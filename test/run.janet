@@ -10,6 +10,7 @@
 (import ./config)
 (import ./dot)
 (import ./json)
+(import ./pty)
 (import ./scan)
 
 (os/exit (t/report))
