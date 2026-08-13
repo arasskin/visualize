@@ -10,6 +10,7 @@
 (import ./config)
 (import ./dot)
 (import ./session)
+(import ./http)
 (import ./json)
 (import ./pty)
 (import ./scan)

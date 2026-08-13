@@ -303,11 +303,18 @@
                                 "running" (now :running)
                                 "generation" (now :generation)})]))
 
-      (and (= (request :method) "GET") (= path "/style.css"))
-      ["200 OK" "text/css; charset=utf-8" (slurp (string web-dir "/style.css"))]
-
-      (and (= (request :method) "GET") (= path "/app.js"))
-      ["200 OK" "text/javascript; charset=utf-8" (slurp (string web-dir "/app.js"))]
+      # Anything else in web/, served by name rather than by a route per file.
+      #
+      # THIS WAS A ROUTE PER FILE and it broke the whole page: app.js grew an
+      # `import './term.js'`, nothing served term.js, and the 404 aborted the
+      # module -- so panning, zooming and the config editor all died along
+      # with the terminal. One missing line took out every interaction on the
+      # page, which is exactly the failure a whitelist invites.
+      (and (= method "GET")
+           (when-let [name (http/static-file path)]
+             (= :file (os/stat (string web-dir "/" name) :mode))))
+      (let [name (http/static-file path)]
+        ["200 OK" (http/content-type name) (slurp (string web-dir "/" name))])
 
       (and (= (request :method) "POST") (= path "/config"))
       (do

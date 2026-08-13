@@ -123,3 +123,46 @@
                    (respond conn "500 Internal Server Error" "text/plain"
                             (string err))
                    ([_] nil)))))))))])
+
+# -- serving files out of web/ ------------------------------------------------
+
+(defn static-file
+  ``The name of the file in web/ this path asks for, or nil.
+
+  A SINGLE PATH COMPONENT, and that is the security of it: a request may name
+  a file in web/ and may not describe a route to anywhere else. `..` and `/`
+  are refused rather than resolved, so there is no traversal to get right --
+  `/../../etc/passwd` simply is not a name this returns.``
+  [path]
+  (def name (string/slice path 1))
+  (when (and (not (empty? name))
+             (not (string/find "/" name))
+             (not (string/find "\\" name))
+             (not (string/has-prefix? "." name))
+             # A conservative allowlist of characters. Anything outside it is
+             # not a filename this project has.
+             (peg/match ~(* (some (+ (range "az") (range "AZ") (range "09")
+                                     "." "-" "_")) -1)
+                        name))
+    name))
+
+(def content-types
+  {".html" "text/html; charset=utf-8"
+   ".js" "text/javascript; charset=utf-8"
+   ".mjs" "text/javascript; charset=utf-8"
+   ".css" "text/css; charset=utf-8"
+   ".svg" "image/svg+xml"
+   ".json" "application/json"})
+
+(defn content-type
+  ``What to call this file.
+
+  The JavaScript one matters more than the others: a browser refuses to
+  execute a module served as text/plain, and the failure looks like the file
+  is missing rather than mislabelled.``
+  [name]
+  (or (some (fn [suffix] (when (string/has-suffix? suffix name)
+                           (content-types suffix)))
+            (keys content-types))
+      "text/plain; charset=utf-8"))
+
