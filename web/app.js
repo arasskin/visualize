@@ -603,7 +603,7 @@ const screen = document.getElementById('screen');
 
 const term = makeTerminal(screen);
 let at = 0;              // how much of the harness output we have consumed
-let polling = null;      // the timer, when a session is live
+let polling = false;     // is the loop running? (see scheduleNextPoll)
 let generation = 0;      // bumped server-side per start, so a restart resets us
 
 // Every terminal request carries the token; without it the server answers 403.
@@ -660,6 +660,10 @@ async function poll() {
     if (out.text) {
       term.write(out.text);
       at = out.at;
+      // Output just arrived, so the next poll should be immediate: an agent
+      // mid-response has more coming, and this is what keeps streaming smooth
+      // rather than stepping along at the idle delay.
+      lastOutput = performance.now();
       // Follow the output, the way a terminal does.
       const body = harnessRoot.querySelector('.panel-body');
       body.scrollTop = body.scrollHeight;
@@ -672,17 +676,70 @@ async function poll() {
   }
 }
 
+// -- pacing ------------------------------------------------------------------
+// The server echoes a keystroke in about 4ms. Everything a person feels as lag
+// is added on this side, so the loop is built to spend as little of it as
+// possible while still going quiet when nothing is happening.
+//
+// A CHAIN, NOT AN INTERVAL. setInterval fires whether or not the previous
+// request came back, so a slow round trip stacks requests that then race --
+// and each carries an `at` from before the last reply, so the same output
+// arrives twice. Each poll now schedules the next one after it finishes.
+//
+// THE DELAY ADAPTS. Idle, there is nothing to see and 250ms costs nothing.
+// Busy, output is arriving and the next poll should already be in flight. The
+// floor is 0 -- an immediate re-poll -- because when the agent is streaming,
+// the round trip itself is the pacing.
+const IDLE_DELAY = 250;
+const BUSY_DELAY = 0;
+// How long output keeps the loop in its fast mode after the last byte, so a
+// pause between two chunks of the same response does not drop it back to idle.
+const BUSY_WINDOW = 900;
+
+let lastOutput = 0;
+let pollTimer = null;
+let pollInFlight = false;
+
+function scheduleNextPoll() {
+  if (!polling) return;
+  clearTimeout(pollTimer);
+  const busy = performance.now() - lastOutput < BUSY_WINDOW;
+  pollTimer = setTimeout(runPoll, busy ? BUSY_DELAY : IDLE_DELAY);
+}
+
+async function runPoll() {
+  // One at a time. Overlapping polls send stale `at` values and duplicate
+  // output onto the screen.
+  if (pollInFlight || !polling) return;
+  pollInFlight = true;
+  try {
+    await poll();
+  } finally {
+    pollInFlight = false;
+    scheduleNextPoll();
+  }
+}
+
+// Called the moment a keystroke is sent. The echo is the thing a person is
+// waiting for, so the poll that will carry it should not sit behind an idle
+// delay -- this is most of the difference between "instant" and "laggy".
+function pollSoon() {
+  if (!polling) return;
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(runPoll, 0);
+}
+
 function startPolling() {
   if (polling) return;
-  // 120ms is fast enough that typing feels immediate and slow enough that an
-  // idle harness costs nothing worth measuring.
-  polling = setInterval(poll, 120);
+  polling = true;
+  runPoll();
 }
 
 function stopPolling() {
   if (!polling) return;
-  clearInterval(polling);
-  polling = null;
+  polling = false;
+  clearTimeout(pollTimer);
+  pollTimer = null;
 }
 
 async function startHarness() {
@@ -717,6 +774,10 @@ screen.addEventListener('keydown', (event) => {
   event.preventDefault();
   event.stopPropagation();
   harnessPost('input', { text: bytes }).catch(() => setState('disconnected'));
+  // Do not wait for the next scheduled poll to see the echo. A keystroke is
+  // the one moment a person is actively watching for a response, and sitting
+  // behind an idle delay is most of what "laggy" means here.
+  pollSoon();
 });
 
 // Paste, which a harness is used with constantly.
@@ -724,6 +785,7 @@ screen.addEventListener('paste', (event) => {
   event.preventDefault();
   const text = event.clipboardData.getData('text');
   if (text) harnessPost('input', { text }).catch(() => {});
+  pollSoon();
 });
 
 const harnessPanel = makePanel(harnessRoot, {

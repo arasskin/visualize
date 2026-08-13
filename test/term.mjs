@@ -157,6 +157,36 @@ ok('resizing to the same size is a no-op', term.resize(10, 40) === false);
   globalThis.requestAnimationFrame = realRAF;
 }
 
+// -- painting is prompt, and still coalesces --------------------------------
+// Two properties in tension, and both matter for how the terminal feels.
+//
+// PROMPT: the timer backing up rAF used to wait 100ms, which a visible tab
+// paid on every keystroke echo -- most of a tenth of a second added to the one
+// interaction a person watches closely. It is 0 now.
+//
+// COALESCED: but a burst of writes must still produce ONE render, or a
+// streaming agent repaints the whole grid per chunk. Both callbacks landing in
+// the same synchronous burst is what makes that free.
+{
+  const realRAF = globalThis.requestAnimationFrame;
+  let renders = 0;
+  const counted = { set innerHTML(v) { renders++; }, get innerHTML() { return ''; } };
+  globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 16);
+
+  const t3 = makeTerminal(counted, { rows: 24, cols: 80 });
+  for (let i = 0; i < 200; i++) t3.write(`line ${i}\r\n`);
+  await new Promise((r) => setTimeout(r, 120));
+  check('a burst of 200 writes paints once', renders, 1);
+
+  // And a later write still paints, rather than being swallowed by a guard
+  // the burst left set.
+  t3.write('after');
+  await new Promise((r) => setTimeout(r, 120));
+  check('a write after the burst paints again', renders, 2);
+
+  globalThis.requestAnimationFrame = realRAF;
+}
+
 if (failed.length === 0) {
   console.log(`  ok  ${passed} assertions (terminal)`);
 } else {

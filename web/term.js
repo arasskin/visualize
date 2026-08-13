@@ -412,8 +412,14 @@ export function makeTerminal(screen, options = {}) {
       render();
     };
 
+    // The frame is the fast path and paints within ~16ms when the tab is
+    // visible. The timer only exists to cover the case where no frame is
+    // coming, so its delay must not become the thing a visible tab waits for
+    // -- 100ms here was adding most of a tenth of a second to every keystroke
+    // echo. Zero lets the browser coalesce the two naturally: whichever runs
+    // first paints, and a visible tab almost always sees the frame.
     if (hasFrames) requestAnimationFrame(run);
-    timer = setTimeout(run, hasFrames ? 100 : 0);
+    timer = setTimeout(run, 0);
     // With no frames at all -- node, a test -- a zero timeout is still
     // asynchronous, and callers expect the paint to have happened by the time
     // `write` returns. So do it now and let the timer find nothing to do.
