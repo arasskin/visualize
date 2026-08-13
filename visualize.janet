@@ -35,6 +35,7 @@
 (import ./src/http)
 (import ./src/parsers)
 (import ./src/json)
+(import ./src/harness)
 
 # Where to start looking, not where it will land. `serve` walks upward to the
 # first free port -- another copy of this tool is often already up in another
@@ -43,6 +44,11 @@
 (def port-tries 20)
 
 (def config-name "visualize.conf")
+
+# What the terminal window runs when the config does not say. Claude Code
+# because it is the harness this was built against; `(harness pi)` in the
+# config picks another, and nothing below this line knows the difference.
+(def default-harness ["claude"])
 
 # Written on first run so there is something to edit rather than a blank pane.
 # Comments survive a round-trip through the editor, so they are worth having.
@@ -147,8 +153,8 @@
                   root))))
 
 (defn- page
-  "The HTML for a rendered graph, with the config baked in."
-  [web-dir title lines problems svg]
+  "The HTML for a rendered graph, with the config and the token baked in."
+  [web-dir title lines problems token harness-argv svg]
   # `->>`, not `->`: string/replace takes the subject LAST, and threading it
   # first quietly produced a page that was the replacement value alone.
   (def template (slurp (string web-dir "/index.html")))
@@ -157,11 +163,41 @@
        (string/replace "{{CONFIG_NAME}}" config-name)
        (string/replace "{{CONFIG_LINES}}" (json/encode lines))
        (string/replace "{{CONFIG_PROBLEMS}}" (json/encode problems))
+       # The token the terminal endpoints require. In the page rather than a
+       # cookie so it dies with the tab and never travels to another origin.
+       (string/replace "{{TOKEN}}" (json/encode token))
+       (string/replace "{{HARNESS_NAME}}" (string/join harness-argv " "))
        # The SVG goes in last, and with a function rather than a literal:
        # string/replace treats `%` sequences in its replacement specially, and
        # graphviz output is full of them (`%3C` in URLs, percent widths). A
        # function replacement is taken verbatim.
        (string/replace "{{GRAPH}}" (fn [&] svg))))
+
+(defn- query
+  ``The query string of a path, as a table. Enough for `?k=secret`.``
+  [path]
+  (def out @{})
+  (when-let [at (string/find "?" path)]
+    (each pair (string/split "&" (string/slice path (+ at 1)))
+      (when-let [eq (string/find "=" pair)]
+        (put out (string/slice pair 0 eq) (string/slice pair (+ eq 1))))))
+  out)
+
+(defn- without-query [path]
+  (if-let [at (string/find "?" path)] (string/slice path 0 at) path))
+
+(defn- make-token
+  ``A secret for this run, so only this page can drive the terminal.
+
+  WHY THIS EXISTS. Everything else visualize serves is derived from files and
+  the worst a stray request can do is redraw a graph. The harness endpoints
+  run a program, and 127.0.0.1 IS NOT A BOUNDARY: any page in any tab can POST
+  to a localhost port. Without a secret, a website you happen to be visiting
+  could type into your agent.
+
+  From `os/cryptorand` because a predictable token is not a token.``
+  []
+  (string/join (map |(string/format "%02x" $) (os/cryptorand 24)) ""))
 
 (defn main [& args]
   (def root (os/realpath (or (get args 1) (os/cwd))))
@@ -169,6 +205,28 @@
   (def web-dir (string here "/web"))
   (def config-path (string root "/" config-name))
   (def specs (parsers/load (string here "/parsers")))
+  (def token (make-token))
+
+  (defn permitted?
+    ``May this request drive the terminal?
+
+    Two checks, because they fail differently. The TOKEN proves the request
+    came from the page this run served -- another tab guessing the port does
+    not have it. The ORIGIN check stops a cross-site POST from a page that
+    somehow learned the token, and rejects anything not from this server.
+
+    A missing Origin is allowed: `curl` sends none, and the token alone is
+    what protects a request that no browser made.``
+    [request]
+    (def given (or ((query (request :path)) "k")
+                   ((query (or (request :body) "")) "k")))
+    (def sent-token (= given token))
+    (def origin (request :origin))
+    (def same-origin
+      (or (not origin)
+          (string/has-prefix? "http://127.0.0.1:" origin)
+          (string/has-prefix? "http://localhost:" origin)))
+    (and sent-token same-origin))
 
   (defn draw []
     (def lines (read-config config-path))
@@ -177,15 +235,73 @@
     [lines problems ok result])
 
   (defn handler [request]
-    (def path (request :path))
+    (def path (without-query (request :path)))
+    (def method (request :method))
+
+    # Which harness the config asked for, re-read per request so editing the
+    # config and pressing start does the new thing without a restart.
+    (defn harness-argv []
+      (def [state _] (config/run (read-config config-path)))
+      (or (state :harness) default-harness))
+
+    (defn guarded [reply]
+      # One shape for every terminal endpoint: prove you are the page this run
+      # served, or get nothing. See `permitted?`.
+      (if (permitted? request)
+        (reply)
+        ["403 Forbidden" "application/json"
+         (json/encode {"error" "bad or missing token"})]))
+
     (cond
-      (and (= (request :method) "GET") (= path "/"))
+      (and (= method "GET") (= path "/"))
       (do
         (def [lines problems ok result] (draw))
         ["200 OK" "text/html; charset=utf-8"
          (page web-dir (string (last (string/split "/" root)) " — visualize")
-               lines problems
+               lines problems token (harness-argv)
                (if ok result (string "<p>could not render: " result "</p>")))])
+
+      # -- the harness ------------------------------------------------------
+      # Polled rather than streamed over SSE. A terminal is a request/response
+      # shape anyway -- the page has to send keystrokes regardless -- and one
+      # endpoint that returns "everything since chunk N" is both the catch-up
+      # path for a reload and the live path for a running session. SSE would
+      # need a second mechanism for input and a way to resume a dropped
+      # stream, which is this endpoint again with more parts.
+      (and (= method "POST") (= path "/harness/start"))
+      (guarded (fn []
+                 (def sent (json/decode (request :body)))
+                 (def rows (math/floor (or (get sent "rows") 24)))
+                 (def cols (math/floor (or (get sent "cols") 100)))
+                 ["200 OK" "application/json"
+                  (json/encode (harness/start (harness-argv) root rows cols))]))
+
+      (and (= method "POST") (= path "/harness/stop"))
+      (guarded (fn [] ["200 OK" "application/json" (json/encode (harness/stop))]))
+
+      (and (= method "POST") (= path "/harness/input"))
+      (guarded (fn []
+                 (def sent (json/decode (request :body)))
+                 (harness/send (string (get sent "text" "")))
+                 ["200 OK" "application/json" (json/encode {"ok" true})]))
+
+      (and (= method "POST") (= path "/harness/resize"))
+      (guarded (fn []
+                 (def sent (json/decode (request :body)))
+                 (harness/resize (math/floor (or (get sent "rows") 24))
+                                 (math/floor (or (get sent "cols") 100)))
+                 ["200 OK" "application/json" (json/encode {"ok" true})]))
+
+      (and (= method "POST") (= path "/harness/poll"))
+      (guarded (fn []
+                 (def sent (json/decode (request :body)))
+                 (def [text next] (harness/since (math/floor (or (get sent "at") 0))))
+                 (def now (harness/state))
+                 ["200 OK" "application/json"
+                  (json/encode {"text" text
+                                "at" next
+                                "running" (now :running)
+                                "generation" (now :generation)})]))
 
       (and (= (request :method) "GET") (= path "/style.css"))
       ["200 OK" "text/css; charset=utf-8" (slurp (string web-dir "/style.css"))]

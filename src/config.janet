@@ -50,7 +50,11 @@
     # Prefixes to narrow to. Empty means no filter, which is the WHOLE graph --
     # so a config saying nothing shows the externals too.
     :only @[]
-    :font nil})
+    :font nil
+    # What to run in the harness window, as argv. Nil means the built-in
+    # default; the config names it because which agent you want is a property
+    # of the project, not of the tool.
+    :harness nil})
 
 (defn- reflow
   ``Give every automatic group a hue no other group is using.
@@ -151,6 +155,16 @@
     (put state :sized true) (put state :sized-coloring true) nil)
   (defn font [name] (put state :font (as name)) nil)
 
+  (defn harness [name & args]
+    ``What to run in the harness window.
+
+    `(harness "claude")`, `(harness "pi")`, or any command with arguments.
+    Nothing about the terminal knows which one it is running -- the pty takes
+    argv and the emulator takes bytes -- so this is a list of strings rather
+    than a choice from a fixed set.``
+    (put state :harness (map as [name ;args]))
+    nil)
+
   (install env "hide" hide
            "(hide prefix) -- take a file, directory or external out of the graph.")
   (install env "show-only" show-only
@@ -165,6 +179,8 @@
            "(show-lines-coloring) -- shade by line count rather than by edge count.")
   (install env "font" font
            "(font name) -- draw the graph in a different typeface.")
+  (install env "harness" harness
+           "(harness cmd & args) -- what to run in the terminal window, e.g. (harness claude) or (harness pi).")
 
   # `~` alone, for a config that quotes it or reaches it through a helper.
   # The bare `(show-only ~)` form never gets this far -- src/tilde.janet turns

@@ -39,5 +39,8 @@
 // on the same lines the graph came from.
 window.CONFIG_LINES = {{CONFIG_LINES}};
 window.CONFIG_PROBLEMS = {{CONFIG_PROBLEMS}};
+// The secret the terminal endpoints require. Here rather than in a cookie so
+// it dies with the tab and is never sent to another origin.
+window.TOKEN = {{TOKEN}};
 </script>
-<script src="/app.js"></script>
+<script type="module" src="/app.js"></script>

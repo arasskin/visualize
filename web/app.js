@@ -1,8 +1,11 @@
-// The page: pan and zoom over the graph, and a line editor for the config.
+// The page: pan and zoom over the graph, a line editor for the config, and a
+// terminal running an agent harness.
 //
-// Vanilla, no build step, no framework. Two halves that barely talk to each
-// other -- the viewport, and the editor -- joined only by `send`, which posts
-// an edit and gets back both the new lines and the new graph.
+// Vanilla, no build step, no framework. Three parts that barely talk to each
+// other -- the viewport, the editor, and the terminal -- joined only by the
+// panel furniture they share.
+
+import { makeTerminal, keyToBytes } from './term.js';
 
 // -- the viewport ------------------------------------------------------------
 // One transform on the <svg> element does the whole job. Not an iframe: the
@@ -586,3 +589,164 @@ draw();
 // Open the panel unasked when the file has something wrong in it -- an error
 // you cannot see is worse than one you did not ask about.
 if (Object.keys(faults).length) requestAnimationFrame(() => bar.click());
+
+// -- the harness terminal ----------------------------------------------------
+// A pty on the server, an emulator here, and a poll loop between them. Polled
+// rather than streamed: the page has to POST keystrokes regardless, so one
+// endpoint returning "everything since chunk N" is both the live path and the
+// catch-up path for a reload. An SSE stream would need a second mechanism for
+// input and a way to resume when it drops.
+
+const harnessRoot = document.getElementById('harness');
+const harnessState = document.getElementById('harness-state');
+const screen = document.getElementById('screen');
+
+const term = makeTerminal(screen);
+let at = 0;              // how much of the harness output we have consumed
+let polling = null;      // the timer, when a session is live
+let generation = 0;      // bumped server-side per start, so a restart resets us
+
+// Every terminal request carries the token; without it the server answers 403.
+// See `permitted?` in visualize.janet for why localhost alone is not enough.
+async function harnessPost(path, body = {}) {
+  const response = await fetch(`/harness/${path}?k=${encodeURIComponent(window.TOKEN)}`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+}
+
+// How many rows and columns fit the panel right now. Measured from a real
+// character rather than assumed: the monospace face and its size come from
+// CSS, so hardcoding a cell size here would break the moment either changed.
+function measure() {
+  const probe = document.createElement('span');
+  probe.textContent = 'M';
+  probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre';
+  screen.appendChild(probe);
+  const box = probe.getBoundingClientRect();
+  probe.remove();
+  const body = harnessRoot.querySelector('.panel-body');
+  const cw = box.width || 7, ch = box.height || 16;
+  return {
+    rows: Math.max(4, Math.floor((body.clientHeight - 24) / ch)),
+    cols: Math.max(20, Math.floor((body.clientWidth - 12) / cw)),
+  };
+}
+
+function setState(text) { harnessState.textContent = text; }
+
+async function poll() {
+  try {
+    const out = await harnessPost('poll', { at });
+    // A restart on the server means our screen belongs to a dead session.
+    if (out.generation !== generation) {
+      generation = out.generation;
+      at = 0;
+      term.reset();
+      return;
+    }
+    if (out.text) {
+      term.write(out.text);
+      at = out.at;
+      // Follow the output, the way a terminal does.
+      const body = harnessRoot.querySelector('.panel-body');
+      body.scrollTop = body.scrollHeight;
+    }
+    setState(out.running ? '' : 'exited');
+    if (!out.running) stopPolling();
+  } catch (e) {
+    setState('disconnected');
+    stopPolling();
+  }
+}
+
+function startPolling() {
+  if (polling) return;
+  // 120ms is fast enough that typing feels immediate and slow enough that an
+  // idle harness costs nothing worth measuring.
+  polling = setInterval(poll, 120);
+}
+
+function stopPolling() {
+  if (!polling) return;
+  clearInterval(polling);
+  polling = null;
+}
+
+async function startHarness() {
+  const size = measure();
+  term.resize(size.rows, size.cols);
+  setState('starting...');
+  try {
+    const out = await harnessPost('start', size);
+    generation = out.generation;
+    at = 0;
+    term.reset();
+    setState('');
+    startPolling();
+    screen.focus();
+  } catch (e) {
+    setState('failed: ' + e.message);
+  }
+}
+
+// Keystrokes go to the pty as bytes. The screen is focusable (tabindex in the
+// HTML) so this needs no input element -- a real one would fight the emulator
+// over what the cursor means.
+screen.addEventListener('keydown', (event) => {
+  // Let copy through: a terminal you cannot copy out of is a terminal you
+  // cannot use. Everything else belongs to the program.
+  if ((event.metaKey || event.ctrlKey) && event.key === 'c'
+      && window.getSelection().toString()) {
+    return;
+  }
+  const bytes = keyToBytes(event);
+  if (!bytes) return;
+  event.preventDefault();
+  event.stopPropagation();
+  harnessPost('input', { text: bytes }).catch(() => setState('disconnected'));
+});
+
+// Paste, which a harness is used with constantly.
+screen.addEventListener('paste', (event) => {
+  event.preventDefault();
+  const text = event.clipboardData.getData('text');
+  if (text) harnessPost('input', { text }).catch(() => {});
+});
+
+const harnessPanel = makePanel(harnessRoot, {
+  minWidth: 360, minHeight: 200,
+  width: 'min(52rem, 94vw)', height: '24rem',
+  onOpen: () => {
+    screen.focus();
+    // Start on first open rather than at page load: a graph tool should not
+    // spawn an agent because you happened to open it.
+    if (!polling && generation === 0) startHarness();
+    else { syncSize(); startPolling(); }
+  },
+  // Collapsed, the session keeps running -- it is a window, not a switch --
+  // but polling a screen nobody can see is wasted traffic.
+  onShut: () => stopPolling(),
+  onResize: () => syncSize(),
+});
+
+// Tell the pty when the panel changes size, so the harness redraws to fit.
+// Debounced: a drag fires continuously, and a SIGWINCH per pixel would have
+// the harness redrawing its whole screen hundreds of times.
+let sizing = null;
+function syncSize() {
+  clearTimeout(sizing);
+  sizing = setTimeout(() => {
+    const size = measure();
+    if (term.resize(size.rows, size.cols)) {
+      harnessPost('resize', size).catch(() => {});
+    }
+  }, 150);
+}
+
+window.addEventListener('resize', () => { if (!harnessPanel.shut) syncSize(); });
+
+// Under the config panel to start with, so both are visible at once.
+requestAnimationFrame(() => harnessPanel.place(12, 104));

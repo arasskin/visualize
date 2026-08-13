@@ -9,6 +9,7 @@
 (import ./color)
 (import ./config)
 (import ./dot)
+(import ./session)
 (import ./json)
 (import ./pty)
 (import ./scan)

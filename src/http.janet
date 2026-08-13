@@ -60,6 +60,9 @@
         (buffer/push-string body chunk))
       {:method (request 0)
        :path (request 1)
+       # Kept because the terminal endpoints check it: a page on another
+       # origin can POST here, and one that runs a shell must not accept it.
+       :origin (headers "origin")
        :body (string body)})))
 
 (defn respond

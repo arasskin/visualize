@@ -120,6 +120,17 @@
          ((state-of "(when true (hide WebKit))") :hidden)
          "a bare name inside a body is still a literal"))
 
+(t/test "the harness is named by the config, as argv"
+  # Which agent to run is a property of the project, not of the tool -- and
+  # nothing downstream knows the difference between one harness and another,
+  # so this is a list of strings rather than a choice from a fixed set.
+  (t/is= ["claude"] ((state-of "(harness claude)") :harness))
+  (t/is= ["pi"] ((state-of "(harness pi)") :harness))
+  (t/is= ["/bin/sh" "-i"] ((state-of `(harness "/bin/sh" "-i")`) :harness)
+         "arguments come through untouched")
+  (t/is= nil ((state-of "(show-lines)") :harness)
+         "saying nothing leaves the built-in default in place"))
+
 (t/test "the sandbox has no way to reach the machine"
   # A config is edited through a web page. The blast radius of a typo there
   # should be a wrong-looking graph, not a deleted directory.
