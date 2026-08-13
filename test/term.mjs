@@ -124,6 +124,39 @@ check('resize keeps the contents', term.text()[0], 'hello');
 check('resize updates the size', [term.rows, term.cols], [10, 40]);
 ok('resizing to the same size is a no-op', term.resize(10, 40) === false);
 
+// -- painting when there are no frames --------------------------------------
+// THE FROZEN-SCREEN BUG. requestAnimationFrame does not fire in a hidden tab,
+// and the paint used to be scheduled on it alone -- setting a `painting` guard
+// that only the callback cleared. A terminal that received output while hidden
+// therefore set the guard, never ran the callback, and never painted again,
+// even after the tab came back. The cursor kept blinking throughout, because
+// that is a CSS animation.
+//
+// Simulated by giving the emulator an rAF that never calls back, which is
+// exactly what a hidden tab is.
+{
+  const realRAF = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = () => {};   // schedules nothing, ever
+
+  const hidden = { innerHTML: '' };
+  const t2 = makeTerminal(hidden, { rows: 4, cols: 20, showCursor: false });
+  t2.write('while-hidden');
+
+  // The timer is what has to save this, so wait past it.
+  await new Promise((r) => setTimeout(r, 200));
+  ok('a hidden tab still paints, via the timer', hidden.innerHTML.includes('while-hidden'));
+
+  // And it must not be wedged afterwards: the guard has to have been cleared,
+  // or the SECOND paint is the one that never happens. Checked against the
+  // grid rather than the markup, since 20 columns wraps the combined text and
+  // the wrap is not what this is testing.
+  t2.write('!');
+  await new Promise((r) => setTimeout(r, 200));
+  ok('and keeps painting after that', hidden.innerHTML.includes('while-hidden!'));
+
+  globalThis.requestAnimationFrame = realRAF;
+}
+
 if (failed.length === 0) {
   console.log(`  ok  ${passed} assertions (terminal)`);
 } else {

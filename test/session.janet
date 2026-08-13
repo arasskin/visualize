@@ -3,9 +3,22 @@
 # Driven with /bin/sh rather than a real agent, for the same reasons the pty
 # tests are: no API calls, no network, and the code path is identical -- the
 # module takes argv and never asks what it is running.
+#
+# THROUGH THE SOCKET, NOT AROUND IT. Every call below crosses into a real
+# supervisor process -- spawned by the first `start`, exactly as the server
+# spawns one. Testing src/supervisor.janet's functions directly would be
+# easier and would check the half that never breaks: the interesting failures
+# are spawning, framing and reconnection, and all three live in the gap
+# between the two files.
 
 (import ../src/harness)
 (import ./harness :as check)
+
+# A socket of this suite's own, so running the tests never adopts (or kills)
+# the supervisor belonging to a visualize the user has open.
+(def- root (os/realpath (string (dyn :current-file) "/../..")))
+(def- socket (string (string/trimr (or (os/getenv "TMPDIR") "/tmp") "/") "/visualize-test.sock"))
+(harness/configure socket [(string root "/bin/janet") (string root "/src/supervisor.janet") socket])
 
 (defn- wait-for
   ``Poll until `ready?` passes or the patience runs out.
@@ -92,3 +105,104 @@
   (harness/stop)
   (check/is= nil (harness/send "nothing is listening\n"))
   (check/is= nil (harness/resize 10 10)))
+
+(check/test "a session outlives the process that started it"
+  # THE WHOLE POINT OF THE SPLIT. A second client, with its own module state,
+  # finds the session the first one started and reads the backlog it never
+  # saw. `configure` is called again to make that concrete: this stands in for
+  # the restarted server, which comes up knowing nothing but the socket path.
+  (harness/start ["/bin/sh" "-c" "echo SURVIVOR; sleep 5"] (os/cwd) 24 80)
+  (wait-for |(string/find "SURVIVOR" $))
+  (harness/configure socket
+                     [(string root "/bin/janet") (string root "/src/supervisor.janet") socket])
+  (def now (harness/state))
+  (check/ok (now :running) "the session is still running for a new client")
+  # From 0, because a fresh page has seen nothing -- this is the reload path.
+  (def [text _] (harness/since 0))
+  (check/ok (string/find "SURVIVOR" text) "and its output replays in full")
+  (harness/stop))
+
+(check/test "heavy output does not wedge the terminal"
+  # THE HANG THIS EXISTS FOR. `ev/give` blocks on a full thread channel, and
+  # the pump gives one item per read. Draining only when a request arrived
+  # meant an agent that outran the polls filled the channel, the pump blocked
+  # forever on the give, and it stopped calling read() on the pty. The kernel
+  # buffer filled, the agent blocked writing, and the session froze -- while
+  # the browser kept polling and the cursor kept blinking, because that blink
+  # is a CSS animation with no connection to the process.
+  #
+  # 4000 lines is comfortably past the old 1024-slot channel; the symptom was
+  # a backlog that stopped at exactly 1025 chunks and never reached the end.
+  (harness/start ["/bin/sh" "-c" "for i in $(seq 1 4000); do echo line-$i; done; echo FLOOD-END"]
+                 (os/cwd) 24 80)
+  (def [found _] (wait-for |(string/find "FLOOD-END" $) 120))
+  (check/ok found "the program runs to completion with nobody polling")
+  (harness/stop))
+
+(check/test "typing still lands while the agent is flooding output"
+  # The user-visible half of the same bug: the terminal looked alive and would
+  # not accept input. What matters is not just that the keystroke is delivered
+  # but that it REACHES THE PROGRAM, so this waits for the effect.
+  (harness/start ["/bin/sh" "-i"] (os/cwd) 24 80)
+  (ev/sleep 0.4)
+  (harness/send "for i in $(seq 1 3000); do echo noise-$i; done\n")
+  (ev/sleep 1.5)
+  (harness/send "echo STILL-ACCEPTING-INPUT\n")
+  (def [found _] (wait-for |(string/find "\nSTILL-ACCEPTING-INPUT" $) 120))
+  (check/ok found "a keystroke sent mid-flood is executed")
+  (harness/stop))
+
+(check/test "a reply larger than one read arrives whole"
+  # The second bug the flood turned up: both sides framed messages with a
+  # single `:read`, which returns one chunk rather than one message. A `since`
+  # reply carrying more than that was truncated JSON, and decoding it failed
+  # -- so a busy terminal broke the very poll that would have drained it.
+  (harness/start ["/bin/sh" "-c" "for i in $(seq 1 2000); do echo padding-line-$i; done"]
+                 (os/cwd) 24 80)
+  (def [found text] (wait-for |(string/find "padding-line-2000" $) 120))
+  (check/ok found "the last line of a large reply survives the round trip")
+  # Not a size assertion: how much survives depends on the backlog cap and on
+  # how the pty happened to split its writes, so pinning a byte count would be
+  # a test of the machine's timing. What matters is that BOTH ENDS of a reply
+  # spanning many chunks arrive -- a truncated one loses the tail.
+  (check/ok (string/find "padding-line-1" text)
+            "the beginning is there too, so nothing was cut short")
+  (harness/stop))
+
+(check/test "a page holding a stale position sees the new session at once"
+  # THE OTHER BLANK-TERMINAL BUG. A client's `at` counts chunks within one
+  # session; restarting empties the backlog, so a page still holding the old
+  # position asks about chunks that no longer exist and `since` -- which
+  # clamps to the end -- answers with nothing. The agent runs, the page stays
+  # empty, and the cursor blinks.
+  (harness/start ["/bin/sh" "-c" "echo FIRST-RUN; sleep 5"] (os/cwd) 24 80)
+  (wait-for |(string/find "FIRST-RUN" $))
+  (def before (harness/poll 0))
+  (def stale-at (get before "at"))
+  (def stale-generation (get before "generation"))
+
+  (harness/start ["/bin/sh" "-c" "echo SECOND-RUN; sleep 5"] (os/cwd) 24 80)
+  # Poll exactly as a page that has not noticed the restart would.
+  (var text "")
+  (for _ 0 60
+    (when (empty? text)
+      (ev/sleep 0.05)
+      (def reply (harness/poll stale-at stale-generation))
+      (set text (get reply "text" ""))))
+  (check/ok (string/find "SECOND-RUN" text)
+            "the mismatch replays the new session rather than answering empty")
+  (harness/stop))
+
+(check/test "shutdown ends the supervisor and takes the socket with it"
+  # What ctrl-c does. Also this suite's teardown: leaving a supervisor behind
+  # would make the next run adopt a session it did not start, and the tests
+  # that count generations would start failing for reasons of their own.
+  (harness/start ["/bin/sh" "-c" "sleep 30"] (os/cwd) 24 80)
+  (harness/shutdown)
+  (var gone false)
+  (for _ 0 40
+    (unless gone
+      (ev/sleep 0.05)
+      (set gone (not (os/stat socket :mode)))))
+  (check/ok gone "the socket file is cleaned up, so the next run binds")
+  (check/ok (not ((harness/state) :running)) "and nothing answers on it"))

@@ -639,13 +639,23 @@ function setState(text) { harnessState.textContent = text; }
 
 async function poll() {
   try {
-    const out = await harnessPost('poll', { at });
-    // A restart on the server means our screen belongs to a dead session.
+    // The generation says which session `at` counts chunks in. Without it a
+    // restarted agent leaves the page asking about chunks that no longer
+    // exist, and the reply is empty forever.
+    const out = await harnessPost('poll', { at, generation });
+    // A restart on the server means our screen belongs to a dead session, so
+    // it is cleared before the new session's output is drawn onto it.
+    //
+    // THE TEXT IN THIS REPLY IS NOT DISCARDED, and an earlier version's bug
+    // was exactly that: it reset, set `at = 0` and returned. But `at` was
+    // already 0 when the reply was requested, so the very next poll asked the
+    // same question, got the same answer, and threw it away again -- forever.
+    // The screen stayed blank while the server held the whole session, and
+    // the cursor kept blinking because that is a CSS animation.
     if (out.generation !== generation) {
       generation = out.generation;
       at = 0;
       term.reset();
-      return;
     }
     if (out.text) {
       term.write(out.text);

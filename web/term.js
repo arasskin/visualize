@@ -355,7 +355,11 @@ export function makeTerminal(screen, options = {}) {
   function styleOf(c) {
     if (!c) return '';
     let fg = c.fg, bg = c.bg;
-    if (c.inverse) { const t = fg; fg = bg || '#d8d8d2'; bg = t || '#1a1a1c'; }
+    // Inverse with no colours of its own swaps against the panel's own ink and
+    // ground. The ground is spelled out rather than taken from --term: that one
+    // is translucent, and a highlight you can see the graph through is not a
+    // highlight.
+    if (c.inverse) { const t = fg; fg = bg || 'var(--term-ink)'; bg = t || '#1a1a1c'; }
     const parts = [];
     if (fg) parts.push(`color:${fg}`);
     if (bg) parts.push(`background:${bg}`);
@@ -369,18 +373,51 @@ export function makeTerminal(screen, options = {}) {
   // one separately is work the user cannot perceive. Falls back to painting
   // immediately where there are no frames -- which is what makes the emulator
   // testable outside a browser, since everything above this line is pure.
-  const nextFrame = typeof requestAnimationFrame === 'function'
-    ? requestAnimationFrame
-    : (fn) => fn();
+  const hasFrames = typeof requestAnimationFrame === 'function';
 
   let painting = false;
+  let timer = null;
+
+  // A TIMER BACKS THE FRAME UP, and it is not belt-and-braces -- it is the
+  // difference between a terminal that works in a background tab and one that
+  // does not.
+  //
+  // requestAnimationFrame DOES NOT FIRE in a hidden tab: browsers throttle it
+  // to nothing. The first version scheduled the paint on rAF alone and cleared
+  // its `painting` guard inside the callback, so a terminal that received
+  // output while hidden set the guard, never ran the callback, and never
+  // painted again -- the guard stayed true even after the tab came back. The
+  // symptom was a screen frozen mid-session with the cursor still blinking,
+  // because the blink is CSS and knows nothing about any of this.
+  //
+  // So whichever of the two arrives first paints, and both clear the guard.
+  // 100ms is slower than a frame and far faster than a person notices.
+  // Each scheduling round gets its own ticket. A hidden tab's rAF callbacks
+  // are not cancelled, only deferred -- they all fire at once when the tab is
+  // shown again -- so a callback must be able to tell "I am the paint that was
+  // scheduled" from "I am a straggler from three paints ago". Without that,
+  // a late arrival clears the guard belonging to a paint still pending, and
+  // the screen stops updating a second time.
+  let ticket = 0;
+
   function paint() {
     if (painting) return;
     painting = true;
-    nextFrame(() => {
+    const mine = ++ticket;
+
+    const run = () => {
+      if (mine !== ticket || !painting) return;  // stale, or already painted
       painting = false;
+      if (timer !== null) { clearTimeout(timer); timer = null; }
       render();
-    });
+    };
+
+    if (hasFrames) requestAnimationFrame(run);
+    timer = setTimeout(run, hasFrames ? 100 : 0);
+    // With no frames at all -- node, a test -- a zero timeout is still
+    // asynchronous, and callers expect the paint to have happened by the time
+    // `write` returns. So do it now and let the timer find nothing to do.
+    if (!hasFrames) run();
   }
 
   function render() {

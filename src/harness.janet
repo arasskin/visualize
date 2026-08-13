@@ -1,140 +1,206 @@
-# The agent harness running in the terminal window.
+# Talking to the process that owns the terminal.
 #
-# One session at a time: a pty, a thread pumping its output, and a buffer of
-# what it has produced so far. The browser attaches to that buffer rather than
-# to the pty, which is what makes a page reload cheap -- the harness keeps
-# running and the reconnecting page is handed everything it missed.
+# THE API HERE IS THE SAME ONE IT ALWAYS WAS -- `start`, `stop`, `send`,
+# `resize`, `since`, `state` -- and the HTTP routes that call it did not change
+# when the pty moved out of this process. That is the seam working: the routes
+# in visualize.janet ask for the same things and get the same shapes back.
 #
-# NOTHING HERE NAMES A PROGRAM. `start` takes argv, which the config supplies
-# via `(harness claude)` or `(harness pi)`. Both were driven through this
-# unchanged; see src/pty.janet.
+# WHAT IS ACTUALLY HERE NOW. The pty, the pump thread and the backlog live in
+# src/supervisor.janet, in a process that outlives this one. Each function
+# below opens a unix socket, writes a line of JSON and reads a line back. The
+# server can therefore be killed and rebuilt as often as a file watcher likes,
+# and the agent running in the terminal never notices.
 #
-# WHY A THREAD. The pump blocks on read(), and a blocking read on the main
-# thread starves Janet's scheduler -- the server stops answering HTTP while
-# the harness is busy, which was measured during development, not guessed.
-# `ev/thread` gives it a real OS thread where blocking costs nothing. The
-# thread talks back over a channel, which the main thread drains whenever a
-# request arrives.
+# WHY OUTLIVING MATTERS. A pty's master fd belongs to the process that called
+# `forkpty` and cannot be passed to a later one, so "restart the server, keep
+# the session" is only possible if the server was never holding the fd.
 
-(import ./pty)
+(import ./json)
 
-# What the harness has printed, oldest first, as chunks. Capped so a session
-# that runs for hours does not grow without bound -- the browser only ever
-# needs enough to redraw its screen, and the emulator's own scrollback holds
-# the rest on the client side.
-(def- backlog-limit 4000)
+# Where the supervisor listens, and what to run to get one. Both are set once
+# at startup by `configure` rather than recomputed here: this module has no way
+# to know where the project root or the janet binary are, and guessing either
+# is how you end up with two supervisors for one project.
+(var- socket-path nil)
+(var- spawn-argv nil)
 
-(var- session nil)      # the live pty, or nil
-(var- output nil)       # channel the pump thread writes into
-(var- backlog @[])      # chunks, for a page that reloads or arrives late
-(var- generation 0)     # bumped per start, so a stale client can tell
-(var- exited false)
+(defn configure
+  ``Where the supervisor is, and how to start one if it is not running.
 
-(defn- drain
-  ``Move whatever the pump thread has produced into the backlog.
+  `path` is keyed to the project root by the caller, so two copies of
+  visualize pointed at different directories do not share a terminal.``
+  [path argv]
+  (set socket-path path)
+  (set spawn-argv argv))
 
-  Called on every request rather than on a timer: there is no other clock
-  here, and a chunk sitting in the channel does no harm until somebody asks
-  for it.
-
-  MUST NOT BLOCK. `ev/take` on an empty channel suspends until something
-  arrives, which would hang the request that called it -- so `ev/count` says
-  how many items are actually waiting and only that many are taken.``
+(defn- connect
+  "A connection to the supervisor, or nil if nothing is listening."
   []
-  (when output
-    (repeat (ev/count output)
-      (def value (ev/take output))
-      (if (= value :eof)
-        (set exited true)
-        (do (array/push backlog value)
-            (when (> (length backlog) backlog-limit)
-              (array/remove backlog 0)))))))
+  (when socket-path
+    (try (net/connect :unix socket-path) ([_] nil))))
 
-(defn running?
-  "Is a harness alive right now?"
+(defn- spawn-detached
+  ``Start the supervisor so that it outlives this process.
+
+  VIA `sh -c '... &'`, NOT `os/spawn` WITH `:d`. Janet's `:d` flag does not
+  mean what the name suggests here: the runtime still tracks the child for
+  reaping, and the spawning process WEDGES rather than continuing -- measured,
+  not assumed. `os/spawn`'s own documentation is explicit that the caller must
+  wait on the process, which is precisely what a supervisor outliving us
+  cannot allow.
+
+  So the shell forks and exits, orphaning the supervisor onto init. Nothing
+  waits on it and nothing needs to: it is ended by the `shutdown` op on
+  ctrl-c, not by a signal that happens to reach it.
+
+  Output goes to /dev/null because there is no terminal to write to -- the
+  supervisor's errors are its own, and a stray write to a closed stdout from
+  an orphan is a way to die confusingly.``
   []
-  (drain)
-  (and session (not exited) (pty/alive? session)))
+  (def quoted (string/join (map |(string "'" (string/replace-all "'" "'\\''" $) "'")
+                                spawn-argv)
+                           " "))
+  (os/execute ["/bin/sh" "-c" (string quoted " >/dev/null 2>&1 &")] :p))
 
-(defn state
-  "What the page needs to know about the session, without its output."
+(defn- ensure
+  ``A connection to a running supervisor, starting one if there is none.
+
+  THREE CASES, and the third is the one that bites. A live socket connects.
+  No socket file at all means nothing has run yet. A socket file that REFUSES
+  the connection is the leftover of a crashed supervisor -- closing a unix
+  socket leaves its file on disk, and binding over one fails rather than
+  replacing it, so the file has to go before a new supervisor can start.``
   []
-  {:running (truthy? (running?))
-   :generation generation
-   :argv (if session (session :argv) [])
-   :chunks (length backlog)})
+  (or (connect)
+      (do
+        (when (os/stat socket-path :mode) (try (os/rm socket-path) ([_] nil)))
+        (spawn-detached)
+        # Spawn is not listen: the child has to get as far as binding before a
+        # connection can land. Retried on a short timer rather than slept on
+        # once, so the common case costs a few milliseconds and a slow start
+        # still succeeds.
+        (var found nil)
+        (for _ 0 100
+          (unless found
+            (ev/sleep 0.02)
+            (set found (connect))))
+        found)))
 
+(defn- ask
+  ``Send one request and read the reply, or nil if the supervisor is gone.
+
+  Every failure lands here as nil rather than an error: the supervisor dying
+  should degrade the terminal panel, not take down the request that noticed.``
+  [message &opt start?]
+  (def connection (if start? (ensure) (connect)))
+  (when connection
+    (defer (:close connection)
+      (try
+        (do
+          (:write connection (string (json/encode message) "\n"))
+          # READ UNTIL THE NEWLINE. A `since` reply carries everything the
+          # agent printed since the last poll, which routinely exceeds one
+          # chunk -- and a single `:read` would hand `json/decode` a truncated
+          # object. The supervisor terminates every reply with \n so there is
+          # a definite end to look for.
+          (def reply @"")
+          (var reading true)
+          (while reading
+            (if (string/find "\n" (string reply))
+              (set reading false)
+              (if-let [chunk (:read connection 65536)]
+                (buffer/push-string reply chunk)
+                (set reading false))))
+          (when (> (length reply) 0)
+            (json/decode (string reply))))
+        ([_] nil)))))
+
+(defn- session-state
+  ``A `state` reply as this side's callers expect it: keyword keys, and a
+  value for every field even when the supervisor is gone.
+
+  ONE PLACE FOR THE KEYS because `start`, `stop` and `state` all answer with
+  the same shape, and the routes hand it straight to `json/encode` -- a
+  keyword encodes as its bare name, so `:running` reaches the browser as
+  "running" and the page cannot tell which of the three it asked.``
+  [reply]
+  {:running (truthy? (get reply "running"))
+   :generation (or (get reply "generation") 0)
+   :argv (or (get reply "argv") [])
+   :chunks (or (get reply "chunks") 0)})
+
+# `start` is the only op that may bring a supervisor into being. Everything
+# else talks to one that is already there -- polling a terminal nobody started
+# should answer "not running", not silently spawn a process.
 (defn start
-  ``Start `argv` on a pty, replacing any session already running.
-
-  `rows` and `cols` come from the browser, which is the only thing that knows
-  how big the panel is. Getting them wrong is not fatal -- the harness redraws
-  on resize -- but starting at the right size avoids a visible reflow.``
+  "Start `argv` on the supervisor's pty, replacing any session running."
   [argv root &opt rows cols]
   (default rows 24)
   (default cols 100)
-  (when session (try (pty/close session) ([_] nil)))
-  (set backlog @[])
-  (set exited false)
-  (++ generation)
-
-  (def channel (ev/thread-chan 1024))
-  (def ready (ev/thread-chan 2))
-  # The pty is opened ON THE THREAD, not here, because the thread is where it
-  # will be read: an ffi-signature cannot cross a thread boundary, so the
-  # session must be created on the side that uses it. What comes back is a
-  # plain struct, which marshals fine.
-  (ev/thread
-    (fn [[reply out command directory lines columns]]
-      (def opened (pty/open command lines columns
-                            (let [environment (os/environ)]
-                              (put environment "PWD" directory)
-                              environment)))
-      (ev/give reply opened)
-      (pty/pump opened (fn [chunk] (ev/give out chunk)))
-      (ev/give out :eof)
-      :done)
-    [ready channel argv root rows cols]
-    :nt (ev/thread-chan 2))
-
-  (set session (ev/take ready))
-  (set output channel)
-  # The child inherits the server's working directory, so the harness starts
-  # wherever visualize was pointed -- which is the directory it is graphing.
-  (state))
+  (session-state (ask {"op" "start" "argv" argv "root" root "rows" rows "cols" cols} true)))
 
 (defn stop
-  "Stop the harness, if one is running."
+  "Stop the harness, leaving the supervisor up for the next start."
   []
-  (when session
-    (try (pty/close session) ([_] nil))
-    (set session nil)
-    (set output nil)
-    (set exited true))
-  (state))
+  (session-state (ask {"op" "stop"})))
 
 (defn send
   "Type at the harness."
   [text]
-  (when (and session (not exited))
-    (try (pty/write-input session text) ([_] nil)))
+  (ask {"op" "input" "text" text})
   nil)
 
 (defn resize
   "Tell the harness its window changed size."
   [rows cols]
-  (when session
-    (try (pty/resize session rows cols) ([_] nil)))
+  (ask {"op" "resize" "rows" rows "cols" cols})
   nil)
 
-(defn since
-  ``Everything the harness has printed since chunk `at`.
+(defn state
+  "What the page needs to know about the session, without its output."
+  []
+  (session-state (ask {"op" "state"})))
 
-  Returns [text next]. The client sends back the `next` it was given, so a
-  reload replays from the beginning and a live page only gets what is new.
-  Chunks rather than bytes because the backlog is a list of reads, and a byte
-  offset would have to be recomputed every time the cap dropped one.``
+(defn since
+  ``Everything the harness has printed since chunk `at`. Returns [text next].
+
+  With no supervisor running this is ["" at] -- nothing new rather than an
+  error, which is exactly what a page polling an unstarted terminal should
+  see.``
   [at]
-  (drain)
-  (def from (max 0 (min at (length backlog))))
-  [(string/join (slice backlog from) "") (length backlog)])
+  (def reply (ask {"op" "since" "at" at}))
+  (if reply
+    [(or (get reply "text") "") (or (get reply "at") at)]
+    ["" at]))
+
+(defn poll
+  ``The whole answer to one `/harness/poll`, in a single round trip.
+
+  Kept as one call rather than `since` plus `state` because it is the hot path
+  -- the page asks several times a second -- and two connections per poll is
+  twice the syscalls for one answer.
+
+  `generation` is the session the page's `at` belongs to. The supervisor
+  replays from the beginning when it does not match the running session, which
+  is what stops a page from sitting blank in front of a restarted agent.``
+  [at &opt generation]
+  (def reply (ask (if generation
+                    {"op" "since" "at" at "generation" generation}
+                    {"op" "since" "at" at})))
+  (if reply
+    {"text" (or (get reply "text") "")
+     "at" (or (get reply "at") at)
+     "running" (truthy? (get reply "running"))
+     "generation" (or (get reply "generation") 0)}
+    {"text" "" "at" at "running" false "generation" 0}))
+
+(defn shutdown
+  ``End the supervisor, killing the agent with it.
+
+  CALLED ON CTRL-C AND NOWHERE ELSE. Quitting visualize takes the terminal
+  down exactly as it did when one process owned everything; a server that is
+  merely restarting because a file changed must NOT call this -- it closes the
+  socket and says nothing, which is what leaves the agent running.``
+  []
+  (ask {"op" "shutdown"})
+  nil)

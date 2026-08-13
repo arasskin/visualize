@@ -29,6 +29,14 @@
   /* The colour a hovered dependency lights up in. */
   --lit: #c04040;
 
+  /* The harness terminal's ground. Translucent so the graph it is talking
+     about stays visible underneath -- the panel covers a corner of the
+     canvas, and an opaque one hides exactly the part you were looking at.
+     Alpha rather than `opacity` on the panel: opacity would fade the TEXT
+     too, and terminal output at 85% on a busy graph is unreadable. */
+  --term: #1a1a1cd9;
+  --term-ink: #d8d8d2;
+
   --shadow: 0 6px 18px #0004;
 }
 
@@ -173,18 +181,31 @@ button:disabled { opacity: .5; cursor: progress; }
 /* -- the harness terminal ---------------------------------------------------
    A monospace grid the emulator paints into. The panel gets a dark ground of
    its own rather than following the page: a terminal is its own surface, and
-   the harnesses pick their colours assuming a dark one. */
-#harness { --gutter: 0px; }
-#harness .panel-body { background: #1a1a1c; padding: .35rem .5rem; }
+   the harnesses pick their colours assuming a dark one.
+
+   That ground is translucent, and the WHOLE panel wears it -- bar included.
+   A solid bar over a see-through body reads as two windows stacked, not as
+   one see-through window. The blur is what keeps the text legible: a graph
+   line passing behind a glyph is noise at the same spatial frequency as the
+   glyph itself, and blurring the backdrop leaves the colour without the
+   detail that competes. */
+#harness {
+  --gutter: 0px;
+  background: var(--term); color: var(--term-ink);
+  backdrop-filter: blur(12px) saturate(.7);
+}
+#harness .bar { border-bottom-color: #fff2; }
+#harness .panel-body { padding: .35rem .5rem; }
 
 #screen {
   margin: 0; outline: none;
   font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  color: #d8d8d2; white-space: pre; tab-size: 8;
+  color: var(--term-ink); white-space: pre; tab-size: 8;
 }
 /* The cell the cursor is on. Painted as a background rather than a caret so
-   it survives the screen being rebuilt on every frame. */
-#screen .cursor { background: #d8d8d2; color: #1a1a1c; }
+   it survives the screen being rebuilt on every frame. Opaque, unlike the
+   panel: a cursor you can see the graph through is not a cursor. */
+#screen .cursor { background: var(--term-ink); color: #1a1a1c; }
 #screen:focus .cursor { animation: blink 1.1s steps(1) infinite; }
 @keyframes blink { 50% { background: transparent; color: inherit; } }
 

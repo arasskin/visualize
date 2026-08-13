@@ -199,6 +199,34 @@
   []
   (string/join (map |(string/format "%02x" $) (os/cryptorand 24)) ""))
 
+(defn- socket-for
+  ``Where this project's supervisor listens.
+
+  Keyed to the root so two copies of visualize, pointed at two directories, do
+  not end up sharing one terminal. The name is derived rather than random: a
+  restarting server has to find the supervisor its predecessor started, and it
+  has nothing to go on but the path it was given.
+
+  HASHED RATHER THAN SPELLED OUT, because a sockaddr_un holds about 104 bytes
+  on this platform and $TMPDIR alone is half of that. A deep project path
+  would overflow it, and the failure is a bind error rather than a truncation
+  you could notice.``
+  [root]
+  (def base (string/trimr (or (os/getenv "TMPDIR") "/tmp") "/"))
+  # A cheap, stable digest: the path never leaves this machine, so this is
+  # only asking for "different directories, different names".
+  #
+  # `%` RATHER THAN `band`, and 31 bits rather than 32. Janet's bitwise ops
+  # take 32-bit SIGNED operands and `* 33` leaves that range on the third
+  # character of any real path -- so masking afterwards is already too late,
+  # and masking with 0xffffffff would then hand `%x` a number it also refuses.
+  # A modulo applies to the arithmetic value before either limit is reached.
+  # Dropping the top bit costs nothing: this is a name, not a checksum.
+  (var digest 5381)
+  (each byte (string/trimr root "/")
+    (set digest (% (+ (* digest 33) byte) 0x7fffffff)))
+  (string base "/visualize-" (string/format "%08x" digest) ".sock"))
+
 (defn main [& args]
   (def root (os/realpath (or (get args 1) (os/cwd))))
   (def here (os/realpath (string (dyn :current-file) "/..")))
@@ -206,6 +234,17 @@
   (def config-path (string root "/" config-name))
   (def specs (parsers/load (string here "/parsers")))
   (def token (make-token))
+
+  # The terminal lives in another process, so that this one can be restarted
+  # without killing the agent -- see src/harness.janet. Told where to find it
+  # and how to start one, both of which only this function knows.
+  #
+  # The path is computed ONCE and passed twice: the address we look on and the
+  # address we tell a new supervisor to bind have to be the same string, and
+  # two calls is two chances for that to stop being true.
+  (def socket (socket-for root))
+  (harness/configure socket
+                     [(string here "/bin/janet") (string here "/src/supervisor.janet") socket])
 
   (defn permitted?
     ``May this request drive the terminal?
@@ -295,13 +334,16 @@
       (and (= method "POST") (= path "/harness/poll"))
       (guarded (fn []
                  (def sent (json/decode (request :body)))
-                 (def [text next] (harness/since (math/floor (or (get sent "at") 0))))
-                 (def now (harness/state))
+                 # One call rather than `since` plus `state`: this is the hot
+                 # path, and each one is a round trip to the supervisor.
                  ["200 OK" "application/json"
-                  (json/encode {"text" text
-                                "at" next
-                                "running" (now :running)
-                                "generation" (now :generation)})]))
+                  (json/encode
+                    (harness/poll (math/floor (or (get sent "at") 0))
+                                  # Which session the page's `at` belongs to.
+                                  # Absent from an older page, which then gets
+                                  # the previous behaviour rather than an error.
+                                  (when-let [g (get sent "generation")]
+                                    (math/floor g))))]))
 
       # Anything else in web/, served by name rather than by a route per file.
       #
@@ -347,6 +389,25 @@
 
   (def [server bound accept-loop] (http/serve default-port port-tries handler))
   (def url (string "http://127.0.0.1:" bound))
+
+  # CTRL-C TAKES THE AGENT WITH IT, and this is the only thing that does.
+  #
+  # The terminal now lives in another process precisely so the server can die
+  # and come back -- but that must not turn quitting into "the agent silently
+  # keeps running". So the two exits are told apart by who caused them:
+  # ctrl-c says `shutdown` and the supervisor kills the pty exactly as the old
+  # single process did, while a restart under --watch closes its socket and
+  # says nothing.
+  #
+  # Explicit rather than relying on the signal reaching the supervisor. SIGINT
+  # goes to the process group, which would usually include it -- but it was
+  # spawned detached, and "usually" is not a lifetime guarantee.
+  (os/sigaction :int (fn []
+                       (print)
+                       (print "visualize: stopping the harness")
+                       (try (harness/shutdown) ([_] nil))
+                       (os/exit 0)))
+
   (printf "visualize: %s on %s" root url)
   (printf "  config: %s" config-path)
   (printf "  parsers: %s" (string/join (map |($ :name) specs) ", "))
