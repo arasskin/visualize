@@ -1,0 +1,8 @@
+# The compiled runtime. `./build` makes it from vendor/janet in a few seconds,
+# so it is a build artifact rather than source -- and a committed binary would
+# be wrong for whichever platform did not build it.
+bin/
+
+# Written into whatever directory is being scanned. One lands here whenever
+# visualize is pointed at its own repo.
+visualize.conf

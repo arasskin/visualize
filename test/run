@@ -1,0 +1,17 @@
+#!/bin/sh
+#
+# Run the test suite against the VENDORED runtime.
+#
+#     ./test/run
+#
+# Through bin/janet rather than whatever `janet` happens to be on PATH, so the
+# suite tests the interpreter the tool will actually use. A green run against
+# a different Janet than the one that ships here would not mean much.
+
+set -e
+
+here=$(cd "$(dirname "$0")/.." && pwd)
+
+"$here/build"
+
+exec "$here/bin/janet" "$here/test/run.janet" "$@"

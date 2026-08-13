@@ -1,0 +1,240 @@
+/* Vanilla CSS, no build step, no framework. Edit it and reload.
+ *
+ * Everything themeable is a custom property at the top. The rest of the file
+ * refers to those and to nothing else, so a new theme is a new :root block
+ * rather than a hunt through the rules. */
+
+:root {
+  color-scheme: light dark;
+
+  /* -- the theme -------------------------------------------------------- */
+  --font-ui: -apple-system, system-ui, sans-serif;
+  /* The config editor's face. Deliberately informal: this is a scratchpad you
+     poke at, not a settings dialog. */
+  --font-config: "Comic Sans MS", "Chalkboard SE", cursive;
+
+  /* The graph pane stays pale in BOTH schemes, because graphviz draws node
+     labels in dark ink and has no idea what the page is doing. */
+  --canvas: #fbfbfa;
+
+  --line: #8883;
+  --line-strong: #8886;
+  --wash: #8881;
+  --wash-strong: #8883;
+
+  --bad: #b3403a;
+  --bad-line: #b3403a55;
+  --bad-wash: #b3403a14;
+
+  /* The colour a hovered dependency lights up in. */
+  --lit: #c04040;
+
+  --shadow: 0 6px 18px #0004;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bad: #ff8a7a;
+    --bad-line: #ff8a7a55;
+    --bad-wash: #ff8a7a14;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; font: 14px/1.5 var(--font-ui); }
+
+/* nowrap keeps the header one row tall, which the graph pane's `top` offset
+   below assumes; the controls scroll sideways on a narrow window rather than
+   wrapping and pushing the graph down. */
+header {
+  display: flex; gap: 1rem; align-items: center;
+  flex-wrap: nowrap; white-space: nowrap; overflow-x: auto;
+  height: 3.25rem; padding: .75rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+button {
+  font: inherit; padding: .4rem .9rem;
+  border: 1px solid var(--line-strong); background: var(--wash);
+  cursor: pointer;
+}
+button:hover:not(:disabled) { background: var(--wash-strong); }
+button:disabled { opacity: .5; cursor: progress; }
+
+#status { opacity: .7; }
+#zoom { font-variant-numeric: tabular-nums; opacity: .7; min-width: 3.5em; }
+
+/* The viewport is fixed to what is left of the window and clips; panning
+   moves the graph inside it, so the page itself never scrolls. */
+#graph {
+  position: absolute; inset: 3.25rem 0 0 0; overflow: hidden;
+  cursor: grab; background: var(--canvas);
+}
+#graph.panning { cursor: grabbing; }
+#graph svg {
+  display: block; transform-origin: 0 0; will-change: transform;
+  max-width: none;
+}
+/* graphviz paints an opaque white page rectangle as its first polygon; hide
+   it so the graph floats on the pane instead of sitting on a white card. */
+#graph svg > g > polygon:first-of-type { fill: none; }
+
+/* -- hovering a dependency ------------------------------------------------
+   graphviz gives every edge a <title>, so the browser shows a native tooltip
+   -- in theory. In practice the edge is a 1px hairline: a target you cannot
+   land on is a target you do not have. So each edge gets a fat transparent
+   twin to catch the pointer, and hovering either lights the real path. */
+
+/* pointer-events: stroke IS THE WHOLE TRICK. The default hit-tests only where
+   a shape is actually PAINTED, so a transparent stroke -- however fat --
+   catches nothing. `stroke` means "hit-test the stroke area whether or not it
+   is visible".
+
+   vector-effect keeps that width in SCREEN pixels. Without it the graph's
+   scale() shrinks the target along with the view, so the thing meant to be
+   forgiving is hardest to hit exactly when the lines are thinnest. */
+#graph .edge .hit {
+  stroke: transparent; stroke-width: 16; fill: none;
+  vector-effect: non-scaling-stroke; pointer-events: stroke; cursor: help;
+}
+/* :not(.hit) IS THE FIX FOR A FLICKER LOOP. Without it this rule also matches
+   the hit stroke and shrinks it the instant hover begins -- the pointer,
+   inside the fat stroke but outside the thin one, falls off the edge, hover
+   ends, the stroke returns, hover fires again, forever. A hover state must
+   never move its own target. */
+#graph .edge.lit path:not(.hit) {
+  stroke: var(--lit); stroke-width: 2.4; vector-effect: non-scaling-stroke;
+}
+#graph .edge.lit polygon { fill: var(--lit); stroke: var(--lit); }
+/* Everything else steps back, so one line stays readable in a dense graph. */
+#graph svg.hovering > g > g:not(.lit) { opacity: .22; }
+
+/* The name of the dependency under the cursor. Fixed to the pane rather than
+   drawn into the SVG: the SVG is under a scale() transform, and text inside
+   it would grow and shrink with the zoom. */
+#edgelabel {
+  position: absolute; z-index: 6; pointer-events: none; display: none;
+  padding: .2rem .45rem; border: 1px solid var(--line-strong);
+  border-radius: 3px; background: var(--canvas); color: #222;
+  font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+#edgelabel b { font-weight: 600; }
+#edgelabel .arrow { opacity: .55; padding: 0 .25rem; }
+
+/* -- the config panel ------------------------------------------------------
+   The whole thing floats over the graph and is moved by dragging its bar.
+   Collapsed it is just the bar, so the same element is both the button and
+   the window -- there is no separate toggle to keep in sync with it. */
+#config {
+  position: absolute; z-index: 5; display: flex; flex-direction: column;
+  border: 1px solid var(--line-strong); background: Canvas;
+  font: 13px/1.5 var(--font-config);
+  touch-action: none;  /* dragging the bar must not also pan the graph */
+}
+#config.shut { width: auto !important; height: auto !important; }
+#config.shut #body, #config.shut #grip { display: none; }
+#config.shut #bar { border-bottom: 0; }
+
+/* One gutter for the bar and the rows below it, so the file's name and the
+   lines under it share a left edge. */
+#config { --gutter: .5rem; }
+
+#bar {
+  display: flex; align-items: center; gap: .3rem; flex: none;
+  padding: .4rem var(--gutter); cursor: grab; user-select: none;
+  border-bottom: 1px solid var(--line);
+}
+#bar:active { cursor: grabbing; }
+
+/* The scrolling part. flex:1 so it takes whatever the resize left it. */
+#body {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  padding: .4rem var(--gutter);
+}
+
+/* Resize grip, bottom-right, drawn as two diagonal rules. */
+#grip {
+  position: absolute; right: 0; bottom: 0; width: 16px; height: 16px;
+  cursor: nwse-resize; opacity: .5;
+  background:
+    linear-gradient(-45deg, transparent 3px, currentColor 3px,
+                    currentColor 4px, transparent 4px),
+    linear-gradient(-45deg, transparent 7px, currentColor 7px,
+                    currentColor 8px, transparent 8px);
+}
+#grip:hover { opacity: .9; }
+
+.row { display: flex; align-items: center; gap: .3rem; padding: .1rem 0; }
+
+/* The drag handle. Its own element so the input keeps normal text selection
+   -- making the whole row draggable would break that. */
+.hold {
+  cursor: grab; user-select: none; opacity: .35; letter-spacing: -2px;
+  padding: 0 .15rem; flex: none;
+}
+.hold:hover { opacity: .8; }
+.hold:active { cursor: grabbing; }
+
+/* While carrying: grabbing everywhere, and no accidental text selection from
+   the pointer sweeping across the list. */
+body.carrying, body.carrying * { cursor: grabbing !important; user-select: none; }
+
+/* The row being carried: a real copy of it, following the pointer. */
+.slot.ghost {
+  position: fixed; z-index: 50; pointer-events: none; margin: 0;
+  background: Canvas; border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow); opacity: .95;
+  transform: rotate(-.5deg) scale(1.02);
+}
+.slot.ghost.landing {
+  transition: top .13s ease-out, left .13s ease-out, transform .13s ease-out;
+  transform: none;
+}
+/* What it left behind -- a hole the same size, marked so it reads as the
+   destination rather than as an empty line. */
+.slot.gap {
+  border: 1px dashed var(--line-strong); background: var(--wash);
+}
+.slot.gap > * { visibility: hidden; }
+/* The rows getting out of the way. Only while a drag is live, so normal
+   redraws are not animated. */
+.slot.sliding { transition: transform .13s ease-out; }
+
+/* The line itself is an input so a typo is fixable in place; the BUTTONS are
+   what add, remove and run it. */
+.row input {
+  flex: 1; min-width: 0; font: inherit; color: inherit;
+  background: var(--wash); border: 1px solid transparent;
+  padding: .22rem .45rem;
+}
+.row input:focus {
+  outline: none; border-color: var(--line-strong); background: var(--wash-strong);
+}
+.row.comment input { opacity: .55; font-style: italic; }
+
+/* Square, quiet buttons -- four per row would shout otherwise. */
+.row button {
+  font: inherit; line-height: 1; padding: .22rem .4rem; min-width: 1.8rem;
+  border: 1px solid var(--line-strong); background: var(--wash);
+  cursor: pointer; opacity: .75;
+}
+.row button:hover:not(:disabled) { opacity: 1; background: var(--wash-strong); }
+.row button:disabled { opacity: .3; cursor: progress; }
+.row .del { color: var(--bad); }
+
+/* A line's complaint, tucked under the line it belongs to. Flush left: the
+   input starts the row, so an indent would push this off the text it is
+   about rather than onto it. */
+.why {
+  margin: .05rem 0 .3rem 0; padding-left: .5rem;
+  border-left: 2px solid var(--bad-line); color: var(--bad); font-size: 12px;
+}
+.row.bad input { border-color: var(--bad); background: var(--bad-wash); }
+
+/* Anything belonging to no single line -- graphviz missing, a failed request
+   -- still needs somewhere to go. */
+#problems {
+  padding: .3rem .5rem 0; color: var(--bad); white-space: pre-wrap;
+}
+#problems:empty { display: none; }

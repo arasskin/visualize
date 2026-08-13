@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>{{TITLE}}</title>
+<link rel="stylesheet" href="/style.css">
+<header>
+  <button id="regen" title="re-read the sources and rebuild">Regenerate</button>
+  <button id="fit" title="fit to window (0)">Fit</button>
+  <span id="zoom"></span>
+  <span id="status"></span>
+</header>
+<div id="graph">{{GRAPH}}<div id="edgelabel"></div></div>
+<div id="config" class="shut">
+  <div id="bar" title="click to open, drag to move">
+    <span class="name">{{CONFIG_NAME}}</span>
+  </div>
+  <div id="body">
+    <div id="lines"></div>
+    <div id="problems"></div>
+  </div>
+  <div id="grip" title="drag to resize"></div>
+</div>
+<script>
+// The file the page was rendered from, handed over at load so the editor opens
+// on the same lines the graph came from.
+window.CONFIG_LINES = {{CONFIG_LINES}};
+window.CONFIG_PROBLEMS = {{CONFIG_PROBLEMS}};
+</script>
+<script src="/app.js"></script>

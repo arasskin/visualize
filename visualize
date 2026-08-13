@@ -1,0 +1,18 @@
+#!/bin/sh
+#
+# Run visualize on a directory, building the runtime first if it is not built.
+#
+#     ./visualize                 the current directory
+#     ./visualize ~/code/project  somewhere else
+#
+# This is the entry point to use. `./build` runs underneath it and does
+# nothing when the runtime is already compiled, so the first run pays a few
+# seconds and every run after it starts immediately.
+
+set -e
+
+here=$(cd "$(dirname "$0")" && pwd)
+
+"$here/build"
+
+exec "$here/bin/janet" "$here/visualize.janet" "$@"

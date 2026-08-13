@@ -1,0 +1,88 @@
+#!/bin/sh
+#
+# Compile the vendored Janet runtime, if it is not already compiled.
+#
+#     ./build          compile bin/janet when it is missing or stale
+#     ./build --force  compile it regardless
+#     ./build --clean  delete it
+#
+# The runtime is `vendor/janet/` -- the official amalgamated distribution,
+# three files, no dependencies beyond libc and a C99 compiler. It is IN THIS
+# REPOSITORY rather than fetched, so a clone builds offline and builds the
+# same runtime a year from now.
+#
+# STALENESS IS BY TIMESTAMP against the vendored sources, not by version
+# string: the question this answers is "was this binary built from the source
+# sitting next to it", and comparing mtimes answers exactly that. Editing a
+# vendored file or checking out a different version rebuilds; running ./build
+# twice does not.
+
+set -e
+
+here=$(cd "$(dirname "$0")" && pwd)
+src="$here/vendor/janet"
+out="$here/bin/janet"
+
+case "${1:-}" in
+  --clean)
+    rm -f "$out"
+    echo "removed $out"
+    exit 0
+    ;;
+  --force)
+    force=1
+    ;;
+  "")
+    force=0
+    ;;
+  *)
+    echo "usage: ./build [--force|--clean]" >&2
+    exit 2
+    ;;
+esac
+
+# Already built, and newer than everything it was built from.
+if [ "$force" -eq 0 ] && [ -x "$out" ]; then
+  stale=0
+  for file in "$src/janet.c" "$src/janet.h" "$src/shell.c"; do
+    [ "$file" -nt "$out" ] && stale=1
+  done
+  if [ "$stale" -eq 0 ]; then
+    exit 0
+  fi
+  echo "vendored source is newer than $out -- rebuilding"
+fi
+
+for file in "$src/janet.c" "$src/janet.h" "$src/shell.c"; do
+  if [ ! -f "$file" ]; then
+    echo "missing $file -- the vendored runtime is incomplete" >&2
+    exit 1
+  fi
+done
+
+CC=${CC:-cc}
+command -v "$CC" >/dev/null 2>&1 || {
+  echo "no C compiler found (set CC, or install Xcode command line tools)" >&2
+  exit 1
+}
+
+mkdir -p "$here/bin"
+
+echo "compiling janet from vendor/janet (a few seconds, once)..."
+
+# -lm is the only library Janet actually needs everywhere; -lpthread and -ldl
+# are separate libraries on Linux and already inside libc on macOS, where
+# passing them is harmless. Tried together first, then without, so one
+# command covers both without probing the platform.
+#
+# 2>/dev/null on the first attempt only: a real compile error should be
+# visible, and it will be, because the fallback prints it.
+if ! "$CC" -O2 -std=c99 -fPIC -o "$out" \
+      "$src/janet.c" "$src/shell.c" -I"$src" \
+      -lm -lpthread -ldl 2>/dev/null; then
+  "$CC" -O2 -std=c99 -fPIC -o "$out" \
+      "$src/janet.c" "$src/shell.c" -I"$src" \
+      -lm
+fi
+
+echo "built $out ($("$out" -v))"
