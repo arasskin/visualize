@@ -41,6 +41,10 @@ same runtime a year from now.
 when the runtime is already compiled — so there is no separate setup step to
 remember.
 
+Node is optional and only for tests: `web/term.js` runs in a browser, so its
+suite needs a JavaScript runtime. `./test/run` skips those and says so when
+node is absent.
+
 Sizes: 3.3MB of vendored runtime, ~230K of tool source, ~3,800 lines of Janet,
 HTML, CSS and JavaScript. `bin/janet` is a build artifact and is gitignored.
 
@@ -61,6 +65,7 @@ pane.
 (show-lines)               ; write each file's line count on it
 (show-lines-coloring)      ; ...and shade by size instead of by edges
 (font "Helvetica")         ; draw it in something else
+(harness claude)           ; what the terminal window runs -- or (harness pi)
 ```
 
 `~` **is the project**, the way a shell expands `~` to a home directory:
@@ -99,6 +104,40 @@ radius of a typo there should be a wrong-looking graph.
 A form cannot span lines — a line is the unit that gets parsed and the unit an
 error attaches to. One bad line is reported under itself and the rest still
 runs.
+
+## The harness window
+
+A second panel runs an agent in a real terminal, beside the graph. Same
+furniture as the config editor: drag the bar to move it, the grip to resize,
+click the bar to collapse it into just the bar.
+
+```lisp
+(harness claude)          ; the default
+(harness pi)
+(harness "/bin/sh" "-i")  ; anything with a command line
+```
+
+**Nothing in the terminal knows which agent it is running.** `src/pty.janet`
+takes argv and `web/term.js` takes bytes, so Claude Code and pi go through
+identical code — the harness is a config value, not a code path.
+
+It is a real terminal, not a chat box. `forkpty` asks the kernel for a
+pseudo-terminal, so `isatty()` is genuinely true and a TUI renders as it
+would in any other terminal. Nothing here defeats a tty check; it satisfies
+one, the same way tmux and ssh do.
+
+The session survives a page reload — the browser attaches to a backlog of
+output rather than to the pty — and collapsing the panel leaves the agent
+running.
+
+### The terminal endpoints need a token
+
+Everything else visualize serves is derived from files, and the worst a stray
+request can do is redraw a graph. These endpoints run a program, and
+**127.0.0.1 is not a boundary**: any page in any tab can POST to a localhost
+port. So a secret is generated per run, embedded in the page (not a cookie, so
+it dies with the tab), and required on every terminal request alongside an
+`Origin` check.
 
 ## Adding a language
 
@@ -173,15 +212,18 @@ visualize.janet     entry point: the server's two endpoints
 src/scan.janet      walk the tree, read every file on all cores, build the graph
 src/parser.janet    what a language spec is, and how one is run
 src/parsers.janet   find the specs in parsers/ at runtime
+src/pty.janet       a pseudo-terminal, via libc's forkpty through the FFI
+src/harness.janet   the agent session: pump thread, backlog, resize
 src/dot.janet       prefix matching, filtering, and the DOT that comes out
 src/color.janet     the palette, the ramp, and WCAG-checked label ink
 src/config.janet    the sandbox the config runs in
 src/tilde.janet     rewriting ~ and #rrggbb past Janet's reader
 src/http.janet      just enough HTTP for one browser on localhost
 src/json.janet      just enough JSON for the browser protocol
+web/term.js         a terminal emulator, in the ~25 sequences agents emit
 web/                the page: vanilla HTML, CSS and JS, no build step
 parsers/            one file per language
-test/               178 assertions, no framework
+test/               236 assertions, no framework
 bin/janet           the compiled runtime (gitignored build artifact)
 ```
 
@@ -201,7 +243,7 @@ node labels in dark ink and has no idea what the page is doing.
 ./test/run
 ```
 
-178 assertions, no test framework — the harness is 70 lines in
+236 assertions, no test framework — the harness is 70 lines in
 `test/harness.janet`, because a dependency is a dependency. It runs against
 the **vendored** runtime, not whatever `janet` is on PATH: a green run against
 a different interpreter than the one that ships here would not mean much.
