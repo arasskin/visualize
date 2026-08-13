@@ -468,67 +468,115 @@ async function send(action, index) {
   }
 }
 
-// Dragging the bar moves the panel; dragging the grip resizes it. Both are the
-// same gesture with a different thing on the end, so they share one path.
-function grab(handle, onMove) {
-  handle.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const box = panel.getBoundingClientRect();
-    const from = { x: e.clientX, y: e.clientY, w: box.width, h: box.height,
-                   left: box.left, top: box.top };
-    let moved = false;
-    handle.setPointerCapture(e.pointerId);
-    const move = (m) => {
-      const dx = m.clientX - from.x, dy = m.clientY - from.y;
-      // A few pixels of slop, so a click that wobbles still counts as a click.
-      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
-      if (moved) onMove(dx, dy, from);
-    };
-    const drop = () => {
-      handle.removeEventListener('pointermove', move);
-      handle.removeEventListener('pointerup', drop);
-      handle.removeEventListener('pointercancel', drop);
-      handle.dragged = moved;
-    };
-    handle.addEventListener('pointermove', move);
-    handle.addEventListener('pointerup', drop);
-    handle.addEventListener('pointercancel', drop);
-  });
-}
+// -- floating panels ---------------------------------------------------------
+// A panel is a title bar you can drag, a body, and a grip in the corner. Click
+// the bar and it collapses into just the bar -- so the same element is both
+// the window and the button that opens it, and there is no separate toggle to
+// keep in sync with it.
+//
+// Written once and used twice: the config editor and the harness terminal are
+// the same furniture with different contents. A second copy of this logic
+// would be a second place for the drag-versus-click rule to drift.
 
-// Keep the panel reachable: at least a bar's worth has to stay on screen, or it
-// can be dragged somewhere it can never be grabbed again.
-function place(left, top) {
-  const w = panel.offsetWidth, edge = 28;
-  panel.style.left = Math.min(Math.max(left, edge - w), innerWidth - edge) + 'px';
-  panel.style.top = Math.min(Math.max(top, 0), innerHeight - edge) + 'px';
-}
+function makePanel(root, options = {}) {
+  const bar = root.querySelector('.bar');
+  const body = root.querySelector('.panel-body');
+  const grip = root.querySelector('.grip');
 
-grab(bar, (dx, dy, from) => place(from.left + dx, from.top + dy));
-grab(grip, (dx, dy, from) => {
-  panel.style.width = Math.max(240, from.w + dx) + 'px';
-  panel.style.height = Math.max(120, from.h + dy) + 'px';
-});
-
-bar.addEventListener('click', () => {
-  // A drag that ended on the bar is not a click asking to collapse it.
-  if (bar.dragged) { bar.dragged = false; return; }
-  const opening = panel.classList.contains('shut');
-  panel.classList.toggle('shut', !opening);
-  if (opening) {
-    // First open gets a default size; after that it keeps whatever the grip
-    // was last dragged to.
-    if (!panel.style.width) panel.style.width = 'min(46rem, 92vw)';
-    if (!panel.style.height) panel.style.height = '22rem';
-    body.querySelector('input')?.focus();
+  // Dragging the bar moves the panel; dragging the grip resizes it. Both are
+  // the same gesture with a different thing on the end, so they share one
+  // pointer-capture path.
+  function grab(handle, onMove) {
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      // Whichever panel you touched comes to the front. Without this the one
+      // that happens to be later in the document always wins, and a panel can
+      // hide under another with no way to raise it.
+      raise(root);
+      const box = root.getBoundingClientRect();
+      const from = { x: e.clientX, y: e.clientY, w: box.width, h: box.height,
+                     left: box.left, top: box.top };
+      let moved = false;
+      handle.setPointerCapture(e.pointerId);
+      const move = (m) => {
+        const dx = m.clientX - from.x, dy = m.clientY - from.y;
+        // A few pixels of slop, so a click that wobbles still counts as a click.
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved = true;
+        if (moved) onMove(dx, dy, from);
+      };
+      const drop = () => {
+        handle.removeEventListener('pointermove', move);
+        handle.removeEventListener('pointerup', drop);
+        handle.removeEventListener('pointercancel', drop);
+        handle.dragged = moved;
+      };
+      handle.addEventListener('pointermove', move);
+      handle.addEventListener('pointerup', drop);
+      handle.addEventListener('pointercancel', drop);
+    });
   }
+
+  // Keep the panel reachable: at least a bar's worth has to stay on screen, or
+  // it can be dragged somewhere it can never be grabbed again.
+  function place(left, top) {
+    const w = root.offsetWidth, edge = 28;
+    root.style.left = Math.min(Math.max(left, edge - w), innerWidth - edge) + 'px';
+    root.style.top = Math.min(Math.max(top, 0), innerHeight - edge) + 'px';
+  }
+
+  grab(bar, (dx, dy, from) => place(from.left + dx, from.top + dy));
+  grab(grip, (dx, dy, from) => {
+    const w = Math.max(options.minWidth || 240, from.w + dx);
+    const h = Math.max(options.minHeight || 120, from.h + dy);
+    root.style.width = w + 'px';
+    root.style.height = h + 'px';
+    if (options.onResize) options.onResize(w, h);
+  });
+
+  const panel = {
+    root, bar, body, grip,
+    place,
+    get shut() { return root.classList.contains('shut'); },
+    open() { if (panel.shut) bar.click(); },
+    toggle() { bar.click(); },
+  };
+
+  bar.addEventListener('click', () => {
+    // A drag that ended on the bar is not a click asking to collapse it.
+    if (bar.dragged) { bar.dragged = false; return; }
+    const opening = root.classList.contains('shut');
+    root.classList.toggle('shut', !opening);
+    if (opening) {
+      raise(root);
+      // First open gets a default size; after that it keeps whatever the grip
+      // was last dragged to.
+      if (!root.style.width) root.style.width = options.width || 'min(46rem, 92vw)';
+      if (!root.style.height) root.style.height = options.height || '22rem';
+      if (options.onOpen) options.onOpen(panel);
+    } else if (options.onShut) {
+      options.onShut(panel);
+    }
+  });
+
+  return panel;
+}
+
+// Panels stack in the order they were last touched. Kept as a counter rather
+// than by reordering the DOM, because moving a live <div> would tear down the
+// terminal's scroll position and any selection inside it.
+let topmost = 5;
+function raise(root) { root.style.zIndex = ++topmost; }
+
+const configPanel = makePanel(panel, {
+  minWidth: 240, minHeight: 120,
+  onOpen: () => body.querySelector('input')?.focus(),
 });
 
 // Start under the header, top-left. After a frame, so the collapsed bar has a
 // real width to clamp against -- measuring before layout puts it elsewhere.
-requestAnimationFrame(() => place(12, 60));
+requestAnimationFrame(() => configPanel.place(12, 60));
 
 lines = window.CONFIG_LINES || [];
 for (const [at, why] of Object.entries(window.CONFIG_PROBLEMS || {})) {

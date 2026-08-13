@@ -68,17 +68,27 @@
     [ready out-chan] :nt (ev/thread-chan 4))
   (def session (ev/take ready))
   (def seen @"")
-  (defn drain [n]
-    (for i 0 n
-      (def chunk (ev/take out-chan))
-      (when (string? chunk) (buffer/push-string seen chunk))))
   (ev/sleep 0.4)
   (pty/write-input session "echo TYPED-OK\n")
-  (drain 3)
+  # Read until the answer shows up rather than for a fixed number of chunks.
+  # A pty splits output wherever it likes -- the echoed command and its result
+  # may arrive together or several reads apart -- so counting chunks is a race
+  # that passes on a quiet machine and fails on a busy one.
+  (var found false)
+  (var reads 0)
+  (while (and (not found) (< reads 40))
+    (++ reads)
+    (def chunk (ev/take out-chan))
+    (if (string? chunk)
+      (do (buffer/push-string seen chunk)
+          # The echoed input contains the string too, so only a line that is
+          # the OUTPUT counts: the shell echoes `echo TYPED-OK`, and the
+          # result is the bare word on a line of its own.
+          (when (string/find "\nTYPED-OK" (string seen)) (set found true)))
+      (break)))
   (pty/write-input session "exit\n")
-  (drain 2)
-  (t/ok (string/find "TYPED-OK" (string seen))
-        "what was written to the pty was executed by the shell"))
+  (t/ok found "what was written to the pty was executed by the shell")
+  (pty/close session))
 
 (t/test "resize is applied by the kernel"
   # Checked against the DEVICE rather than by asking the program, because a

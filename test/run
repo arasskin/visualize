@@ -14,4 +14,15 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 
 "$here/build"
 
-exec "$here/bin/janet" "$here/test/run.janet" "$@"
+"$here/bin/janet" "$here/test/run.janet" "$@"
+
+# The terminal emulator is JavaScript, so its tests need a JavaScript runtime.
+# Skipped rather than fatal when node is absent: node is not a dependency of
+# visualize itself -- only of testing the one file that runs in a browser --
+# and a missing one should not fail the suite for someone who never touches
+# web/term.js.
+if command -v node >/dev/null 2>&1; then
+  node "$here/test/term.mjs"
+else
+  echo "  --  skipping terminal tests (no node on PATH)"
+fi

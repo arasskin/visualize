@@ -122,39 +122,44 @@ button:disabled { opacity: .5; cursor: progress; }
 #edgelabel b { font-weight: 600; }
 #edgelabel .arrow { opacity: .55; padding: 0 .25rem; }
 
-/* -- the config panel ------------------------------------------------------
-   The whole thing floats over the graph and is moved by dragging its bar.
-   Collapsed it is just the bar, so the same element is both the button and
-   the window -- there is no separate toggle to keep in sync with it. */
-#config {
+/* -- floating panels --------------------------------------------------------
+   A panel floats over the graph and is moved by dragging its bar. Collapsed
+   it is just the bar, so the same element is both the button and the window
+   -- there is no separate toggle to keep in sync with it.
+
+   Written as classes rather than ids because there are two of them now: the
+   config editor and the harness terminal are the same furniture with
+   different contents. */
+.panel {
   position: absolute; z-index: 5; display: flex; flex-direction: column;
   border: 1px solid var(--line-strong); background: Canvas;
   font: 13px/1.5 var(--font-config);
   touch-action: none;  /* dragging the bar must not also pan the graph */
+  --gutter: .5rem;     /* one gutter for the bar and the rows below it, so a
+                          panel's title and its contents share a left edge */
 }
-#config.shut { width: auto !important; height: auto !important; }
-#config.shut #body, #config.shut #grip { display: none; }
-#config.shut #bar { border-bottom: 0; }
+.panel.shut { width: auto !important; height: auto !important; }
+.panel.shut .panel-body, .panel.shut .grip { display: none; }
+.panel.shut .bar { border-bottom: 0; }
 
-/* One gutter for the bar and the rows below it, so the file's name and the
-   lines under it share a left edge. */
-#config { --gutter: .5rem; }
-
-#bar {
+.bar {
   display: flex; align-items: center; gap: .3rem; flex: none;
   padding: .4rem var(--gutter); cursor: grab; user-select: none;
   border-bottom: 1px solid var(--line);
 }
-#bar:active { cursor: grabbing; }
+.bar:active { cursor: grabbing; }
+/* A panel's own status, right of its name: whether the harness is running,
+   how many config lines failed. Quiet enough to ignore. */
+.bar .state { opacity: .55; font-size: 11px; margin-left: auto; }
 
 /* The scrolling part. flex:1 so it takes whatever the resize left it. */
-#body {
+.panel-body {
   flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
   padding: .4rem var(--gutter);
 }
 
 /* Resize grip, bottom-right, drawn as two diagonal rules. */
-#grip {
+.grip {
   position: absolute; right: 0; bottom: 0; width: 16px; height: 16px;
   cursor: nwse-resize; opacity: .5;
   background:
@@ -163,7 +168,34 @@ button:disabled { opacity: .5; cursor: progress; }
     linear-gradient(-45deg, transparent 7px, currentColor 7px,
                     currentColor 8px, transparent 8px);
 }
-#grip:hover { opacity: .9; }
+.grip:hover { opacity: .9; }
+
+/* -- the harness terminal ---------------------------------------------------
+   A monospace grid the emulator paints into. The panel gets a dark ground of
+   its own rather than following the page: a terminal is its own surface, and
+   the harnesses pick their colours assuming a dark one. */
+#harness { --gutter: 0px; }
+#harness .panel-body { background: #1a1a1c; padding: .35rem .5rem; }
+
+#screen {
+  margin: 0; outline: none;
+  font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #d8d8d2; white-space: pre; tab-size: 8;
+}
+/* The cell the cursor is on. Painted as a background rather than a caret so
+   it survives the screen being rebuilt on every frame. */
+#screen .cursor { background: #d8d8d2; color: #1a1a1c; }
+#screen:focus .cursor { animation: blink 1.1s steps(1) infinite; }
+@keyframes blink { 50% { background: transparent; color: inherit; } }
+
+/* A terminal that has not been clicked cannot receive keys, which is worth
+   saying rather than leaving the user to discover. */
+#harness .panel-body::after {
+  content: "click the screen to type";
+  display: block; padding: .3rem .1rem 0;
+  color: #6a6a68; font-size: 11px;
+}
+#harness .panel-body:focus-within::after { content: ""; padding: 0; }
 
 .row { display: flex; align-items: center; gap: .3rem; padding: .1rem 0; }
 
