@@ -601,7 +601,18 @@
     (def quoted (string/join (map |(string "'" (string/replace-all "'" "'\\''" $) "'")
                                   argv)
                              " "))
-    (os/execute ["/bin/sh" "-c" (string quoted " >/dev/null 2>&1 &")] :p))
+    # The descriptor closes matter as much as the redirects. A forked child
+    # inherits every open fd, INCLUDING THE SERVER'S LISTENING SOCKET -- and
+    # a supervisor holding that fd keeps the port undead after the server
+    # exits: the kernel still accepts connections into the backlog of a
+    # socket nobody will ever read, so clients hang instead of being refused,
+    # and the next server's is-it-free probe reads "taken". Ports 3-9 cover
+    # everything the server has open at first-start time; the supervisor
+    # opens its own fds after exec.
+    (os/execute ["/bin/sh" "-c"
+                 (string quoted " >/dev/null 2>&1"
+                         " 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &")]
+                :p))
 
   # A connection to a running supervisor, starting one if there is none.
   #
