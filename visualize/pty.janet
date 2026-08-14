@@ -51,6 +51,9 @@
 (defn- forkpty* [] (bound "forkpty" :int :ptr :ptr :ptr :ptr))
 (defn- read* [] (bound "read" :long :int :ptr :size))
 (defn- write* [] (bound "write" :long :int :ptr :size))
+# int poll(struct pollfd *fds, nfds_t nfds, int timeout) -- not variadic, so
+# unlike ioctl it is callable through libffi.
+(defn- poll* [] (bound "poll" :int :ptr :uint :int))
 (defn- close* [] (bound "close" :int :int))
 (defn- kill* [] (bound "kill" :int :int :int))
 (defn- waitpid* [] (bound "waitpid" :int :int :ptr :int))
@@ -121,13 +124,34 @@
              (string/slice text 0 (or (string/find "\0" text) (length text))))
    :argv argv})
 
+(defn writable?
+  ``Can the master fd take input RIGHT NOW, without blocking?
+
+  Asked before every write, because the answer is sometimes no: the pty
+  input buffer is about a kilobyte, and a program that has stopped reading
+  stdin while it paints -- claude, mid scroll-flood -- fills it. A write
+  then BLOCKS, and an FFI call blocks the whole OS thread, not a fiber:
+  the supervisor's event loop froze whole until claude drained its stdin,
+  ~10 seconds of every request timing out, recovering by itself. Polled
+  with zero timeout: an answer, never a wait.``
+  [session]
+  # struct pollfd { int fd; short events; short revents } -- POLLOUT is 4.
+  (def fds (buffer/new-filled 8 0))
+  (ffi/write :int (session :fd) fds 0)
+  (ffi/write :int16 4 fds 4)
+  (pos? (call (poll*) fds 1 0)))
+
 (defn write-input
-  "Send keystrokes to the program. Returns how many bytes went."
+  ``Send keystrokes to the program. Returns how many bytes went, WHICH MAY
+  BE FEWER THAN OFFERED -- zero when the pty buffer is full. The caller
+  queues the rest; blocking here would freeze the whole event loop (see
+  `writable?`).``
   [session text]
   (def payload (buffer text))
-  (if (empty? payload)
-    0
-    (call (write*) (session :fd) payload (length payload))))
+  (cond
+    (empty? payload) 0
+    (not (writable? session)) 0
+    (max 0 (call (write*) (session :fd) payload (length payload)))))
 
 (defn resize
   ``Tell the program its window changed size.

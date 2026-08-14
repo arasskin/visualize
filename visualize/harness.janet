@@ -94,6 +94,11 @@
   (when (and (pos? hits) session (not exited))
     (repeat hits (try (pty/write-input session da1-reply) ([_] nil)))))
 
+# (The DA1 reply above writes directly: it is a dozen bytes answering a
+# startup probe, sent while the program is reading. If it ever meets a full
+# buffer the write returns short and the loss is one probe answer, not a
+# frozen event loop.)
+
 (defn- drain
   ``Move whatever the pump thread has produced into the backlog.
 
@@ -132,6 +137,27 @@
 # where it can be capped by discarding the OLDEST output rather than by
 # stalling the producer, and dropping scrollback nobody asked for is the right
 # thing to lose under pressure.
+# Input the pty has not yet accepted. A program that stops reading stdin
+# while it paints fills the pty's ~1KB input buffer, and writing past that
+# point blocks -- an FFI write blocks the supervisor's whole event loop, so
+# every request froze for the ~10 seconds claude took to drain its stdin
+# after a hard scroll. Writes are now gated on writability (see
+# pty/writable?) and whatever the pty will not take yet waits here, flushed
+# by every later send and by the drain timer's tick.
+(var- unsent @"")
+
+(defn- flush-unsent
+  "Move queued input into the pty, exactly as much as it will take."
+  []
+  (while (and session (not exited) (pos? (length unsent)))
+    (def head (string/slice unsent 0 (min 2048 (length unsent))))
+    (def wrote (try (pty/write-input session head) ([_] 0)))
+    (if (pos? wrote)
+      (let [rest (buffer/slice unsent wrote)]
+        (buffer/clear unsent)
+        (buffer/push-string unsent rest))
+      (break))))
+
 (defn- keep-draining
   ``Empty the pump's channel continuously, whether or not anyone is polling.
 
@@ -143,7 +169,10 @@
     (fn []
       (forever
         (ev/sleep 0.02)
-        (try (drain) ([_] nil))))))
+        (try (drain) ([_] nil))
+        # Input the pty refused earlier goes as soon as the program reads
+        # again -- this tick is what turns a full-buffer stall into a queue.
+        (try (flush-unsent) ([_] nil))))))
 
 (defn- running?
   "Is a harness alive right now?"
@@ -173,6 +202,7 @@
   (set base 0)
   (set exited false)
   (set da1-carry "")
+  (buffer/clear unsent)
   (set pty-rows rows)
   (set pty-cols cols)
   (++ generation)
@@ -228,10 +258,11 @@
   (session-state))
 
 (defn- session-send
-  "Type at the harness."
+  "Type at the harness. QUEUED, never blocking: order is the queue's."
   [text]
   (when (and session (not exited))
-    (try (pty/write-input session text) ([_] nil)))
+    (buffer/push-string unsent text)
+    (flush-unsent))
   nil)
 
 (defn- session-resize

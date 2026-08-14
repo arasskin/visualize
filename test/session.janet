@@ -111,6 +111,25 @@
   (check/ok (< (- (os/clock :monotonic) t2) 1) "pending output never waits")
   (harness/stop))
 
+(check/test "input to a program that never reads cannot freeze the supervisor"
+  # `sleep` never reads stdin, so the pty's ~1KB input buffer fills and
+  # stays full. A blocking write there froze the supervisor's whole event
+  # loop -- an FFI call blocks the thread, not a fiber -- for as long as
+  # the program took to drain, which for a scroll flood was ~10 seconds of
+  # every request timing out. Writes are gated on writability now, with
+  # the surplus queued; the send must come back at once and the supervisor
+  # must still be answering.
+  (harness/start ["/bin/sh" "-c" "exec sleep 5"] (os/cwd) 24 80)
+  (ev/sleep 0.3)
+  (def flood (string/repeat "x" 65536))
+  (def t0 (os/clock :monotonic))
+  (harness/send flood)
+  (def state (harness/state))
+  (def elapsed (- (os/clock :monotonic) t0))
+  (check/ok (< elapsed 2) "a flooded pty queues instead of blocking the event loop")
+  (check/ok (state :running) "and the supervisor still answers")
+  (harness/stop))
+
 (check/test "a quiet input skips the echo wait"
   # Mouse reports ride input requests but need no echo riding back -- the
   # parked poll carries the repaint. Against a program that echoes NOTHING,
