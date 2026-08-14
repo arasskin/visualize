@@ -13,9 +13,11 @@
      poke at, not a settings dialog. */
   --font-config: "Comic Sans MS", "Chalkboard SE", cursive;
 
-  /* The graph pane stays pale in BOTH schemes, because graphviz draws node
-     labels in dark ink and has no idea what the page is doing. */
+  /* graphviz draws node labels in dark ink and has no idea what the page is
+     doing, so a dark canvas needs the SVG inverted too -- see the dark block
+     at the end of the theme. */
   --canvas: #fbfbfa;
+  --ink: #222;
 
   --line: #8883;
   --line-strong: #8886;
@@ -33,9 +35,11 @@
      about stays visible underneath -- the panel covers a corner of the
      canvas, and an opaque one hides exactly the part you were looking at.
      Alpha rather than `opacity` on the panel: opacity would fade the TEXT
-     too, and terminal output at 85% on a busy graph is unreadable. */
-  --term: #fdfdfbd9;
+     too, and terminal output at 70% on a busy graph is unreadable. */
+  --term: #fdfdfbb3;
   --term-ink: #2c2c2a;
+  --term-line: #0002;
+  --term-hint: #6a6a68;
   /* --term's solid twin, for the places translucency would be wrong: the
      cursor cell and inverse video. A highlight you can see the graph through
      is not a highlight. */
@@ -65,12 +69,48 @@
   --shadow: 0 6px 18px #0004;
 }
 
+/* The dark theme: the same properties restated, per the note at the top.
+   The browser flips this with the OS setting -- the server never knows. */
 @media (prefers-color-scheme: dark) {
   :root {
+    --canvas: #171715;
+    --ink: #ddd;
+
     --bad: #ff8a7a;
     --bad-line: #ff8a7a55;
     --bad-wash: #ff8a7a14;
+
+    --term: #1b1b19b3;
+    --term-ink: #d6d6d2;
+    --term-ground: #1b1b19;
+    --term-line: #fff2;
+    --term-hint: #8f8f8b;
+
+    /* Lightened to read against the dark ground -- the mirror image of the
+       light palette's problem: stock black and dim colours vanish here. */
+    --term-black:          #5a5a56;
+    --term-red:            #d47070;
+    --term-green:          #7ab87a;
+    --term-yellow:         #c7a84e;
+    --term-blue:           #7d98d4;
+    --term-magenta:        #c07ad4;
+    --term-cyan:           #62b8b8;
+    --term-white:          #a8a8a4;
+    --term-bright-black:   #82827e;
+    --term-bright-red:     #e08a8a;
+    --term-bright-green:   #8ed48e;
+    --term-bright-yellow:  #dcc165;
+    --term-bright-blue:    #94aee6;
+    --term-bright-magenta: #d494e6;
+    --term-bright-cyan:    #7cd0d0;
+    --term-bright-white:   #e8e8e4;
   }
+
+  /* graphviz's ink is dark and baked into the SVG, so the SVG itself flips:
+     invert turns the ink light, hue-rotate turns the colours (including the
+     CSS-applied --lit) back to roughly themselves. Slightly under 1 so pure
+     black lands on soft white rather than glare. */
+  #graph svg { filter: invert(.92) hue-rotate(180deg); }
 }
 
 * { box-sizing: border-box; }
@@ -149,7 +189,7 @@ button:disabled { opacity: .5; cursor: progress; }
 #edgelabel {
   position: absolute; z-index: 6; pointer-events: none; display: none;
   padding: .2rem .45rem; border: 1px solid var(--line-strong);
-  border-radius: 3px; background: var(--canvas); color: #222;
+  border-radius: 3px; background: var(--canvas); color: var(--ink);
   font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums;
 }
 #edgelabel b { font-weight: 600; }
@@ -204,22 +244,19 @@ button:disabled { opacity: .5; cursor: progress; }
 .grip:hover { opacity: .9; }
 
 /* -- the harness terminal ---------------------------------------------------
-   A monospace grid the emulator paints into. The panel gets a light ground of
-   its own rather than following the page: a terminal is its own surface, and
-   the emulator's palette is picked to read against a light one.
+   A monospace grid the emulator paints into. The panel gets a ground of its
+   own rather than following the page: a terminal is its own surface, and the
+   emulator's palette is picked to read against it -- each scheme's :root
+   block states the ground and the 16 colours together.
 
    That ground is translucent, and the WHOLE panel wears it -- bar included.
    A solid bar over a see-through body reads as two windows stacked, not as
-   one see-through window. The blur is what keeps the text legible: a graph
-   line passing behind a glyph is noise at the same spatial frequency as the
-   glyph itself, and blurring the backdrop leaves the colour without the
-   detail that competes. */
+   one see-through window. */
 #harness {
   --gutter: 0px;
   background: var(--term); color: var(--term-ink);
-  backdrop-filter: blur(12px) saturate(.7);
 }
-#harness .bar { border-bottom-color: #0002; }
+#harness .bar { border-bottom-color: var(--term-line); }
 #harness .panel-body { padding: .35rem .5rem; }
 
 #screen {
@@ -239,7 +276,7 @@ button:disabled { opacity: .5; cursor: progress; }
 #harness .panel-body::after {
   content: "click the screen to type";
   display: block; padding: .3rem .1rem 0;
-  color: #6a6a68; font-size: 11px;
+  color: var(--term-hint); font-size: 11px;
 }
 #harness .panel-body:focus-within::after { content: ""; padding: 0; }
 
