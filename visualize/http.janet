@@ -72,6 +72,15 @@
   (:write conn (string "HTTP/1.1 " status "\r\n"
                        "Content-Type: " content-type "\r\n"
                        "Content-Length: " (length payload) "\r\n"
+                       # Without this the browser caches statics HEURISTICALLY
+                       # -- no header at all means "guess" -- and an edited
+                       # app.js can lose to a stale copy from a previous run
+                       # on the same port. For a localhost tool whose files
+                       # are being edited live, yesterday's code served fresh
+                       # is the worst possible cache hit. no-store: the files
+                       # are local and tiny, revalidation would need ETags for
+                       # no win.
+                       "Cache-Control: no-store\r\n"
                        # No keep-alive bookkeeping: one request per
                        # connection, and the browser opens another when it
                        # wants one. Simpler than getting reuse subtly wrong.
