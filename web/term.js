@@ -643,13 +643,15 @@ export function makeTerminal(screen, options = {}) {
       if (mine !== ticket || !painting) return;  // stale, or already painted
       painting = false;
       if (timer !== null) { clearTimeout(timer); timer = null; }
-      const [lines, changed] = render();
+      const [lines, changed, shift] = render();
       // After, not before: a caller following the output needs the DOM to
       // have its new height when it decides where to scroll. The line count
       // rides along so the caller can tell whether the height CAN have moved
       // without reading the layout to find out; `changed` says whether this
-      // paint moved any ink at all.
-      if (options.onPaint) options.onPaint(lines, changed);
+      // paint moved any ink at all, and `shift` whether it moved existing
+      // rows to new indices -- a transcript scrolling, as opposed to
+      // changing in place.
+      if (options.onPaint) options.onPaint(lines, changed, shift);
     };
 
     // THE FRAME PACES THE VISIBLE TAB. A real terminal does not render per
@@ -696,6 +698,34 @@ export function makeTerminal(screen, options = {}) {
       let last = out.length - 1;
       while (last > cursor.row && out[last] === '') last--;
       const want = last + 1;
+      // DID THE FRAME SCROLL? A program answering wheel reports moves
+      // EXISTING rows to new indices; a status tick or a streaming token
+      // changes rows in place. The distinction is the only trustworthy
+      // consumption signal the wheel pacing in app.js has -- paints that
+      // merely changed something turned out to fire constantly while an
+      // agent works, and pacing on them flooded the pty (that story is
+      // told at the wheel handler). Detected by the dominant row shift:
+      // the d for which most non-empty new rows equal the old row d
+      // further down, required to beat the rows that did NOT move so a
+      // ticking status line or a near-uniform screen cannot fake it.
+      let shift = 0;
+      {
+        let zero = 0;
+        for (let r = 0; r < want; r++) {
+          if (out[r] !== '' && liveHTML[r] === out[r]) zero++;
+        }
+        let best = 0, bestCount = 0;
+        for (let d = -8; d <= 8; d++) {
+          if (d === 0) continue;
+          let count = 0;
+          for (let r = 0; r < want; r++) {
+            const prev = liveHTML[r + d];
+            if (out[r] !== '' && prev !== undefined && prev === out[r]) count++;
+          }
+          if (count > bestCount) { bestCount = count; best = d; }
+        }
+        if (bestCount > zero && bestCount >= 3) shift = best;
+      }
       let changed = false;
       while (liveDivs.length > want) {
         liveEl.removeChild(liveDivs.pop());
@@ -716,7 +746,7 @@ export function makeTerminal(screen, options = {}) {
           changed = true;
         }
       }
-      return [scrollback.length + want, changed];
+      return [scrollback.length + want, changed, shift];
     }
 
     // Headless: the whole view as one string, exactly as before the split.
@@ -731,7 +761,7 @@ export function makeTerminal(screen, options = {}) {
     let last = out.length - 1;
     while (last > cursorRow && out[last] === '') last--;
     screen.innerHTML = out.slice(0, last + 1).join('\n');
-    return [last + 1, true];
+    return [last + 1, true, 0];
   }
 
   function escapeHtml(text) {

@@ -327,6 +327,32 @@ function domScreen() {
 }
 
 {
+  // THE SHIFT DETECTOR: the one consumption signal the wheel pacing can
+  // trust. A frame whose rows MOVED to new indices is a program answering
+  // scroll reports; a frame that changed in place -- a ticking status line,
+  // a streaming token -- is an agent working, and pacing on those floods
+  // the pty (the wheel handler in app.js tells that story).
+  const s = domScreen();
+  const shifts = [];
+  const t = makeTerminal(s, { rows: 16, cols: 30, showCursor: false,
+                              onPaint: (_l, _c, shift) => shifts.push(shift) });
+  const frame = (start, tick) => '\x1b[H\x1b[2J' + `status tick ${tick}\r\n`
+    + Array.from({ length: 12 }, (_, i) => `line-${start + i}`).join('\r\n');
+  t.write(frame(0, 1));
+  check('the first frame has nothing to have moved from',
+        shifts[shifts.length - 1], 0);
+  t.write(frame(0, 2));
+  check('a status tick repaints in place: no shift',
+        shifts[shifts.length - 1], 0);
+  t.write(frame(3, 2));
+  ok('a scrolled repaint reports its displacement',
+     shifts[shifts.length - 1] !== 0);
+  t.write(frame(3, 3));
+  check('and the next tick is in place again',
+        shifts[shifts.length - 1], 0);
+}
+
+{
   // The cap trims the DOM alongside the model.
   const s = domScreen();
   const t = makeTerminal(s, { rows: 2, cols: 10, showCursor: false, scrollback: 3 });
