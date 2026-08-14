@@ -244,7 +244,7 @@
   (def here (os/realpath (string (dyn :current-file) "/..")))
   (def web-dir (string here "/web"))
   (def config-path (string root "/" config-name))
-  (def specs (parsers/load (string here "/parsers")))
+  (def specs (parsers/load (string here "/src/parsers")))
   (def token (make-token))
 
   # The terminal lives in another process, so that this one can be restarted

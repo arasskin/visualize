@@ -2,7 +2,7 @@
 #
 # This file names no language either. It finds the files some parser claims,
 # hands each one to a worker thread, and turns the answers into a graph. The
-# only language-specific things in the process are the specs in `parsers/`,
+# only language-specific things in the process are the specs in `src/parsers/`,
 # which arrive as data.
 #
 # WHY THREADS. The scan is the slow half -- reading a few thousand files and

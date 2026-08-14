@@ -6,10 +6,10 @@
 
 (import ../src/parser :as parser)
 (import ../src/scan)
-(import ../parsers/swift)
-(import ../parsers/python)
-(import ../parsers/go)
-(import ../parsers/javascript :as js)
+(import ../src/parsers/swift)
+(import ../src/parsers/python)
+(import ../src/parsers/go)
+(import ../src/parsers/javascript :as js)
 (import ./harness :as t)
 
 (defn- swift [text] (parser/run swift/spec text "T.swift"))

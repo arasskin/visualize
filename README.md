@@ -141,7 +141,7 @@ it dies with the tab), and required on every terminal request alongside an
 
 ## Adding a language
 
-Drop a file in `parsers/`. Nothing else in the tree knows languages exist —
+Drop a file in `src/parsers/`. Nothing else in the tree knows languages exist —
 `src/parsers.janet` finds them by looking, so there is no registry to update.
 
 A spec is data:
@@ -211,7 +211,8 @@ vendor/janet/       the Janet runtime, amalgamated: three files, no deps
 visualize.janet     entry point: the server's two endpoints
 src/scan.janet      walk the tree, read every file on all cores, build the graph
 src/parser.janet    what a language spec is, and how one is run
-src/parsers.janet   find the specs in parsers/ at runtime
+src/parsers.janet   find the specs in src/parsers/ at runtime
+src/parsers/        one file per language
 src/pty.janet       a pseudo-terminal, via libc's forkpty through the FFI
 src/harness.janet   the agent session, both halves: the owner (run as
                     `visualize --supervise`, outliving the server) and the
@@ -224,7 +225,6 @@ src/http.janet      just enough HTTP for one browser on localhost
 src/json.janet      just enough JSON for the browser protocol
 web/term.js         a terminal emulator, in the ~25 sequences agents emit
 web/                the page: vanilla HTML, CSS and JS, no build step
-parsers/            one file per language
 test/               236 assertions, no framework
 bin/janet           the compiled runtime (gitignored build artifact)
 ```
