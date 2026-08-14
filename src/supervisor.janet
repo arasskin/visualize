@@ -206,7 +206,42 @@
 
     (= op "stop") [(stop) false]
 
-    (= op "input") (do (send (string (get message "text" ""))) [{"ok" true} false])
+    # INPUT ANSWERS WITH THE ECHO, which is what makes typing feel immediate.
+    #
+    # Polling to discover the effect of your own keystroke is the wrong shape:
+    # even with no delay at all it costs a second round trip, because the page
+    # has to wait for the input request to come back before it can ask what
+    # happened. Answering here collapses that into one.
+    #
+    # The wait is short and bounded. A terminal in its normal (cooked, echoing)
+    # mode turns a keystroke around in well under a millisecond, so this
+    # returns almost immediately; a program that echoes nothing -- a password
+    # prompt, an agent mid-thought -- costs the timeout once and the ordinary
+    # poll picks up whatever comes later. Nothing is lost either way: the
+    # backlog is the record, and this reply is only an early look at it.
+    (= op "input")
+    (let [at (number-at "at" -1)
+          before (length backlog)]
+      (send (string (get message "text" "")))
+      # Wait for the pump to produce something, checking often. `drain` is what
+      # moves the pty's output into the backlog, and the timer in
+      # `keep-draining` is doing it too -- this just gets there sooner.
+      (var waited 0)
+      (while (and (< waited 24) (= (length backlog) before))
+        (++ waited)
+        (ev/sleep 0.002)
+        (drain))
+      (if (neg? at)
+        # An older page that does not send `at` gets the old answer.
+        [{"ok" true} false]
+        (let [[text next] (since at)
+              now (state)]
+          [{"ok" true
+            "text" text
+            "at" next
+            "running" (now "running")
+            "generation" (now "generation")}
+           false])))
 
     (= op "resize")
     (do (resize (number-at "rows" 24) (number-at "cols" 100))

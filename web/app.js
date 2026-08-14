@@ -773,19 +773,46 @@ screen.addEventListener('keydown', (event) => {
   if (!bytes) return;
   event.preventDefault();
   event.stopPropagation();
-  harnessPost('input', { text: bytes }).catch(() => setState('disconnected'));
-  // Do not wait for the next scheduled poll to see the echo. A keystroke is
-  // the one moment a person is actively watching for a response, and sitting
-  // behind an idle delay is most of what "laggy" means here.
-  pollSoon();
+  sendInput(bytes);
 });
+
+// Type, and draw whatever came back.
+//
+// THE ECHO RIDES HOME ON THE SAME REQUEST. Asking for it separately costs a
+// second round trip no matter how short the poll delay is, because the page
+// cannot start that second request until the first has returned -- and while
+// it waited, the scheduler was just as likely to have armed the idle timer.
+// This is the difference between a character appearing as you press the key
+// and appearing a quarter of a second later.
+function sendInput(text) {
+  if (!text) return;
+  harnessPost('input', { text, at })
+    .then((out) => {
+      if (!out || out.text === undefined) return;
+      if (out.generation !== generation) {
+        generation = out.generation;
+        at = 0;
+        term.reset();
+      }
+      if (out.text) {
+        term.write(out.text);
+        at = out.at;
+        lastOutput = performance.now();
+        const body = harnessRoot.querySelector('.panel-body');
+        body.scrollTop = body.scrollHeight;
+      }
+      // Whatever follows the echo -- a command's output, an agent's answer --
+      // arrives on the polling loop, which is now in its fast mode.
+      pollSoon();
+    })
+    .catch(() => setState('disconnected'));
+}
 
 // Paste, which a harness is used with constantly.
 screen.addEventListener('paste', (event) => {
   event.preventDefault();
   const text = event.clipboardData.getData('text');
-  if (text) harnessPost('input', { text }).catch(() => {});
-  pollSoon();
+  if (text) sendInput(text);
 });
 
 const harnessPanel = makePanel(harnessRoot, {

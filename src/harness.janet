@@ -145,10 +145,24 @@
   (session-state (ask {"op" "stop"})))
 
 (defn send
-  "Type at the harness."
-  [text]
-  (ask {"op" "input" "text" text})
-  nil)
+  ``Type at the harness.
+
+  With `at`, the reply carries the ECHO -- everything the program printed in
+  response, in the same round trip. That is what makes typing feel immediate:
+  polling for the effect of your own keystroke costs a second round trip even
+  when the delay between polls is zero, because the page has to wait for this
+  request to return before it can ask what happened.
+
+  Without `at` it answers {"ok" true} as it always did.``
+  [text &opt at]
+  (def reply (ask (if at
+                    {"op" "input" "text" text "at" at}
+                    {"op" "input" "text" text})))
+  (when (and reply (get reply "text"))
+    {"text" (get reply "text")
+     "at" (or (get reply "at") at)
+     "running" (truthy? (get reply "running"))
+     "generation" (or (get reply "generation") 0)}))
 
 (defn resize
   "Tell the harness its window changed size."

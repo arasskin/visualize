@@ -219,6 +219,33 @@
              "asking must not bump the generation -- that would mean a restart")
   (harness/stop))
 
+(check/test "typing answers with its own echo, in one round trip"
+  # THE FIRST-KEYSTROKE LAG. Polling to discover the effect of your own
+  # keystroke costs a SECOND round trip even when the delay between polls is
+  # zero: the page cannot start that request until the input request has come
+  # back, and by then the scheduler has usually armed the idle timer -- 250ms
+  # before the character appears. Answering here collapses it into one trip.
+  (harness/start ["/bin/sh" "-i"] (os/cwd) 24 80)
+  (ev/sleep 0.4)
+  (def [_ at] (harness/since 0))
+  (def echoed (harness/send "Q" at))
+  (check/ok echoed "input answers with a body rather than just ok")
+  (check/ok (string/find "Q" (get echoed "text" ""))
+            "and the body carries the character the terminal echoed")
+  (check/ok (> (get echoed "at" 0) at)
+            "the position advances, so the next poll does not repeat it")
+  (harness/stop))
+
+(check/test "typing without a position still works"
+  # An older page does not send `at`, and must not break -- the reply is the
+  # bare acknowledgement it expects, and its polling loop picks the echo up.
+  (harness/start ["/bin/sh" "-i"] (os/cwd) 24 80)
+  (ev/sleep 0.4)
+  (check/is= nil (harness/send "echo NO-POSITION\n"))
+  (def [found _] (wait-for |(string/find "\nNO-POSITION" $)))
+  (check/ok found "the keystroke still reached the program")
+  (harness/stop))
+
 (check/test "shutdown ends the supervisor and takes the socket with it"
   # What ctrl-c does. Also this suite's teardown: leaving a supervisor behind
   # would make the next run adopt a session it did not start, and the tests

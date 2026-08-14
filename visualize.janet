@@ -321,8 +321,13 @@
       (and (= method "POST") (= path "/harness/input"))
       (guarded (fn []
                  (def sent (json/decode (request :body)))
-                 (harness/send (string (get sent "text" "")))
-                 ["200 OK" "application/json" (json/encode {"ok" true})]))
+                 # `at` turns this into "type, and tell me what came back" --
+                 # one round trip for a keystroke and its echo. See `send`.
+                 (def echo (harness/send (string (get sent "text" ""))
+                                         (when-let [a (get sent "at")]
+                                           (math/floor a))))
+                 ["200 OK" "application/json"
+                  (json/encode (or echo {"ok" true}))]))
 
       (and (= method "POST") (= path "/harness/resize"))
       (guarded (fn []
