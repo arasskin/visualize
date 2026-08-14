@@ -316,8 +316,18 @@
         (unless connection (break))
         (ev/go (fn [] (try (answer connection) ([err] (eprintf "supervisor: %s" (string err)))))))))
   (ev/take done)
+  (try (stop) ([_] nil))          # the agent goes with us
   (try (:close server) ([_] nil))
-  (try (os/rm path) ([_] nil)))
+  (try (os/rm path) ([_] nil))
+  # EXIT EXPLICITLY. Returning from here is not enough: `keep-draining` and the
+  # accept loop are `forever` fibers, and Janet keeps running while any task is
+  # scheduled -- so the process outlived its own shutdown, printing "stopping
+  # the harness" while the supervisor stayed up. The next run then found a live
+  # socket, connected to the OLD supervisor, and the errors began.
+  #
+  # There is nothing left to unwind at this point: the socket is closed, its
+  # file is gone, and the pty has been killed.
+  (os/exit 0))
 
 (defn main [& args]
   (def path (get args 1))
