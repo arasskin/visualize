@@ -29,12 +29,20 @@
 # The page runs that file on load, so the view you left is the view you return
 # to. Every button press is a real edit to the real file.
 
-# DEV MODE IS DECIDED BEFORE ANYTHING COMPILES. `--dev` hosts a repl inside
-# the running server (see visualize/dev.janet) and turns on `*redef*`, which
-# is a property of code generation, not of runtime: set after the imports
-# below, the engine would already be compiled to constants and a repl
-# redefinition would silently change nothing.
-(def dev? (truthy? (index-of "--dev" (or (dyn *args*) []))))
+# DEV MODE IS THE DEFAULT, DECIDED BEFORE ANYTHING COMPILES. Every server run
+# hosts a repl inside itself (see visualize/dev.janet) and turns on `*redef*`,
+# which is a property of code generation, not of runtime: set after the
+# imports below, the engine would already be compiled to constants and a repl
+# redefinition would silently change nothing. `--no-dev` opts out; `--dev` is
+# accepted for old habits and changes nothing.
+#
+# The SUPERVISOR is not a dev surface: it hosts no repl, it owns the agent's
+# pty, and it was never compiled under *redef* before -- the server spawned it
+# without the flag. Excluding it here preserves exactly that.
+(def dev?
+  (let [argv (or (dyn *args*) [])]
+    (not (or (index-of "--no-dev" argv)
+             (index-of "--supervise" argv)))))
 (when dev? (put root-env *redef* true))
 
 (import ./visualize/scan)
@@ -255,9 +263,9 @@
     (harness/supervise path)
     (os/exit 0))
 
-  # `--dev` was consumed at load (it had to be -- see the top of this file);
-  # here it just must not be mistaken for the directory.
-  (def args (filter |(not= "--dev" $) args))
+  # The dev flags were consumed at load (they had to be -- see the top of
+  # this file); here they just must not be mistaken for the directory.
+  (def args (filter |(not (index-of $ ["--dev" "--no-dev"])) args))
   (def root (os/realpath (or (get args 1) (os/cwd))))
   (def here (os/realpath (string (dyn :current-file) "/..")))
   (def web-dir (string here "/web"))
@@ -276,12 +284,6 @@
   (harness/configure socket
                      [(string here "/bin/janet") (string here "/visualize.janet")
                       "--supervise" socket])
-
-  # The dev repl: this process's own image on a unix socket, evaluating in an
-  # env that sees everything this file sees. Only under --dev, because it
-  # runs whatever connects -- see the security note on dev/serve.
-  (def repl-socket (when dev? (socket-for root ".repl.sock")))
-  (when dev? (dev/serve repl-socket this-env))
 
   (defn permitted?
     ``May this request drive the terminal?
@@ -440,6 +442,17 @@
     (http/serve default-port port-tries (if dev? (dev/watched handler) handler)))
   (def url (string "http://127.0.0.1:" bound))
 
+  # The dev repl: this process's own image on a unix socket, evaluating in an
+  # env that sees everything this file sees. It runs whatever connects -- see
+  # the security note on dev/serve. Now that every run hosts one, the name is
+  # keyed to the BOUND PORT as well as the root: the live server and a sandbox
+  # developing it share a root, and a name both computed from the root alone
+  # would be stolen by whichever bound last -- dev/serve deletes and rebinds a
+  # taken name on purpose. The port is the one thing the walk just made
+  # unique, which is why this waits until after the bind.
+  (def repl-socket (when dev? (socket-for root (string ".repl." bound ".sock"))))
+  (when dev? (dev/serve repl-socket this-env))
+
   # CTRL-C TAKES THE AGENT WITH IT, and this is the only thing that does.
   #
   # The terminal now lives in another process precisely so the server can die
@@ -456,6 +469,10 @@
                        (print)
                        (print "visualize: stopping the harness")
                        (try (harness/shutdown) ([_] nil))
+                       # The repl socket dies with its server, so its name
+                       # should too: every run mints one now, and the port in
+                       # the name means a restart rarely reclaims yesterday's.
+                       (when repl-socket (try (os/rm repl-socket) ([_] nil)))
                        (os/exit 0)))
 
   (printf "visualize: %s on %s" root url)

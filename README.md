@@ -261,17 +261,19 @@ error messages arriving as `null`.
 ## Developing it from inside
 
 ```bash
-./run --dev ~/code/project
+./run ~/code/project
 # ...
-#   repl: nc -U /tmp/visualize-1a2b3c4d.repl.sock
+#   repl: nc -U /tmp/visualize-1a2b3c4d.repl.8770.sock
 ```
 
-`--dev` makes the running server host a repl on a unix socket — the Swank
-arrangement, because the stock stdin repl would freeze the event loop while
-its prompt waited, and because Janet compiles defs to constants, so
-redefinition only reaches compiled callers when `*redef*` is switched on
-**before** anything compiles. That is why it is a launch flag and not a
-runtime toggle.
+Every run hosts a repl on a unix socket — the Swank arrangement, because the
+stock stdin repl would freeze the event loop while its prompt waited, and
+because Janet compiles defs to constants, so redefinition only reaches
+compiled callers when `*redef*` is switched on **before** anything compiles.
+That is why dev mode is decided at launch — on by default, `--no-dev` to opt
+out — and not a runtime toggle. The socket name carries the server's port,
+so the live server and a sandbox developing it, sharing one project root,
+each keep their own.
 
 Connect and you are in the server's own image: every module under its prefix,
 every def in `visualize.janet` by name. From there:

@@ -24,7 +24,8 @@
         (let [env (dofile path)
               entry (get env 'spec)
               # Two shapes, one meaning: a def compiles to {:value v}
-              # normally and to a box -- {:ref @[v]} -- under --dev, where
+              # normally and to a box -- {:ref @[v]} -- in dev mode (the
+              # default), where
               # `*redef*` makes every binding an indirection so the repl can
               # swap it. A reader of environments has to accept both.
               spec (when entry (or (entry :value) (first (or (entry :ref) @[]))))]
