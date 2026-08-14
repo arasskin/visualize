@@ -618,6 +618,7 @@
       (try (:close pinned) ([_] nil))
       (set pinned nil)))
 
+
   # A connection to the supervisor, or nil if nothing is listening.
   #
   # The stat comes first because it is free: a `net/connect` that fails still
@@ -628,6 +629,37 @@
   (defn connect []
     (when (and path (os/stat path :mode))
       (try (net/connect :unix path) ([_] nil))))
+
+  # THE PARK CONNECTION, standing like the pinned one and for the same
+  # reason. Wait-polls used to open a fresh unix socket per park, and during
+  # a scroll the parked poll wakes and re-parks tens of times a second --
+  # tens of connections a second churning the process's lowest fd numbers,
+  # which is precisely the regime that tickles the macOS fd-reuse race the
+  # pinned connection was built to end (see the note above it). Every reply
+  # that race dropped knocked the page out of its streaming chain into
+  # retry cadence: the intermittent multi-second hangs that survived four
+  # redesigns of wheel pacing, because they were never about the wheel.
+  # One page parks one poll at a time, so one standing connection serves;
+  # a second concurrent park -- another tab -- falls back to a fresh
+  # connection rather than queueing 20 seconds behind the first.
+  (var parked-conn nil)
+  (var parked-busy false)
+
+  (defn park-talk [message deadline]
+    (if parked-busy
+      (when-let [conn (connect)]
+        (defer (:close conn)
+          (try (talk conn message deadline) ([_] nil))))
+      (do
+        (set parked-busy true)
+        (defer (set parked-busy false)
+          (when (nil? parked-conn) (set parked-conn (connect)))
+          (when parked-conn
+            (def reply (try (talk parked-conn message deadline) ([_] nil)))
+            (unless reply
+              (try (:close parked-conn) ([_] nil))
+              (set parked-conn nil))
+            reply)))))
 
   # Start the supervisor so that it outlives this process.
   #
@@ -798,11 +830,9 @@
                    (not (empty? (get quick "text" "")))
                    (not (truthy? (get quick "running"))))
              quick
-             (if-let [conn (connect)]
-               (defer (:close conn)
-                 (put message "wait" wait)
-                 (try (talk conn message (+ 10 (/ wait 1000))) ([_] nil)))
-               quick)))
+             (do
+               (put message "wait" wait)
+               (or (park-talk message (+ 10 (/ wait 1000))) quick))))
          (ask message)))
      (if reply
        {"text" (or (get reply "text") "")
@@ -849,8 +879,11 @@
    (fn [_]
      (ask {"op" "shutdown"})
      # The supervisor is gone; a conn pinned to it would cost the next caller
-     # a dead-connection retry for nothing.
+     # a dead-connection retry for nothing. The park connection likewise.
      (drop-pinned)
+     (when parked-conn
+       (try (:close parked-conn) ([_] nil))
+       (set parked-conn nil))
      nil)})
 
 # -- the default client -------------------------------------------------------

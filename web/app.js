@@ -639,15 +639,10 @@ function makeTerminalPane(root, prefix) {
   // to ~30ms, which is the regime iTerm lives in. The frames can simply be
   // shown.
   const term = makeTerminal(screen, {
-    onPaint: (lines, changed, shift) => {
+    onPaint: (lines) => {
       const grew = lines !== paintedLines;
       paintedLines = lines;
       if (grew && following) paneBody.scrollTop = paneBody.scrollHeight;
-      // A paint whose rows MOVED is a program answering scroll reports;
-      // one that merely changed is an agent working. Only the first
-      // releases the next batch -- see the wheel pacing below, and the
-      // shift detector in term.js for how the two are told apart.
-      if (shift !== 0) wheelBatchDone();
     },
   });
   let at = 0;              // how much of the session output we have consumed
@@ -976,54 +971,55 @@ function makeTerminalPane(root, prefix) {
   // pty and the transcript scrolled. With tracking off (the repl, a shell)
   // the wheel keeps scrolling the pane's own scrollback, and shift forces
   // that path the way real terminals do under a mouse-hungry program.
-  // BATCHED, AND PACED BY THE ANSWERING REPAINT. A trackpad fires dozens of
-  // wheel events a second and momentum keeps firing them after the fingers
-  // stop. Three pacing designs died here, each teaching the next: a report
-  // per event flooded the wire; a 16ms timer outran the server's input
-  // turnaround and banked seconds of backlog CLIENT-side; and pacing by our
-  // own POST completion (~3ms once reports went quiet) just moved the
-  // backlog across the pty -- WE finished sending instantly while claude
-  // consumed reports at its own repaint rate, and its stdin held the queue
-  // that kept scrolling after the fingers stopped.
-  //
-  // The consumer sets the pace, and the consumer speaks -- but only one
-  // signal it sends is trustworthy. The fourth design paced on any changed,
-  // non-growing paint, and hung WORSE than the third: an agent at work
-  // repaints in place constantly (a ticking status line, streaming tokens),
-  // every such paint released another batch, and the flood returned with a
-  // bigger budget behind it. The signal that cannot lie is the SHIFT: a
-  // program answering scroll reports moves existing rows to new indices,
-  // and nothing else does that. A shifted paint (term.js detects the
-  // dominant row displacement) releases the next batch; a 250ms backstop
-  // covers a program with nothing to answer -- at the top of its
-  // transcript, say -- where nothing is moving anyway.
-  //
+  // BATCHED, PACED BY COMPLETION, WITH A RATE FLOOR. A trackpad fires
+  // dozens of wheel events a second and momentum keeps firing them after
+  // the fingers stop. This corner has burned four designs, and the survivor
+  // is the simplest that held up in use: at most one batch in flight, the
+  // next leaving when the last one lands and never sooner than 30ms after
+  // it -- a ceiling near 260 rows/s, above any rate a person can follow.
   // Deltas accumulate between batches (the carry keeps fractions from
-  // rounding to nothing), with two screenfuls of momentum budget and a 2x
-  // gain, tuned against iTerm's feel. Excess beyond the budget is dropped,
-  // never owed. Reports go `quiet`: their answer arrives on the parked
-  // poll, so the input reply's echo wait bought nothing. Coordinates are
-  // read in the flush, off the hot path.
+  // rounding to nothing), clamped to a screenful; excess momentum is
+  // dropped, never owed. A 2x gain tunes the per-tick feel toward iTerm.
+  //
+  // The two clever successors are recorded here so they are not rebuilt.
+  // Pacing on the answering repaint (any changed, non-growing paint)
+  // flooded the pty whenever the agent was WORKING -- its ticking status
+  // line and streaming tokens are exactly such paints, and each one
+  // released a batch. Pacing on the detected row SHIFT (see term.js, which
+  // still reports it) was causally sound and still felt hung: when the
+  // detector missed -- an unmatched frame, a program that scrolls more
+  // than the probe range -- the fallback cadence crawled. A dumb bounded
+  // rate degrades gently everywhere instead of sharply somewhere.
+  // Reports go `quiet`: their answer arrives on the parked poll, so the
+  // input reply's echo wait bought nothing. Coordinates are read in the
+  // flush, off the hot path.
   const WHEEL_GAIN = 2;
-  let wheelCarry = 0, wheelQueued = 0, wheelFlush = null;
-  let wheelAwait = null;   // backstop timer while a batch awaits its repaint
+  const WHEEL_GAP = 30;
+  let wheelCarry = 0, wheelQueued = 0, wheelFlush = null, wheelInFlight = false;
+  let wheelLastSend = 0;
   let wheelLast = { x: 0, y: 0 };
-  function wheelBatchDone() {
-    if (wheelAwait === null) return;
-    clearTimeout(wheelAwait);
-    wheelAwait = null;
-    flushWheel();
-  }
   function flushWheel() {
-    if (wheelAwait !== null || wheelQueued === 0) return;
+    if (wheelInFlight || wheelQueued === 0) return;
+    const wait = wheelLastSend + WHEEL_GAP - performance.now();
+    if (wait > 0) {
+      if (wheelFlush === null) {
+        wheelFlush = setTimeout(() => { wheelFlush = null; flushWheel(); }, wait);
+      }
+      return;
+    }
     const n = Math.max(-8, Math.min(8, wheelQueued));
     wheelQueued -= n;
     const box = cellSize();
     const rect = screen.getBoundingClientRect();
     const col = Math.max(1, Math.min(term.cols, Math.floor((wheelLast.x - rect.left) / box.w) + 1));
     const row = Math.max(1, Math.min(term.rows, Math.floor((wheelLast.y - rect.top) / box.h) + 1));
-    wheelAwait = setTimeout(wheelBatchDone, 250);
-    sendInput(`\x1b[<${n < 0 ? 64 : 65};${col};${row}M`.repeat(Math.abs(n)), true);
+    wheelInFlight = true;
+    wheelLastSend = performance.now();
+    sendInput(`\x1b[<${n < 0 ? 64 : 65};${col};${row}M`.repeat(Math.abs(n)), true)
+      .finally(() => {
+        wheelInFlight = false;
+        flushWheel();
+      });
   }
   screen.addEventListener('wheel', (event) => {
     if (!term.mouseReporting || event.shiftKey) return;
@@ -1033,13 +1029,9 @@ function makeTerminalPane(root, prefix) {
       * (event.deltaMode === 1 ? event.deltaY : event.deltaY / cellSize().h);
     const n = Math.trunc(wheelCarry);
     wheelCarry -= n;
-    const budget = 2 * term.rows;
-    wheelQueued = Math.max(-budget, Math.min(budget, wheelQueued + n));
+    wheelQueued = Math.max(-term.rows, Math.min(term.rows, wheelQueued + n));
     wheelLast = { x: event.clientX, y: event.clientY };
-    // One short timer coalesces the burst a single gesture-frame delivers;
-    // after it, answering repaints drive the cadence.
-    if (wheelFlush !== null || wheelAwait !== null || wheelQueued === 0) return;
-    wheelFlush = setTimeout(() => { wheelFlush = null; flushWheel(); }, 16);
+    if (wheelQueued !== 0) flushWheel();
   }, { passive: false });
 
   const termPanel = makePanel(root, {
