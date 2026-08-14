@@ -264,13 +264,50 @@
   (array/push out "}")
   (string/join out "\n"))
 
+# ONE `dot` AT A TIME, and this is not an optimisation -- it is what keeps the
+# server alive.
+#
+# Every render spawns graphviz with three pipes and drains them on three
+# fibers. Concurrent requests multiply that: a dozen page loads at once means a
+# dozen subprocesses and three dozen pipes, and the server WEDGES -- measured,
+# with twelve parallel loads, after which it answered nothing at all. A browser
+# produces exactly that shape whenever a reload races the polling loop, which
+# is how "request failed: Bad file descriptor" reached the terminal.
+#
+# Serialising costs nothing real. Renders are milliseconds, the graph is
+# identical for identical input, and a queue of two is already the pathological
+# case. A semaphore of one is the whole fix.
+(def- one-at-a-time @{:busy false :waiting @[]})
+
+(defn- take-turn []
+  (if (one-at-a-time :busy)
+    (let [ticket (ev/chan 1)]
+      (array/push (one-at-a-time :waiting) ticket)
+      (ev/take ticket))
+    (put one-at-a-time :busy true)))
+
+(defn- give-turn []
+  (if (empty? (one-at-a-time :waiting))
+    (put one-at-a-time :busy false)
+    # `array/remove` answers with the ARRAY, not the element it took out, so
+    # the ticket has to be read before removing it.
+    (let [ticket (get (one-at-a-time :waiting) 0)]
+      (array/remove (one-at-a-time :waiting) 0)
+      (ev/give ticket true))))
+
 (defn to-svg
   ``Lay the DOT out with graphviz. Returns [ok svg-or-error].
 
   The one external dependency, and a deliberate one: `dot` is a compiler for
   this tool, not a library to vendor. Its Sugiyama layout is decades of work
-  that a hand-rolled one would only approximate.``
+  that a hand-rolled one would only approximate.
+
+  Runs one at a time; see the note above `one-at-a-time`.``
   [text &opt cwd]
+  (take-turn)
+  # `defer`, so the turn is returned however this ends -- including the paths
+  # that error out. A render that kept the turn would stop every later one.
+  (defer (give-turn)
   (def proc (try
               (os/spawn ["dot" "-Tsvg"] :px
                         {:in :pipe :out :pipe :err :pipe :cd (or cwd (os/cwd))})
@@ -304,4 +341,4 @@
       (if (zero? code)
         [true (string collected)]
         [false (let [why (string/trim (string errors))]
-                 (if (empty? why) "dot failed" why))]))))
+                 (if (empty? why) "dot failed" why))])))))

@@ -115,6 +115,31 @@
   (t/ok (not (string/find "SwiftUI\\n" text))
         "an external has no file behind it and is left alone"))
 
+(t/test "concurrent renders do not wedge the process"
+  # THE BUG THIS EXISTS FOR. Every render spawns graphviz with three pipes and
+  # drains them on three fibers. A dozen at once -- which is what a browser
+  # produces when a reload races the polling loop -- meant a dozen subprocesses
+  # and three dozen pipes, and the server stopped answering anything at all.
+  # The terminal showed "request failed: Bad file descriptor" on the way down.
+  #
+  # `to-svg` now takes a turn, so this is a queue rather than a stampede. Ten
+  # is comfortably past where it used to fail.
+  (def text (dot/render (sample)))
+  (def results @[])
+  # Started all at once, then waited for together -- which is the stampede the
+  # semaphore has to turn into a queue. `ev/gather` is a macro and cannot take
+  # a spliced list, so each fiber reports to a channel and they are counted in.
+  (def finished (ev/chan 16))
+  (repeat 10
+    (ev/go (fn []
+             (array/push results (first (dot/to-svg text)))
+             (ev/give finished true))))
+  (repeat 10 (ev/take finished))
+  (t/is= 10 (length results) "every render finished")
+  (t/ok (all truthy? results) "and each one succeeded")
+  # The turn must be handed back afterwards, or the NEXT render waits forever.
+  (t/ok (first (dot/to-svg text)) "a render after the burst still works"))
+
 (t/test "labels with quotes cannot break out of the DOT string"
   (def odd {:nodes [{:name "N" :label `He said "hi"` :ours true}]
             :edges [] :sizes {} :ours {"N" true}})
