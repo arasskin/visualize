@@ -29,13 +29,27 @@
 # The page runs that file on load, so the view you left is the view you return
 # to. Every button press is a real edit to the real file.
 
-(import ./src/scan)
-(import ./src/dot)
-(import ./src/config)
-(import ./src/http)
-(import ./src/parsers)
-(import ./src/json)
-(import ./src/harness)
+# DEV MODE IS DECIDED BEFORE ANYTHING COMPILES. `--dev` hosts a repl inside
+# the running server (see visualize/dev.janet) and turns on `*redef*`, which
+# is a property of code generation, not of runtime: set after the imports
+# below, the engine would already be compiled to constants and a repl
+# redefinition would silently change nothing.
+(def dev? (truthy? (index-of "--dev" (or (dyn *args*) []))))
+(when dev? (put root-env *redef* true))
+
+(import ./visualize/scan)
+(import ./visualize/dot)
+(import ./visualize/config)
+(import ./visualize/http)
+(import ./visualize/parsers)
+(import ./visualize/json)
+(import ./visualize/harness)
+(import ./visualize/dev)
+
+# The env the dev repl evaluates in protos to THIS one, captured at load so
+# a connection sees the same names this file sees -- every module above,
+# prefixed, and everything defined below.
+(def- this-env (curenv))
 
 # Where to start looking, not where it will land. `serve` walks upward to the
 # first free port -- another copy of this tool is often already up in another
@@ -211,7 +225,8 @@
   on this platform and $TMPDIR alone is half of that. A deep project path
   would overflow it, and the failure is a bind error rather than a truncation
   you could notice.``
-  [root]
+  [root &opt tag]
+  (default tag ".sock")
   (def base (string/trimr (or (os/getenv "TMPDIR") "/tmp") "/"))
   # A cheap, stable digest: the path never leaves this machine, so this is
   # only asking for "different directories, different names".
@@ -225,12 +240,12 @@
   (var digest 5381)
   (each byte (string/trimr root "/")
     (set digest (% (+ (* digest 33) byte) 0x7fffffff)))
-  (string base "/visualize-" (string/format "%08x" digest) ".sock"))
+  (string base "/visualize-" (string/format "%08x" digest) tag))
 
 (defn main [& args]
   # ONE PROGRAM, TWO ROLES. Run plainly, this is the web server. Run with
   # --supervise it is the process that owns the terminal, spawned by the
-  # server's own client half and outliving it -- see src/harness.janet for
+  # server's own client half and outliving it -- see visualize/harness.janet for
   # why the pty cannot live here. Orchestrating both roles from this one
   # entry point means there is exactly one program to install, one to spawn,
   # and one place that knows how the pieces fit.
@@ -240,15 +255,18 @@
     (harness/supervise path)
     (os/exit 0))
 
+  # `--dev` was consumed at load (it had to be -- see the top of this file);
+  # here it just must not be mistaken for the directory.
+  (def args (filter |(not= "--dev" $) args))
   (def root (os/realpath (or (get args 1) (os/cwd))))
   (def here (os/realpath (string (dyn :current-file) "/..")))
   (def web-dir (string here "/web"))
   (def config-path (string root "/" config-name))
-  (def specs (parsers/load (string here "/src/parsers")))
+  (def specs (parsers/load (string here "/visualize/parsers")))
   (def token (make-token))
 
   # The terminal lives in another process, so that this one can be restarted
-  # without killing the agent -- see src/harness.janet. Told where to find it
+  # without killing the agent -- see visualize/harness.janet. Told where to find it
   # and how to start one, both of which only this function knows.
   #
   # The path is computed ONCE and passed twice: the address we look on and the
@@ -258,6 +276,12 @@
   (harness/configure socket
                      [(string here "/bin/janet") (string here "/visualize.janet")
                       "--supervise" socket])
+
+  # The dev repl: this process's own image on a unix socket, evaluating in an
+  # env that sees everything this file sees. Only under --dev, because it
+  # runs whatever connects -- see the security note on dev/serve.
+  (def repl-socket (when dev? (socket-for root ".repl.sock")))
+  (when dev? (dev/serve repl-socket this-env))
 
   (defn permitted?
     ``May this request drive the terminal?
@@ -410,7 +434,10 @@
 
       ["404 Not Found" "text/plain" "not found"]))
 
-  (def [server bound accept-loop] (http/serve default-port port-tries handler))
+  # In dev mode every request runs under the watcher, so a crash is a fiber
+  # in dev/crashed and a breakpoint parks the request instead of losing it.
+  (def [server bound accept-loop]
+    (http/serve default-port port-tries (if dev? (dev/watched handler) handler)))
   (def url (string "http://127.0.0.1:" bound))
 
   # CTRL-C TAKES THE AGENT WITH IT, and this is the only thing that does.
@@ -434,6 +461,7 @@
   (printf "visualize: %s on %s" root url)
   (printf "  config: %s" config-path)
   (printf "  parsers: %s" (string/join (map |($ :name) specs) ", "))
+  (when dev? (printf "  repl: nc -U %s" repl-socket))
   (print "  ctrl-c to stop")
   # Off the server, not off the constant: they differ whenever the first
   # choice was taken, and printing the wrong one sends you to somebody else's

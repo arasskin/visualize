@@ -2,7 +2,7 @@
 #
 # This file names no language either. It finds the files some parser claims,
 # hands each one to a worker thread, and turns the answers into a graph. The
-# only language-specific things in the process are the specs in `src/parsers/`,
+# only language-specific things in the process are the specs in `visualize/parsers/`,
 # which arrive as data.
 #
 # WHY THREADS. The scan is the slow half -- reading a few thousand files and
@@ -146,7 +146,7 @@
 (defn resolve-relative
   ``A relative import specifier, resolved against the importing file's path.
 
-  `test/scan.janet` importing `../src/color` gives `src/color`, which is the
+  `test/scan.janet` importing `../visualize/color` gives `visualize/color`, which is the
   node the scan already made for that file. Without this the specifier is
   flattened as written and becomes a node nothing else refers to.
 
@@ -287,9 +287,9 @@
         (if (string/has-prefix? "." module)
           # A RELATIVE import names a file, and which file depends on where
           # the importing file sits. Resolved against that directory rather
-          # than flattened, or `../src/color` becomes the node `___src_color`
+          # than flattened, or `../visualize/color` becomes the node `___visualize_color`
           # -- a phantom external that nothing matches, instead of an edge to
-          # the src/color the project already has.
+          # the visualize/color the project already has.
           (safe-name (resolve-relative (file :rel) module))
           (safe-name (string/replace-all "." "/" module))))
       (cond

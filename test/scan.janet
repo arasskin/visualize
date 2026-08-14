@@ -4,12 +4,12 @@
 # port, kept so they cannot go wrong again quietly. Each is a false edge the
 # graph would otherwise have drawn with total confidence.
 
-(import ../src/parser :as parser)
-(import ../src/scan)
-(import ../src/parsers/swift)
-(import ../src/parsers/python)
-(import ../src/parsers/go)
-(import ../src/parsers/javascript :as js)
+(import ../visualize/parser :as parser)
+(import ../visualize/scan)
+(import ../visualize/parsers/swift)
+(import ../visualize/parsers/python)
+(import ../visualize/parsers/go)
+(import ../visualize/parsers/javascript :as js)
 (import ./harness :as t)
 
 (defn- swift [text] (parser/run swift/spec text "T.swift"))
@@ -82,7 +82,7 @@ from . import sibling
   # THE BUG THIS EXISTS FOR: blanking string literals before reading imports
   # erased every import in Go and JavaScript, because in both languages the
   # module path is a quoted string. Declarations and references still get the
-  # strings blanked; imports get only the comments blanked. See src/parser.janet.
+  # strings blanked; imports get only the comments blanked. See visualize/parser.janet.
   (def got (parser/run go/spec ``
 import "fmt"
 
@@ -130,11 +130,12 @@ const fs = require('fs')
           (string name " must be a bare DOT identifier"))))
 
 (t/test "a relative import resolves to the file it names"
-  # Flattened as written, `../src/color` becomes the node `___src_color` -- a
-  # phantom external nothing matches, instead of an edge to the src/color the
-  # scan already found. Which file it means depends on where the importer sits.
-  (t/is= "src/color" (scan/resolve-relative "test/scan.janet" "../src/color"))
-  (t/is= "src/b" (scan/resolve-relative "src/a.janet" "./b"))
+  # Flattened as written, `../visualize/color` becomes the node `___visualize_color`
+  # -- a phantom external nothing matches, instead of an edge to the
+  # visualize/color the scan already found. Which file it means depends on
+  # where the importer sits.
+  (t/is= "visualize/color" (scan/resolve-relative "test/scan.janet" "../visualize/color"))
+  (t/is= "visualize/b" (scan/resolve-relative "visualize/a.janet" "./b"))
   (t/is= "x" (scan/resolve-relative "a/b/c.js" "../../x"))
   (t/is= "y" (scan/resolve-relative "x.js" "./y.js")
          "an extension on the specifier is dropped, as node names carry none"))

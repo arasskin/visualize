@@ -11,7 +11,7 @@
 # are spawning, framing and reconnection, and all three live on the wire
 # between the two processes.
 
-(import ../src/harness)
+(import ../visualize/harness)
 (import ./harness :as check)
 
 # A socket of this suite's own, so running the tests never adopts (or kills)

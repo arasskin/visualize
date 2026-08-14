@@ -233,7 +233,7 @@
 # -- the protocol -------------------------------------------------------------
 #
 # One request per connection, a line of JSON each way. The same shape as the
-# HTTP server above it (see src/http.janet): a connection carries one message
+# HTTP server above it (see visualize/http.janet): a connection carries one message
 # and the client opens another when it wants one, which is simpler than
 # getting framing and reuse subtly right for a caller that makes a handful of
 # requests a second.

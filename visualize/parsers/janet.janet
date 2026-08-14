@@ -1,6 +1,6 @@
 # Janet: imports are authoritative, and the tool can graph itself.
 #
-# `(import ./src/color :as c)` and `(use ./thing)` both name a module. The
+# `(import ./visualize/color :as c)` and `(use ./thing)` both name a module. The
 # path is kept as written, leading `./` and all, because that is what
 # distinguishes a module in this project from one in the tree of installed
 # libraries -- the same reason the JavaScript spec keeps `./store` whole.

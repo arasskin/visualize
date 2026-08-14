@@ -2,8 +2,9 @@
 #
 # Run visualize on a directory, building the runtime first if it is not built.
 #
-#     ./visualize                 the current directory
-#     ./visualize ~/code/project  somewhere else
+#     ./run                 the current directory
+#     ./run ~/code/project  somewhere else
+#     ./run --dev [dir]     ...with a repl into the live server (see README)
 #
 # This is the entry point to use. `./build` runs underneath it and does
 # nothing when the runtime is already compiled, so the first run pays a few

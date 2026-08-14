@@ -3,7 +3,7 @@
 # The opposite of Swift. Python states its dependencies in the source --
 # `import otto.store` names a module and means it -- so this spec declares
 # only :imports and leaves :declares and :refs out entirely. The engine
-# handles both shapes; see src/parser.janet.
+# handles both shapes; see visualize/parser.janet.
 #
 # The module name is kept WHOLE and dotted (`otto.store`, not `otto`), because
 # the graph's prefix matching is what turns that into structure: `~.store`

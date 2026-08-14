@@ -1,6 +1,6 @@
 # The JSON that carries every edit to and from the browser.
 
-(import ../src/json)
+(import ../visualize/json)
 (import ./harness :as t)
 
 (t/test "scalars encode as JSON, not as Janet"

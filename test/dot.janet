@@ -1,7 +1,7 @@
 # Prefix matching, filtering, and the DOT that comes out the far side.
 
-(import ../src/dot)
-(import ../src/color)
+(import ../visualize/dot)
+(import ../visualize/color)
 (import ./harness :as t)
 
 # A small graph with the shape that matters: our own files in two directories,

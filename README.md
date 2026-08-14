@@ -3,7 +3,7 @@
 A dependency graph you draw by editing a file.
 
 ```bash
-./visualize ~/code/some-project
+./run ~/code/some-project
 ```
 
 Opens a browser. The graph is your project; the panel top-left is the config
@@ -37,7 +37,7 @@ same runtime a year from now.
 ./build --clean   # delete it
 ```
 
-`./visualize` and `./test/run` both call `./build` first, and it does nothing
+`./run` and `./test/run` both call `./build` first, and it does nothing
 when the runtime is already compiled — so there is no separate setup step to
 remember.
 
@@ -91,7 +91,7 @@ functions and everything else comes free:
 
 Two notes on the notation, both consequences of Janet's reader:
 
-- `~` and `#rrggbb` are rewritten before parsing (`src/tilde.janet`). Janet
+- `~` and `#rrggbb` are rewritten before parsing (`visualize/tilde.janet`). Janet
   reads `~` as quasiquote and `#` as a comment, and both collisions are in
   notation the existing config files already use.
 - A bare name that isn't bound resolves to itself, which is the rule the Python
@@ -117,7 +117,7 @@ click the bar to collapse it into just the bar.
 (harness "/bin/sh" "-i")  ; anything with a command line
 ```
 
-**Nothing in the terminal knows which agent it is running.** `src/pty.janet`
+**Nothing in the terminal knows which agent it is running.** `visualize/pty.janet`
 takes argv and `web/term.js` takes bytes, so Claude Code and pi go through
 identical code — the harness is a config value, not a code path.
 
@@ -141,8 +141,8 @@ it dies with the tab), and required on every terminal request alongside an
 
 ## Adding a language
 
-Drop a file in `src/parsers/`. Nothing else in the tree knows languages exist —
-`src/parsers.janet` finds them by looking, so there is no registry to update.
+Drop a file in `visualize/parsers/`. Nothing else in the tree knows languages exist —
+`visualize/parsers.janet` finds them by looking, so there is no registry to update.
 
 A spec is data:
 
@@ -180,7 +180,7 @@ JavaScript; declarations get the strings blanked, imports get only the comments
 blanked.
 
 Five ship: `swift`, `python`, `javascript` (also .ts/.jsx/.tsx), `go`, `janet`
-— which is why `./visualize .` draws this tool's own graph.
+— which is why `./run .` draws this tool's own graph.
 
 ## Speed
 
@@ -205,24 +205,24 @@ edit. **Regenerate** is how you say the source changed.
 ## Layout
 
 ```
-visualize           run it (builds the runtime first if needed)
+run                 run it (builds the runtime first if needed)
 build               compile vendor/janet -> bin/janet, once
 vendor/janet/       the Janet runtime, amalgamated: three files, no deps
 visualize.janet     entry point: the server's two endpoints
-src/scan.janet      walk the tree, read every file on all cores, build the graph
-src/parser.janet    what a language spec is, and how one is run
-src/parsers.janet   find the specs in src/parsers/ at runtime
-src/parsers/        one file per language
-src/pty.janet       a pseudo-terminal, via libc's forkpty through the FFI
-src/harness.janet   the agent session, both halves: the owner (run as
-                    `visualize --supervise`, outliving the server) and the
-                    client the HTTP routes talk through
-src/dot.janet       prefix matching, filtering, and the DOT that comes out
-src/color.janet     the palette, the ramp, and WCAG-checked label ink
-src/config.janet    the sandbox the config runs in
-src/tilde.janet     rewriting ~ and #rrggbb past Janet's reader
-src/http.janet      just enough HTTP for one browser on localhost
-src/json.janet      just enough JSON for the browser protocol
+visualize/scan.janet    walk the tree, read every file on all cores, build the graph
+visualize/parser.janet  what a language spec is, and how one is run
+visualize/parsers.janet find the specs in visualize/parsers/ at runtime
+visualize/parsers/      one file per language
+visualize/pty.janet     a pseudo-terminal, via libc's forkpty through the FFI
+visualize/harness.janet the agent session, both halves: the owner (run as
+                        `visualize.janet --supervise`, outliving the server)
+                        and the client the HTTP routes talk through
+visualize/dot.janet     prefix matching, filtering, and the DOT that comes out
+visualize/color.janet   the palette, the ramp, and WCAG-checked label ink
+visualize/config.janet  the sandbox the config runs in
+visualize/tilde.janet   rewriting ~ and #rrggbb past Janet's reader
+visualize/http.janet    just enough HTTP for one browser on localhost
+visualize/json.janet    just enough JSON for the browser protocol
 web/term.js         a terminal emulator, in the ~25 sequences agents emit
 web/                the page: vanilla HTML, CSS and JS, no build step
 test/               236 assertions, no framework
@@ -245,7 +245,8 @@ node labels in dark ink and has no idea what the page is doing.
 ./test/run
 ```
 
-236 assertions, no test framework — the harness is 70 lines in
+277 assertions (plus 40 for the terminal emulator, under node), no test
+framework — the harness is 70 lines in
 `test/harness.janet`, because a dependency is a dependency. It runs against
 the **vendored** runtime, not whatever `janet` is on PATH: a green run against
 a different interpreter than the one that ships here would not mean much.
@@ -256,6 +257,43 @@ same inputs, and the Swift scan was diffed edge-for-edge against
 exist for bugs that were real during the port — an `extension` declaring a type
 it doesn't own, `import struct Foundation.Data` declaring `Foundation`, per-line
 error messages arriving as `null`.
+
+## Developing it from inside
+
+```bash
+./run --dev ~/code/project
+# ...
+#   repl: nc -U /tmp/visualize-1a2b3c4d.repl.sock
+```
+
+`--dev` makes the running server host a repl on a unix socket — the Swank
+arrangement, because the stock stdin repl would freeze the event loop while
+its prompt waited, and because Janet compiles defs to constants, so
+redefinition only reaches compiled callers when `*redef*` is switched on
+**before** anything compiles. That is why it is a launch flag and not a
+runtime toggle.
+
+Connect and you are in the server's own image: every module under its prefix,
+every def in `visualize.janet` by name. From there:
+
+- **Hot reload:** edit a file, `(dev/reload "scan")` — re-evaluated into the
+  module's *live* environment, so every caller sees the new definitions
+  immediately. In-memory state survives, which is the point: the pty already
+  survives restarts by living in the supervisor, and this covers the rest.
+- **Post-mortem:** a request that crashes leaves its fiber — stack *and
+  locals* — in `dev/crashed`. `(dev/attach 0)` opens the core dot-command
+  debugger on it: `(.stack)`, `(.frame 1)`, `(.locals)`, `(.source)`.
+- **Breakpoints:** `(debug/fbreak scan/scan 0)` marks live bytecode; the next
+  request to cross it parks in `dev/parked` with its client waiting while
+  every other request keeps serving. `(dev/attach id)` inspects it
+  mid-flight, `(dev/continue id)` lets it finish.
+- An error typed *at* the repl drops the connection straight into that same
+  debugger, like `janet -d` does on stdin.
+
+The socket is the security boundary: created `0600`, keyed to the project
+like the supervisor's, and never a TCP port — this endpoint evaluates
+whatever connects, and 127.0.0.1 is not a boundary (see the token note
+above).
 
 ## Notes on the picture
 

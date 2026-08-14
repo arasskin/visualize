@@ -1,7 +1,7 @@
 # What a language is, as data.
 #
 # THIS FILE NAMES NO LANGUAGE. It defines the shape a parser spec has and the
-# one function that runs a spec against a file's text; `src/parsers/*.janet` are
+# one function that runs a spec against a file's text; `visualize/parsers/*.janet` are
 # the specs themselves. Adding a language means adding a file there and
 # nothing here, which is the whole point of the split -- the scan engine, the
 # graph, the config language and the page are all language-agnostic, and this

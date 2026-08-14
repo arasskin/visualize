@@ -21,6 +21,7 @@
 (import ./http)
 (import ./json)
 (import ./scan)
+(import ./dev)
 # These two spawn real processes. Nothing may be imported below them.
 (import ./pty)
 (import ./session)

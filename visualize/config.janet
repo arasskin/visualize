@@ -183,7 +183,7 @@
            "(harness cmd & args) -- what to run in the terminal window, e.g. (harness claude) or (harness pi).")
 
   # `~` alone, for a config that quotes it or reaches it through a helper.
-  # The bare `(show-only ~)` form never gets this far -- src/tilde.janet turns
+  # The bare `(show-only ~)` form never gets this far -- visualize/tilde.janet turns
   # it into a string before the reader sees it -- but a config that says
   # `(def mine ~)` deserves to work.
   (install env "~" "~" "The project itself: everything scanned, no externals.")

@@ -114,6 +114,9 @@ check('shift-tab is back-tab', keyToBytes({ key: 'Tab', shiftKey: true }), '\x1b
 check('alt prefixes with escape', keyToBytes({ key: 'b', altKey: true }), '\x1bb');
 check('a printable key is itself', keyToBytes({ key: 'a' }), 'a');
 check('an unmapped named key sends nothing', keyToBytes({ key: 'F13' }), '');
+// Claiming Cmd-V would preventDefault the keydown, and with it the paste
+// event that keydown triggers -- the pty would see a literal `v` instead.
+check('cmd chords stay with the browser', keyToBytes({ key: 'v', metaKey: true }), '');
 
 // -- resize ----------------------------------------------------------------------
 
@@ -133,6 +136,47 @@ term.write('old 1\r\nold 2\x1b[2J\x1b[Hfresh');
 check('clear-screen banks the screen in scrollback',
       screen.innerHTML.split('\n').slice(0, 3), ['old 1', 'old 2', 'fresh']);
 check('clear-screen still clears the grid', term.text()[0], 'fresh');
+
+// But a clear is more often the FIRST HALF OF A REDRAW: on resize the harness
+// clears and repaints the same conversation at the new width. Banking every
+// such clear left one near-duplicate of the screen per clear, and a resize
+// drag fires a dozen of them -- the symptom was scrollback holding the final
+// frame over and over, each copy wrapped slightly differently. A bank is
+// therefore provisional: when the live screen again contains the banked rows'
+// ink, the bank was a redraw echo and dissolves.
+term.reset();
+term.write('alpha\r\nbeta');
+term.write('\x1b[2J\x1b[Halpha\r\nbeta');
+check('a repaint of the same screen dissolves the bank',
+      screen.innerHTML.split('\n'), ['alpha', 'beta']);
+
+// The comparison is ink, not lines: the same words rewrapped at a new width
+// still match.
+term.reset();
+term.write('one two\r\nthree');
+term.write('\x1b[2J\x1b[Hone two three');
+check('a rewrapped repaint still dissolves the bank',
+      screen.innerHTML.split('\n'), ['one two three']);
+
+// A width shrink clips the grid before the clear even arrives (resize()
+// reflows by truncating), so the banked rows are fragments of the lines the
+// repaint redraws in full. Fragments match as substrings.
+term.reset();
+term.write('a long line of words\r\ntail');
+term.resize(10, 12);
+term.write('\x1b[2J\x1b[Ha long line\r\nof words\r\ntail');
+check('a clipped bank dissolves into the full repaint',
+      screen.innerHTML.split('\n'), ['a long line', 'of words', 'tail']);
+term.resize(10, 40);
+
+// Each clear in a storm settles against its own repaint.
+term.reset();
+term.write('frame');
+term.write('\x1b[2J\x1b[Hframe');
+term.write('\x1b[2J\x1b[Hframe');
+term.write('\x1b[2J\x1b[Hframe');
+check('a resize storm leaves one copy, not one per clear',
+      screen.innerHTML.split('\n'), ['frame']);
 
 // -- painting when there are no frames --------------------------------------
 // THE FROZEN-SCREEN BUG. requestAnimationFrame does not fire in a hidden tab,
