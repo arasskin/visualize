@@ -24,6 +24,43 @@
 (var- socket-path nil)
 (var- spawn-argv nil)
 
+# ONE CONNECTION, KEPT OPEN -- not one per request.
+#
+# The per-request version opened and closed a unix socket for every poll,
+# several times a second, and each of those briefly owned the process's lowest
+# free fd -- the same number every new browser connection was about to be
+# handed. That churn is what tickled a runtime fd/reuse race on macOS: under a
+# real browser's concurrency, an occasional net/write blew up with EBADF on a
+# connection whose fd had been closed behind its back, the page declared
+# itself disconnected, and the terminal froze. Slowing the fibers down with
+# logging made it vanish, which is the signature of exactly this kind of race.
+#
+# A pinned connection removes the churn (and, incidentally, four syscalls per
+# poll). The turn-lock matters as much as the pinning: several fibers ask at
+# once -- a poll races a resize races an input -- and interleaved writes on one
+# socket would pair replies with the wrong requests.
+(var- pinned nil)
+(def- turn @{:busy false :waiting @[]})
+
+(defn- take-turn []
+  (if (turn :busy)
+    (let [ticket (ev/chan 1)]
+      (array/push (turn :waiting) ticket)
+      (ev/take ticket))
+    (put turn :busy true)))
+
+(defn- give-turn []
+  (if (empty? (turn :waiting))
+    (put turn :busy false)
+    (let [ticket (get (turn :waiting) 0)]
+      (array/remove (turn :waiting) 0)
+      (ev/give ticket true))))
+
+(defn- drop-pinned []
+  (when pinned
+    (try (:close pinned) ([_] nil))
+    (set pinned nil)))
+
 (defn configure
   ``Where the supervisor is, and how to start one if it is not running.
 
@@ -31,12 +68,20 @@
   visualize pointed at different directories do not share a terminal.``
   [path argv]
   (set socket-path path)
-  (set spawn-argv argv))
+  (set spawn-argv argv)
+  # A connection pinned to the OLD socket must not answer for the new one.
+  (drop-pinned))
 
 (defn- connect
-  "A connection to the supervisor, or nil if nothing is listening."
+  ``A connection to the supervisor, or nil if nothing is listening.
+
+  The stat comes first because it is free: a `net/connect` that fails still
+  burns a file descriptor at the kernel for a moment, and during supervisor
+  boot this used to be called in a tight retry loop -- a storm of short-lived
+  fds churning the exact numbers the browser's connections were being handed,
+  which fed the EBADF race. No socket file, no syscall.``
   []
-  (when socket-path
+  (when (and socket-path (os/stat socket-path :mode))
     (try (net/connect :unix socket-path) ([_] nil))))
 
 (defn- spawn-detached
@@ -86,34 +131,52 @@
             (set found (connect))))
         found)))
 
+(defn- talk
+  ``One request and its reply over an open connection, or nil on EOF.
+
+  Reads to the newline the supervisor terminates every reply with: a `since`
+  reply routinely exceeds one chunk, and a single :read would hand json/decode
+  a truncated object. Throws if the connection is dead, which `ask` treats as
+  "drop it and try a fresh one".``
+  [connection message]
+  (:write connection (string (json/encode message) "\n"))
+  (def reply @"")
+  (var line nil)
+  (var reading true)
+  (while reading
+    (if-let [at (string/find "\n" (string reply))]
+      (do (set line (string/slice (string reply) 0 at))
+          (set reading false))
+      (if-let [chunk (:read connection 65536)]
+        (buffer/push-string reply chunk)
+        (set reading false))))
+  (when line (json/decode line)))
+
 (defn- ask
   ``Send one request and read the reply, or nil if the supervisor is gone.
 
   Every failure lands here as nil rather than an error: the supervisor dying
-  should degrade the terminal panel, not take down the request that noticed.``
+  should degrade the terminal panel, not take down the request that noticed.
+
+  A dead pinned connection gets ONE retry on a fresh one -- the supervisor may
+  simply have restarted between requests -- and a failure after that answers
+  nil like any other.``
   [message &opt start?]
-  (def connection (if start? (ensure) (connect)))
-  (when connection
-    (defer (:close connection)
-      (try
+  (take-turn)
+  (defer (give-turn)
+    (when (nil? pinned)
+      (set pinned (if start? (ensure) (connect))))
+    (when pinned
+      (def reply (try (talk pinned message) ([_] nil)))
+      (if reply
+        reply
         (do
-          (:write connection (string (json/encode message) "\n"))
-          # READ UNTIL THE NEWLINE. A `since` reply carries everything the
-          # agent printed since the last poll, which routinely exceeds one
-          # chunk -- and a single `:read` would hand `json/decode` a truncated
-          # object. The supervisor terminates every reply with \n so there is
-          # a definite end to look for.
-          (def reply @"")
-          (var reading true)
-          (while reading
-            (if (string/find "\n" (string reply))
-              (set reading false)
-              (if-let [chunk (:read connection 65536)]
-                (buffer/push-string reply chunk)
-                (set reading false))))
-          (when (> (length reply) 0)
-            (json/decode (string reply))))
-        ([_] nil)))))
+          (drop-pinned)
+          (set pinned (if start? (ensure) (connect)))
+          (when pinned
+            (def again (try (talk pinned message) ([_] nil)))
+            (unless again (drop-pinned))
+            again))))))
 
 (defn- session-state
   ``A `state` reply as this side's callers expect it: keyword keys, and a
@@ -217,4 +280,7 @@
   socket and says nothing, which is what leaves the agent running.``
   []
   (ask {"op" "shutdown"})
+  # The supervisor is gone; a conn pinned to it would cost the next caller a
+  # dead-connection retry for nothing.
+  (drop-pinned)
   nil)

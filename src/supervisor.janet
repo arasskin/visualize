@@ -290,25 +290,52 @@
   (def done (ev/chan 1))
   # Before any connection is answered: the pump must never wait on a poll.
   (keep-draining)
+  # AN UNREACHABLE SUPERVISOR MUST DIE ON ITS OWN. Clients find this process
+  # through the socket file and nothing else, so a supervisor whose file is
+  # gone can never again be spoken to -- including the `shutdown` that is its
+  # only exit. That state is reachable: two spawns can race during a busy
+  # start, the loser's bind unlinks or loses the file, and the orphan then
+  # sits forever holding a pty nobody can see. Checked on a slow timer; the
+  # file vanishing is not a transient.
+  (ev/go
+    (fn []
+      (forever
+        (ev/sleep 2)
+        (unless (os/stat path :mode)
+          (try (stop) ([_] nil))
+          (os/exit 0)))))
   (defn answer [connection]
+    # MANY REQUESTS PER CONNECTION, until the client hangs up. The client
+    # keeps one connection pinned and asks everything over it -- opening a
+    # fresh socket per poll churned the server's lowest fd numbers several
+    # times a second, which is what tickled the EBADF race under a real
+    # browser's concurrency. One line of JSON each way per request, and the
+    # newline is the frame: a single :read returns whatever one chunk happens
+    # to carry, so reads accumulate until the newline arrives, and anything
+    # after it is kept for the next request.
     (defer (:close connection)
-      # READ UNTIL THE NEWLINE, not once. A single `:read` returns whatever
-      # one chunk happened to carry, and a request longer than that -- a paste
-      # into the terminal is the everyday case -- arrives as truncated JSON
-      # that fails to parse. The client terminates every message with \n for
-      # exactly this reason.
-      (def request @"")
-      (var reading true)
-      (while reading
-        (if (string/find "\n" (string request))
-          (set reading false)
+      (def pending @"")
+      (var serving true)
+      (while serving
+        (if-let [at (string/find "\n" (string pending))]
+          (let [line (string/slice (string pending) 0 at)
+                rest (string/slice (string pending) (inc at))]
+            (buffer/clear pending)
+            (buffer/push-string pending rest)
+            (def parsed (try (json/decode line) ([_] nil)))
+            (if parsed
+              (do
+                (def [reply finished] (handle parsed))
+                (try (:write connection (string (json/encode reply) "\n"))
+                  ([_] (set serving false)))
+                (when finished
+                  (ev/give done true)
+                  (set serving false)))
+              # Garbage on the wire: this client is confused, hang up on it.
+              (set serving false)))
           (if-let [chunk (:read connection 65536)]
-            (buffer/push-string request chunk)
-            (set reading false))))
-      (when (> (length request) 0)
-        (def [reply finished] (handle (json/decode (string request))))
-        (try (:write connection (string (json/encode reply) "\n")) ([_] nil))
-        (when finished (ev/give done true)))))
+            (buffer/push-string pending chunk)
+            (set serving false))))))
   (ev/go
     (fn []
       (forever

@@ -604,6 +604,7 @@ const screen = document.getElementById('screen');
 const term = makeTerminal(screen);
 let at = 0;              // how much of the harness output we have consumed
 let polling = false;     // is the loop running? (see scheduleNextPoll)
+let pollFailures = 0;    // consecutive misses; three in a row means gone
 let generation = 0;      // bumped server-side per start, so a restart resets us
 
 // Every terminal request carries the token; without it the server answers 403.
@@ -670,9 +671,20 @@ async function poll() {
     }
     setState(out.running ? '' : 'exited');
     if (!out.running) stopPolling();
+    pollFailures = 0;
   } catch (e) {
-    setState('disconnected');
-    stopPolling();
+    // A SINGLE dropped request must not kill the terminal. The server answers
+    // hundreds of polls an hour, and one 500 -- a transient race, a supervisor
+    // mid-restart -- used to flip the panel to "disconnected" and stop polling
+    // for good, leaving a live agent invisible behind a dead pane. Three in a
+    // row means it is really gone.
+    pollFailures++;
+    if (pollFailures >= 3) {
+      setState('disconnected');
+      stopPolling();
+    } else {
+      setState('retrying...');
+    }
   }
 }
 
@@ -805,7 +817,12 @@ function sendInput(text) {
       // arrives on the polling loop, which is now in its fast mode.
       pollSoon();
     })
-    .catch(() => setState('disconnected'));
+    .catch(() => {
+      // The keystroke may have been lost; the poll loop is the arbiter of
+      // whether the session is actually gone.
+      setState('retrying...');
+      pollSoon();
+    });
 }
 
 // Paste, which a harness is used with constantly.

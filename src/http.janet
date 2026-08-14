@@ -113,16 +113,38 @@
              (try
                (when-let [request (read-request conn)]
                  (def [status content-type body] (handler request))
+                 (setdyn :serving (request :path))
                  (respond conn status content-type body))
-               ([err]
+               ([err fib]
                  # A bug in a handler must not take the server down with it --
                  # the browser would see only "failed to fetch" and the next
                  # request would find nothing listening.
-                 (eprintf "request failed: %s" (string err))
-                 (try
-                   (respond conn "500 Internal Server Error" "text/plain"
-                            (string err))
-                   ([_] nil)))))))))])
+                 (if (= (string err) "Bad file descriptor")
+                   # A known, survivable race, worth one quiet line and no
+                   # more: under heavy browser concurrency the runtime very
+                   # occasionally invalidates a connection's fd behind its
+                   # stream (macOS, fd numbers reused within one event-loop
+                   # turn), and the write to that one connection fails. The
+                   # page retries the poll and carries on; the fd churn that
+                   # provoked it is also gone, so this is rare. No 500 is
+                   # attempted -- it would be a second write to the same dead
+                   # descriptor.
+                   (eprintf "dropped one reply (%s): connection fd went stale"
+                            (or (dyn :serving) "?"))
+                   (do
+                     # WITH THE STACK, not just the message. An error with no
+                     # location here was diagnosed wrong twice -- a leaked
+                     # supervisor, then a graphviz stampede, both real bugs
+                     # and neither the one being chased -- because one line
+                     # said nothing about which of a dozen fd-using calls had
+                     # thrown. An error a person must chase carries its trace.
+                     (eprintf "request failed (%s): %s"
+                              (or (dyn :serving) "before-respond") (string err))
+                     (debug/stacktrace fib err "  ")
+                     (try
+                       (respond conn "500 Internal Server Error" "text/plain"
+                                (string err))
+                       ([_] nil)))))))))))])
 
 # -- serving files out of web/ ------------------------------------------------
 
