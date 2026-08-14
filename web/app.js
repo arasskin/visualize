@@ -1,8 +1,8 @@
-// The page: pan and zoom over the graph, a line editor for the config, and a
-// terminal running an agent harness.
+// The page: pan and zoom over the graph, a line editor for the config, and
+// terminal panes -- one running an agent harness, one the dev repl.
 //
 // Vanilla, no build step, no framework. Three parts that barely talk to each
-// other -- the viewport, the editor, and the terminal -- joined only by the
+// other -- the viewport, the editor, and the terminals -- joined only by the
 // panel furniture they share.
 
 import { makeTerminal, keyToBytes } from './term.js';
@@ -590,251 +590,111 @@ draw();
 // you cannot see is worse than one you did not ask about.
 if (Object.keys(faults).length) requestAnimationFrame(() => bar.click());
 
-// -- the harness terminal ----------------------------------------------------
+// -- the terminal panes ------------------------------------------------------
 // A pty on the server, an emulator here, and a poll loop between them. Polled
 // rather than streamed: the page has to POST keystrokes regardless, so one
 // endpoint returning "everything since chunk N" is both the live path and the
 // catch-up path for a reload. An SSE stream would need a second mechanism for
 // input and a way to resume when it drops.
+//
+// Written once and instantiated twice: the agent harness and the dev repl are
+// the same pane speaking to different endpoint prefixes -- /harness/* drives
+// the supervisor's agent pty, /repl/* a pty running ./repl against this
+// server's own image. Nothing in here knows which one it is.
 
-const harnessRoot = document.getElementById('harness');
-const harnessState = document.getElementById('harness-state');
-const screen = document.getElementById('screen');
+function makeTerminalPane(root, prefix) {
+  const stateLine = root.querySelector('.state');
+  const screen = root.querySelector('.screen');
 
-// Follow the output the way a terminal does -- but only while the view is at
-// the bottom. The flag comes from the user's own scrolling, so scrolling up
-// to read mid-stream is honoured for as long as they stay up, and returning
-// to the bottom re-arms the follow. The pin itself happens in onPaint, after
-// the DOM has its new height: paints are deferred a frame, so pinning at
-// write time scrolls to the PREVIOUS frame's bottom -- and, measured there,
-// "am I at the bottom?" is off by up to a whole chunk, which is what made an
-// earlier version stop following fast streams.
-const harnessBody = harnessRoot.querySelector('.panel-body');
-let following = true;
-harnessBody.addEventListener('scroll', () => {
-  following = harnessBody.scrollTop + harnessBody.clientHeight
-    >= harnessBody.scrollHeight - 4;
-});
-const term = makeTerminal(screen, {
-  onPaint: () => {
-    if (following) harnessBody.scrollTop = harnessBody.scrollHeight;
-  },
-});
-let at = 0;              // how much of the harness output we have consumed
-let polling = false;     // is the loop running? (see scheduleNextPoll)
-let pollFailures = 0;    // consecutive misses; three in a row means gone
-let generation = 0;      // bumped server-side per start, so a restart resets us
-
-// Every terminal request carries the token; without it the server answers 403.
-// See `permitted?` in visualize.janet for why localhost alone is not enough.
-async function harnessPost(path, body = {}) {
-  // THE TIMEOUT IS WHAT SURVIVES A SUSPEND. A fetch that is in flight when
-  // the machine sleeps can come back neither resolved nor rejected, and the
-  // poll chain -- guarded by pollInFlight -- then waits on it forever: no
-  // polls, no error, a cursor still blinking because the blink is CSS. An
-  // aborted request rejects like any failure and lands in the retry path.
-  const response = await fetch(`/harness/${path}?k=${encodeURIComponent(window.TOKEN)}`, {
-    method: 'POST',
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(15000),
+  // Follow the output the way a terminal does -- but only while the view is at
+  // the bottom. The flag comes from the user's own scrolling, so scrolling up
+  // to read mid-stream is honoured for as long as they stay up, and returning
+  // to the bottom re-arms the follow. The pin itself happens in onPaint, after
+  // the DOM has its new height: paints are deferred a frame, so pinning at
+  // write time scrolls to the PREVIOUS frame's bottom -- and, measured there,
+  // "am I at the bottom?" is off by up to a whole chunk, which is what made an
+  // earlier version stop following fast streams.
+  const paneBody = root.querySelector('.panel-body');
+  let following = true;
+  paneBody.addEventListener('scroll', () => {
+    following = paneBody.scrollTop + paneBody.clientHeight
+      >= paneBody.scrollHeight - 4;
   });
-  if (!response.ok) throw new Error(await response.text());
-  return response.json();
-}
+  const term = makeTerminal(screen, {
+    onPaint: () => {
+      if (following) paneBody.scrollTop = paneBody.scrollHeight;
+    },
+  });
+  let at = 0;              // how much of the session output we have consumed
+  let polling = false;     // is the loop running? (see scheduleNextPoll)
+  let pollFailures = 0;    // consecutive misses; three in a row means gone
+  let generation = 0;      // bumped server-side per start, so a restart resets us
 
-// How many rows and columns fit the panel right now. Measured from a real
-// character rather than assumed: the monospace face and its size come from
-// CSS, so hardcoding a cell size here would break the moment either changed.
-function measure() {
-  const probe = document.createElement('span');
-  probe.textContent = 'M';
-  probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre';
-  screen.appendChild(probe);
-  const box = probe.getBoundingClientRect();
-  probe.remove();
-  const body = harnessRoot.querySelector('.panel-body');
-  const cw = box.width || 7, ch = box.height || 16;
-  return {
-    rows: Math.max(4, Math.floor((body.clientHeight - 24) / ch)),
-    cols: Math.max(20, Math.floor((body.clientWidth - 12) / cw)),
-  };
-}
-
-function setState(text) { harnessState.textContent = text; }
-
-async function poll() {
-  try {
-    // The generation says which session `at` counts chunks in. Without it a
-    // restarted agent leaves the page asking about chunks that no longer
-    // exist, and the reply is empty forever.
-    const out = await harnessPost('poll', { at, generation });
-    // A reply saying "could not reach the supervisor" is a failed request
-    // wearing a 200; treating its running=false/generation=0 as session
-    // truth is what blanked the screen after a suspend. Absent -- the socket
-    // file itself gone -- is different again: that is a supervisor shut down
-    // for real, and the honest state is exited, not eternal reconnecting.
-    if (out.reachable === false) {
-      if (out.absent) { setState('exited'); stopPolling(); return; }
-      throw new Error('supervisor unreachable');
-    }
-    // A restart on the server means our screen belongs to a dead session, so
-    // it is cleared before the new session's output is drawn onto it.
-    //
-    // THE TEXT IN THIS REPLY IS NOT DISCARDED, and an earlier version's bug
-    // was exactly that: it reset, set `at = 0` and returned. But `at` was
-    // already 0 when the reply was requested, so the very next poll asked the
-    // same question, got the same answer, and threw it away again -- forever.
-    // The screen stayed blank while the server held the whole session, and
-    // the cursor kept blinking because that is a CSS animation.
-    if (out.generation !== generation) {
-      generation = out.generation;
-      at = 0;
-      term.reset();
-    }
-    if (out.text) {
-      term.write(out.text);
-      at = out.at;
-      // Output just arrived, so the next poll should be immediate: an agent
-      // mid-response has more coming, and this is what keeps streaming smooth
-      // rather than stepping along at the idle delay.
-      lastOutput = performance.now();
-      // Following the output happens in the emulator's onPaint, once the
-      // new height exists to scroll to.
-    }
-    setState(out.running ? '' : 'exited');
-    if (!out.running) stopPolling();
-    pollFailures = 0;
-  } catch (e) {
-    // A SINGLE dropped request must not kill the terminal. The server answers
-    // hundreds of polls an hour, and one 500 -- a transient race, a supervisor
-    // mid-restart -- used to flip the panel to "disconnected" and stop polling
-    // for good, leaving a live agent invisible behind a dead pane. Three in a
-    // row means it is really gone.
-    pollFailures++;
-    // NEVER a terminal state. The server is on 127.0.0.1 and will come back
-    // -- from a restart, from the machine waking -- so the loop drops to a
-    // slow reconnect cadence rather than stopping. Stopping is what left a
-    // dead panel behind a live agent after every suspend.
-    setState(pollFailures >= 3 ? 'reconnecting...' : 'retrying...');
+  // Every terminal request carries the token; without it the server answers 403.
+  // See `permitted?` in visualize.janet for why localhost alone is not enough.
+  async function post(path, body = {}) {
+    // THE TIMEOUT IS WHAT SURVIVES A SUSPEND. A fetch that is in flight when
+    // the machine sleeps can come back neither resolved nor rejected, and the
+    // poll chain -- guarded by pollInFlight -- then waits on it forever: no
+    // polls, no error, a cursor still blinking because the blink is CSS. An
+    // aborted request rejects like any failure and lands in the retry path.
+    const response = await fetch(`/${prefix}/${path}?k=${encodeURIComponent(window.TOKEN)}`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    return response.json();
   }
-}
 
-// -- pacing ------------------------------------------------------------------
-// The server echoes a keystroke in about 4ms. Everything a person feels as lag
-// is added on this side, so the loop is built to spend as little of it as
-// possible while still going quiet when nothing is happening.
-//
-// A CHAIN, NOT AN INTERVAL. setInterval fires whether or not the previous
-// request came back, so a slow round trip stacks requests that then race --
-// and each carries an `at` from before the last reply, so the same output
-// arrives twice. Each poll now schedules the next one after it finishes.
-//
-// THE DELAY ADAPTS. Idle, there is nothing to see and 250ms costs nothing.
-// Busy, output is arriving and the next poll should already be in flight. The
-// floor is 0 -- an immediate re-poll -- because when the agent is streaming,
-// the round trip itself is the pacing.
-const IDLE_DELAY = 250;
-const BUSY_DELAY = 0;
-// How long output keeps the loop in its fast mode after the last byte, so a
-// pause between two chunks of the same response does not drop it back to idle.
-const BUSY_WINDOW = 900;
-
-let lastOutput = 0;
-let pollTimer = null;
-let pollInFlight = false;
-
-const RECONNECT_DELAY = 2000;
-
-function scheduleNextPoll() {
-  if (!polling) return;
-  clearTimeout(pollTimer);
-  const delay = pollFailures >= 3 ? RECONNECT_DELAY
-    : (performance.now() - lastOutput < BUSY_WINDOW ? BUSY_DELAY : IDLE_DELAY);
-  pollTimer = setTimeout(runPoll, delay);
-}
-
-async function runPoll() {
-  // One at a time. Overlapping polls send stale `at` values and duplicate
-  // output onto the screen.
-  if (pollInFlight || !polling) return;
-  pollInFlight = true;
-  try {
-    await poll();
-  } finally {
-    pollInFlight = false;
-    scheduleNextPoll();
+  // How many rows and columns fit the panel right now. Measured from a real
+  // character rather than assumed: the monospace face and its size come from
+  // CSS, so hardcoding a cell size here would break the moment either changed.
+  function measure() {
+    const probe = document.createElement('span');
+    probe.textContent = 'M';
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre';
+    screen.appendChild(probe);
+    const box = probe.getBoundingClientRect();
+    probe.remove();
+    const cw = box.width || 7, ch = box.height || 16;
+    return {
+      rows: Math.max(4, Math.floor((paneBody.clientHeight - 24) / ch)),
+      cols: Math.max(20, Math.floor((paneBody.clientWidth - 12) / cw)),
+    };
   }
-}
 
-// Called the moment a keystroke is sent. The echo is the thing a person is
-// waiting for, so the poll that will carry it should not sit behind an idle
-// delay -- this is most of the difference between "instant" and "laggy".
-function pollSoon() {
-  if (!polling) return;
-  clearTimeout(pollTimer);
-  pollTimer = setTimeout(runPoll, 0);
-}
+  function setState(text) { stateLine.textContent = text; }
 
-function startPolling() {
-  if (polling) return;
-  polling = true;
-  runPoll();
-}
-
-function stopPolling() {
-  if (!polling) return;
-  polling = false;
-  clearTimeout(pollTimer);
-  pollTimer = null;
-}
-
-async function startHarness() {
-  const size = measure();
-  term.resize(size.rows, size.cols);
-  setState('starting...');
-  try {
-    const out = await harnessPost('start', size);
-    generation = out.generation;
-    at = 0;
-    term.reset();
-    setState('');
-    startPolling();
-    screen.focus();
-  } catch (e) {
-    setState('failed: ' + e.message);
-  }
-}
-
-// Keystrokes go to the pty as bytes. The screen is focusable (tabindex in the
-// HTML) so this needs no input element -- a real one would fight the emulator
-// over what the cursor means.
-screen.addEventListener('keydown', (event) => {
-  // Let copy through: a terminal you cannot copy out of is a terminal you
-  // cannot use. Everything else belongs to the program.
-  if ((event.metaKey || event.ctrlKey) && event.key === 'c'
-      && window.getSelection().toString()) {
-    return;
-  }
-  const bytes = keyToBytes(event);
-  if (!bytes) return;
-  event.preventDefault();
-  event.stopPropagation();
-  sendInput(bytes);
-});
-
-// Type, and draw whatever came back.
-//
-// THE ECHO RIDES HOME ON THE SAME REQUEST. Asking for it separately costs a
-// second round trip no matter how short the poll delay is, because the page
-// cannot start that second request until the first has returned -- and while
-// it waited, the scheduler was just as likely to have armed the idle timer.
-// This is the difference between a character appearing as you press the key
-// and appearing a quarter of a second later.
-function sendInput(text) {
-  if (!text) return;
-  harnessPost('input', { text, at })
-    .then((out) => {
-      if (!out || out.text === undefined) return;
+  async function poll() {
+    try {
+      // The generation says which session `at` counts chunks in. Without it a
+      // restarted agent leaves the page asking about chunks that no longer
+      // exist, and the reply is empty forever.
+      const askedAt = at, askedGen = generation;
+      const out = await post('poll', { at: askedAt, generation: askedGen });
+      // A reply saying "could not reach the supervisor" is a failed request
+      // wearing a 200; treating its running=false/generation=0 as session
+      // truth is what blanked the screen after a suspend. Absent -- the socket
+      // file itself gone -- is different again: that is a supervisor shut down
+      // for real, and the honest state is exited, not eternal reconnecting.
+      if (out.reachable === false) {
+        if (out.absent) { setState('exited'); stopPolling(); return; }
+        throw new Error('supervisor unreachable');
+      }
+      // A keystroke's echo won the race and moved the cursor; this reply is
+      // answering a question that is no longer being asked. The chain is
+      // already scheduling the next poll, which asks the right one.
+      if (stale(askedAt, askedGen)) { pollFailures = 0; return; }
+      // A restart on the server means our screen belongs to a dead session, so
+      // it is cleared before the new session's output is drawn onto it.
+      //
+      // THE TEXT IN THIS REPLY IS NOT DISCARDED, and an earlier version's bug
+      // was exactly that: it reset, set `at = 0` and returned. But `at` was
+      // already 0 when the reply was requested, so the very next poll asked the
+      // same question, got the same answer, and threw it away again -- forever.
+      // The screen stayed blank while the server held the whole session, and
+      // the cursor kept blinking because that is a CSS animation.
       if (out.generation !== generation) {
         generation = out.generation;
         at = 0;
@@ -843,133 +703,332 @@ function sendInput(text) {
       if (out.text) {
         term.write(out.text);
         at = out.at;
+        // Output just arrived, so the next poll should be immediate: an agent
+        // mid-response has more coming, and this is what keeps streaming smooth
+        // rather than stepping along at the idle delay.
         lastOutput = performance.now();
+        // Following the output happens in the emulator's onPaint, once the
+        // new height exists to scroll to.
       }
-      // Whatever follows the echo -- a command's output, an agent's answer --
-      // arrives on the polling loop, which is now in its fast mode.
-      pollSoon();
-    })
-    .catch(() => {
-      // The keystroke may have been lost; the poll loop is the arbiter of
-      // whether the session is actually gone.
-      setState('retrying...');
+      setState(out.running ? '' : 'exited');
+      if (!out.running) stopPolling();
+      pollFailures = 0;
+    } catch (e) {
+      // A SINGLE dropped request must not kill the terminal. The server answers
+      // hundreds of polls an hour, and one 500 -- a transient race, a supervisor
+      // mid-restart -- used to flip the panel to "disconnected" and stop polling
+      // for good, leaving a live agent invisible behind a dead pane. Three in a
+      // row means it is really gone.
+      pollFailures++;
+      // NEVER a terminal state. The server is on 127.0.0.1 and will come back
+      // -- from a restart, from the machine waking -- so the loop drops to a
+      // slow reconnect cadence rather than stopping. Stopping is what left a
+      // dead panel behind a live agent after every suspend.
+      setState(pollFailures >= 3 ? 'reconnecting...' : 'retrying...');
+    }
+  }
+
+  // -- pacing ------------------------------------------------------------------
+  // The server echoes a keystroke in about 4ms. Everything a person feels as lag
+  // is added on this side, so the loop is built to spend as little of it as
+  // possible while still going quiet when nothing is happening.
+  //
+  // A CHAIN, NOT AN INTERVAL. setInterval fires whether or not the previous
+  // request came back, so a slow round trip stacks requests that then race --
+  // and each carries an `at` from before the last reply, so the same output
+  // arrives twice. Each poll now schedules the next one after it finishes.
+  //
+  // THE DELAY ADAPTS. Idle, there is nothing to see and 250ms costs nothing.
+  // Busy, output is arriving and the next poll should already be in flight. The
+  // floor is 0 -- an immediate re-poll -- because when the agent is streaming,
+  // the round trip itself is the pacing.
+  const IDLE_DELAY = 250;
+  const BUSY_DELAY = 0;
+  // How long output keeps the loop in its fast mode after the last byte, so a
+  // pause between two chunks of the same response does not drop it back to idle.
+  const BUSY_WINDOW = 900;
+
+  let lastOutput = 0;
+  let pollTimer = null;
+  let pollInFlight = false;
+
+  // A REPLY COUNTS ONLY IF NOTHING MOVED `at` WHILE IT FLEW. Both `poll` and
+  // `input` answer with "everything since `at`", and `at` goes into the
+  // request body -- so a keystroke sent while a poll is in flight asks the
+  // same question twice, and both replies carry the same bytes. The harness
+  // hides that: a full-screen program repaints with absolute positions, and
+  // drawing a frame twice looks like drawing it once. The repl is a line
+  // stream where every byte appends, so the duplicate echo was right there on
+  // the screen: typing 2 printed 22.
+  //
+  // CONCURRENT, NOT SERIALIZED. An earlier fix put every request behind one
+  // queue, which cured the doubling but queued each keystroke behind the
+  // back-to-back polls of busy mode, and typing turned laggy. So requests fly
+  // together and the first reply home wins: each remembers the (at,
+  // generation) it asked about, and one that comes back to find them changed
+  // is dropped whole. Dropping loses nothing -- the backlog is the record --
+  // it only defers those bytes to the next poll, which re-fetches them from
+  // the position the winner advanced to.
+  function stale(askedAt, askedGen) {
+    return at !== askedAt || generation !== askedGen;
+  }
+
+  const RECONNECT_DELAY = 2000;
+
+  function scheduleNextPoll() {
+    if (!polling) return;
+    clearTimeout(pollTimer);
+    const delay = pollFailures >= 3 ? RECONNECT_DELAY
+      : (performance.now() - lastOutput < BUSY_WINDOW ? BUSY_DELAY : IDLE_DELAY);
+    pollTimer = setTimeout(runPoll, delay);
+  }
+
+  async function runPoll() {
+    // One at a time. Overlapping polls send stale `at` values and duplicate
+    // output onto the screen.
+    if (pollInFlight || !polling) return;
+    pollInFlight = true;
+    try {
+      await poll();
+    } finally {
+      pollInFlight = false;
+      scheduleNextPoll();
+    }
+  }
+
+  // Called the moment a keystroke is sent. The echo is the thing a person is
+  // waiting for, so the poll that will carry it should not sit behind an idle
+  // delay -- this is most of the difference between "instant" and "laggy".
+  function pollSoon() {
+    if (!polling) return;
+    clearTimeout(pollTimer);
+    pollTimer = setTimeout(runPoll, 0);
+  }
+
+  function startPolling() {
+    if (polling) return;
+    polling = true;
+    runPoll();
+  }
+
+  function stopPolling() {
+    if (!polling) return;
+    polling = false;
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+
+  async function startSession() {
+    const size = measure();
+    term.resize(size.rows, size.cols);
+    setState('starting...');
+    try {
+      const out = await post('start', size);
+      generation = out.generation;
+      at = 0;
+      term.reset();
+      setState('');
+      startPolling();
+      screen.focus();
+    } catch (e) {
+      setState('failed: ' + e.message);
+    }
+  }
+
+  // Keystrokes go to the pty as bytes. The screen is focusable (tabindex in the
+  // HTML) so this needs no input element -- a real one would fight the emulator
+  // over what the cursor means.
+  screen.addEventListener('keydown', (event) => {
+    // Let copy through: a terminal you cannot copy out of is a terminal you
+    // cannot use. Everything else belongs to the program.
+    if ((event.metaKey || event.ctrlKey) && event.key === 'c'
+        && window.getSelection().toString()) {
+      return;
+    }
+    const bytes = keyToBytes(event);
+    if (!bytes) return;
+    event.preventDefault();
+    event.stopPropagation();
+    sendInput(bytes);
+  });
+
+  // Type, and draw whatever came back.
+  //
+  // THE ECHO RIDES HOME ON THE SAME REQUEST. Asking for it separately costs a
+  // second round trip no matter how short the poll delay is, because the page
+  // cannot start that second request until the first has returned -- and while
+  // it waited, the scheduler was just as likely to have armed the idle timer.
+  // This is the difference between a character appearing as you press the key
+  // and appearing a quarter of a second later.
+  // Keystrokes queue behind EACH OTHER and nothing else. Two fetches in
+  // flight at once can reach the server swapped, and a pty that receives "eh"
+  // types "eh" -- so inputs are ordered. But they do not wait for polls:
+  // that wait, multiplied by busy mode's back-to-back polling, is what made
+  // typing laggy. The queue is empty at human typing speed anyway; it only
+  // fills when keys arrive faster than a localhost round trip.
+  let inputTurn = Promise.resolve();
+  function sendInput(text) {
+    if (!text) return;
+    inputTurn = inputTurn.then(() => {
+      const askedAt = at, askedGen = generation;
+      return post('input', { text, at: askedAt })
+        .then((out) => {
+          if (!out || out.text === undefined) return;
+          // A poll got home first with these same bytes; the echo is already
+          // on the screen and this copy would be the doubled keystroke.
+          if (stale(askedAt, askedGen)) { pollSoon(); return; }
+          if (out.generation !== generation) {
+            generation = out.generation;
+            at = 0;
+            term.reset();
+          }
+          if (out.text) {
+            term.write(out.text);
+            at = out.at;
+            lastOutput = performance.now();
+          }
+          // Whatever follows the echo -- a command's output, an agent's answer --
+          // arrives on the polling loop, which is now in its fast mode.
+          pollSoon();
+        })
+        .catch(() => {
+          // The keystroke may have been lost; the poll loop is the arbiter of
+          // whether the session is actually gone.
+          setState('retrying...');
+          pollSoon();
+        });
+    });
+  }
+
+  // Paste, which a harness is used with constantly.
+  screen.addEventListener('paste', (event) => {
+    event.preventDefault();
+    const text = event.clipboardData.getData('text');
+    if (text) sendInput(text);
+  });
+
+  const termPanel = makePanel(root, {
+    minWidth: 360, minHeight: 200,
+    width: 'min(52rem, 94vw)', height: '24rem',
+    onOpen: async () => {
+      screen.focus();
+      // A beat, so the panel's first-open default size has actually been laid
+      // out -- measure() in the same tick as the opening click reads a
+      // half-sized body and starts the session ~30 columns wide.
+      //
+      // A TIMER, NOT requestAnimationFrame. rAF does not fire while the tab is
+      // hidden, so an onOpen that awaited a frame in a background tab -- the
+      // panel reopening as the machine wakes, say -- suspended here forever:
+      // no attach, no start, a state line saying nothing. The same
+      // hidden-tab trap as the emulator's paint path, and the same fix.
+      await new Promise(r => setTimeout(r, 50));
+      // ATTACH TO A SESSION THAT IS ALREADY RUNNING, and only start one when
+      // there is none. (The old test was `generation === 0` -- a fact about
+      // THIS PAGE, not the server -- so a reload used to shoot the live agent
+      // and replace it, and the first keystroke went to a dead shell.)
+      try {
+        const now = await post('poll', { at: 0, generation: 0 });
+        // Unreachable is not "no session" -- starting here would shoot a live
+        // agent the moment the supervisor came back. But ABSENT is: no socket
+        // file means nothing has ever started, and starting is exactly what
+        // opening the panel is for. Confusing the two the other way left a
+        // fresh boot spinning at "reconnecting..." with nothing to reconnect
+        // to.
+        if (now.reachable === false && !now.absent) {
+          setState('reconnecting...');
+          startPolling();
+          return;
+        }
+        if (now.running) {
+          // REPLAY AT THE RECORDED GEOMETRY, NOT THE PANEL'S. The backlog is
+          // bytes the program drew for a specific terminal size; absolute
+          // cursor positions in it are meaningless in any other. Replaying a
+          // Claude session into a fresh differently-sized grid was scattering
+          // line fragments all over the reattached screen.
+          generation = now.generation;
+          term.reset();
+          term.resize(now.rows || 24, now.cols || 80);
+          // A TRIMMED HISTORY IS NOT REPLAYED. Once the backlog cap has eaten
+          // the front, what remains starts mid-frame -- often mid-escape --
+          // and painting it fills the scrollback with garbage the redraw
+          // nudge cannot reach, because a TUI repaints its live rows and
+          // nothing above them. Skipping the replay costs old scrollback and
+          // buys a clean screen; the nudge below fills in the current frame.
+          if (now.text && !now.trimmed) term.write(now.text);
+          at = now.at;
+          // NOW adapt to this panel: reflow the grid and tell the pty.
+          const size = measure();
+          if (term.resize(size.rows, size.cols)) {
+            await post('resize', size).catch(() => {});
+          }
+          // And ask the program for one clean frame. The recording may have
+          // been trimmed mid-frame by the backlog cap, and it may span old
+          // geometries; a full-screen program repaints itself completely on
+          // the resize nudge, painting over whatever the replay left. A
+          // line-oriented program ignores it, which is also right.
+          await post('redraw', {}).catch(() => {});
+          setState('');
+          startPolling();
+        } else {
+          syncSize();
+          startPolling();
+          startSession();
+        }
+      } catch (e) {
+        setState('disconnected');
+      }
+    },
+    // Collapsed, the session keeps running -- it is a window, not a switch --
+    // but polling a screen nobody can see is wasted traffic.
+    onShut: () => stopPolling(),
+    onResize: () => syncSize(),
+  });
+
+  // Tell the pty when the panel changes size, so the harness redraws to fit.
+  // Debounced: a drag fires continuously, and a SIGWINCH per pixel would have
+  // the harness redrawing its whole screen hundreds of times.
+  let sizing = null;
+  function syncSize() {
+    clearTimeout(sizing);
+    sizing = setTimeout(() => {
+      const size = measure();
+      if (term.resize(size.rows, size.cols)) {
+        post('resize', size).catch(() => {});
+      }
+    }, 150);
+  }
+
+  window.addEventListener('resize', () => { if (!termPanel.shut) syncSize(); });
+
+  // COMING BACK -- from a suspend, a hidden tab, a dropped network -- restarts
+  // the conversation immediately rather than waiting out whatever backoff the
+  // gap left armed. Restart-not-just-poll: if the machine slept mid-request the
+  // chain may have been wedged in ways the timeout is still unwinding, and
+  // startPolling on a live loop is a no-op anyway.
+  for (const signal of ['visibilitychange', 'focus', 'online']) {
+    window.addEventListener(signal, () => {
+      if (document.hidden || termPanel.shut || generation === 0) return;
+      pollFailures = 0;
+      startPolling();
       pollSoon();
     });
+  }
+
+  return termPanel;
 }
 
-// Paste, which a harness is used with constantly.
-screen.addEventListener('paste', (event) => {
-  event.preventDefault();
-  const text = event.clipboardData.getData('text');
-  if (text) sendInput(text);
-});
-
-const harnessPanel = makePanel(harnessRoot, {
-  minWidth: 360, minHeight: 200,
-  width: 'min(52rem, 94vw)', height: '24rem',
-  onOpen: async () => {
-    screen.focus();
-    // A beat, so the panel's first-open default size has actually been laid
-    // out -- measure() in the same tick as the opening click reads a
-    // half-sized body and starts the session ~30 columns wide.
-    //
-    // A TIMER, NOT requestAnimationFrame. rAF does not fire while the tab is
-    // hidden, so an onOpen that awaited a frame in a background tab -- the
-    // panel reopening as the machine wakes, say -- suspended here forever:
-    // no attach, no start, a state line saying nothing. The same
-    // hidden-tab trap as the emulator's paint path, and the same fix.
-    await new Promise(r => setTimeout(r, 50));
-    // ATTACH TO A SESSION THAT IS ALREADY RUNNING, and only start one when
-    // there is none. (The old test was `generation === 0` -- a fact about
-    // THIS PAGE, not the server -- so a reload used to shoot the live agent
-    // and replace it, and the first keystroke went to a dead shell.)
-    try {
-      const now = await harnessPost('poll', { at: 0, generation: 0 });
-      // Unreachable is not "no session" -- starting here would shoot a live
-      // agent the moment the supervisor came back. But ABSENT is: no socket
-      // file means nothing has ever started, and starting is exactly what
-      // opening the panel is for. Confusing the two the other way left a
-      // fresh boot spinning at "reconnecting..." with nothing to reconnect
-      // to.
-      if (now.reachable === false && !now.absent) {
-        setState('reconnecting...');
-        startPolling();
-        return;
-      }
-      if (now.running) {
-        // REPLAY AT THE RECORDED GEOMETRY, NOT THE PANEL'S. The backlog is
-        // bytes the program drew for a specific terminal size; absolute
-        // cursor positions in it are meaningless in any other. Replaying a
-        // Claude session into a fresh differently-sized grid was scattering
-        // line fragments all over the reattached screen.
-        generation = now.generation;
-        term.reset();
-        term.resize(now.rows || 24, now.cols || 80);
-        // A TRIMMED HISTORY IS NOT REPLAYED. Once the backlog cap has eaten
-        // the front, what remains starts mid-frame -- often mid-escape --
-        // and painting it fills the scrollback with garbage the redraw
-        // nudge cannot reach, because a TUI repaints its live rows and
-        // nothing above them. Skipping the replay costs old scrollback and
-        // buys a clean screen; the nudge below fills in the current frame.
-        if (now.text && !now.trimmed) term.write(now.text);
-        at = now.at;
-        // NOW adapt to this panel: reflow the grid and tell the pty.
-        const size = measure();
-        if (term.resize(size.rows, size.cols)) {
-          await harnessPost('resize', size).catch(() => {});
-        }
-        // And ask the program for one clean frame. The recording may have
-        // been trimmed mid-frame by the backlog cap, and it may span old
-        // geometries; a full-screen program repaints itself completely on
-        // the resize nudge, painting over whatever the replay left. A
-        // line-oriented program ignores it, which is also right.
-        await harnessPost('redraw', {}).catch(() => {});
-        setState('');
-        startPolling();
-      } else {
-        syncSize();
-        startPolling();
-        startHarness();
-      }
-    } catch (e) {
-      setState('disconnected');
-    }
-  },
-  // Collapsed, the session keeps running -- it is a window, not a switch --
-  // but polling a screen nobody can see is wasted traffic.
-  onShut: () => stopPolling(),
-  onResize: () => syncSize(),
-});
-
-// Tell the pty when the panel changes size, so the harness redraws to fit.
-// Debounced: a drag fires continuously, and a SIGWINCH per pixel would have
-// the harness redrawing its whole screen hundreds of times.
-let sizing = null;
-function syncSize() {
-  clearTimeout(sizing);
-  sizing = setTimeout(() => {
-    const size = measure();
-    if (term.resize(size.rows, size.cols)) {
-      harnessPost('resize', size).catch(() => {});
-    }
-  }, 150);
-}
-
-window.addEventListener('resize', () => { if (!harnessPanel.shut) syncSize(); });
-
-// COMING BACK -- from a suspend, a hidden tab, a dropped network -- restarts
-// the conversation immediately rather than waiting out whatever backoff the
-// gap left armed. Restart-not-just-poll: if the machine slept mid-request the
-// chain may have been wedged in ways the timeout is still unwinding, and
-// startPolling on a live loop is a no-op anyway.
-for (const signal of ['visibilitychange', 'focus', 'online']) {
-  window.addEventListener(signal, () => {
-    if (document.hidden || harnessPanel.shut || generation === 0) return;
-    pollFailures = 0;
-    startPolling();
-    pollSoon();
-  });
-}
-
+const harnessPane = makeTerminalPane(document.getElementById('harness'), 'harness');
 // Under the config panel to start with, so both are visible at once.
-requestAnimationFrame(() => harnessPanel.place(12, 104));
+requestAnimationFrame(() => harnessPane.place(12, 104));
+
+// The repl pane exists only when the server hosts a repl to connect to -- a
+// window onto nothing would open, fail to start, and say "failed" about a
+// feature the run deliberately turned off.
+const replRoot = document.getElementById('repl');
+if (window.DEV) {
+  const replPane = makeTerminalPane(replRoot, 'repl');
+  // Stacked under the harness bar, so all three bars read as a stack.
+  requestAnimationFrame(() => replPane.place(12, 148));
+} else {
+  replRoot.remove();
+}

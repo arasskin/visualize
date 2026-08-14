@@ -243,8 +243,10 @@ button:disabled { opacity: .5; cursor: progress; }
 }
 .grip:hover { opacity: .9; }
 
-/* -- the harness terminal ---------------------------------------------------
-   A monospace grid the emulator paints into. The panel gets a ground of its
+/* -- the terminal panes -----------------------------------------------------
+   A monospace grid the emulator paints into. Classes rather than ids because
+   there are two of these now -- the agent harness and the dev repl are the
+   same pane pointed at different endpoints. The panel gets a ground of its
    own rather than following the page: a terminal is its own surface, and the
    emulator's palette is picked to read against it -- each scheme's :root
    block states the ground and the 16 colours together.
@@ -252,14 +254,14 @@ button:disabled { opacity: .5; cursor: progress; }
    That ground is translucent, and the WHOLE panel wears it -- bar included.
    A solid bar over a see-through body reads as two windows stacked, not as
    one see-through window. */
-#harness {
+.term {
   --gutter: 0px;
   background: var(--term); color: var(--term-ink);
 }
-#harness .bar { border-bottom-color: var(--term-line); }
-#harness .panel-body { padding: .35rem .5rem; }
+.term .bar { border-bottom-color: var(--term-line); }
+.term .panel-body { padding: .35rem .5rem; }
 
-#screen {
+.screen {
   margin: 0; outline: none;
   font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--term-ink); white-space: pre; tab-size: 8;
@@ -267,18 +269,18 @@ button:disabled { opacity: .5; cursor: progress; }
 /* The cell the cursor is on. Painted as a background rather than a caret so
    it survives the screen being rebuilt on every frame. Opaque, unlike the
    panel: a cursor you can see the graph through is not a cursor. */
-#screen .cursor { background: var(--term-ink); color: var(--term-ground); }
-#screen:focus .cursor { animation: blink 1.1s steps(1) infinite; }
+.screen .cursor { background: var(--term-ink); color: var(--term-ground); }
+.screen:focus .cursor { animation: blink 1.1s steps(1) infinite; }
 @keyframes blink { 50% { background: transparent; color: inherit; } }
 
 /* A terminal that has not been clicked cannot receive keys, which is worth
    saying rather than leaving the user to discover. */
-#harness .panel-body::after {
+.term .panel-body::after {
   content: "click the screen to type";
   display: block; padding: .3rem .1rem 0;
   color: var(--term-hint); font-size: 11px;
 }
-#harness .panel-body:focus-within::after { content: ""; padding: 0; }
+.term .panel-body:focus-within::after { content: ""; padding: 0; }
 
 .row { display: flex; align-items: center; gap: .3rem; padding: .1rem 0; }
 

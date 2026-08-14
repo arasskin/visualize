@@ -264,6 +264,8 @@ error messages arriving as `null`.
 ./run ~/code/project
 # ...
 #   repl: nc -U /tmp/visualize-1a2b3c4d.repl.8770.sock
+
+./repl        # connects to the newest repl socket; or pass the path you mean
 ```
 
 Every run hosts a repl on a unix socket — the Swank arrangement, because the
@@ -274,6 +276,10 @@ That is why dev mode is decided at launch — on by default, `--no-dev` to opt
 out — and not a runtime toggle. The socket name carries the server's port,
 so the live server and a sandbox developing it, sharing one project root,
 each keep their own.
+
+There is also a **repl window** on the page itself, beside the harness window
+— the same terminal pane, running `./repl` against that server's own socket.
+It only exists in dev mode, since without one there is nothing to connect to.
 
 Connect and you are in the server's own image: every module under its prefix,
 every def in `visualize.janet` by name. From there:

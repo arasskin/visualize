@@ -1,0 +1,31 @@
+#!/bin/sh
+#
+# Connect to the dev repl of a running visualize server.
+#
+#     ./repl              the newest repl socket around
+#     ./repl <socket>     a specific one
+#
+# Every dev-mode server hosts a repl on a unix socket, named for the project
+# and the port the server bound -- see visualize/dev.janet, and the startup
+# banner, which prints the path. With no argument this connects to the newest
+# socket, which is the right one whenever a single server is running; with
+# more than one up, pass the path you mean. The repl window in the page uses
+# exactly this script, with its own server's socket as the argument.
+#
+# ctrl-d leaves; the server stays.
+
+set -e
+
+sock=${1:-}
+
+if [ -z "$sock" ]; then
+  tmp=${TMPDIR:-/tmp}
+  sock=$(ls -t "${tmp%/}"/visualize-*.repl.*.sock 2>/dev/null | head -n 1)
+fi
+
+if [ -z "$sock" ] || [ ! -S "$sock" ]; then
+  echo "no repl socket found -- is a server running? (./run)" >&2
+  exit 1
+fi
+
+exec nc -U "$sock"

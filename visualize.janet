@@ -43,6 +43,7 @@
   (let [argv (or (dyn *args*) [])]
     (not (or (index-of "--no-dev" argv)
              (index-of "--supervise" argv)))))
+
 (when dev? (put root-env *redef* true))
 
 (import ./visualize/scan)
@@ -189,6 +190,9 @@
        # cookie so it dies with the tab and never travels to another origin.
        (string/replace "{{TOKEN}}" (json/encode token))
        (string/replace "{{HARNESS_NAME}}" (string/join harness-argv " "))
+       # Whether this run hosts a dev repl; without one the page drops the
+       # repl panel rather than offering a window onto nothing.
+       (string/replace "{{DEV}}" (json/encode dev?))
        # The SVG goes in last, and with a function rather than a literal:
        # string/replace treats `%` sequences in its replacement specially, and
        # graphviz output is full of them (`%3C` in URLs, percent widths). A
@@ -258,8 +262,7 @@
   # entry point means there is exactly one program to install, one to spawn,
   # and one place that knows how the pieces fit.
   (when (= (get args 1) "--supervise")
-    (def path (get args 2))
-    (unless path (error "usage: visualize --supervise <socket-path>"))
+    (def path (or (get args 2) (error "usage: visualize --supervise <socket-path>")))
     (harness/supervise path)
     (os/exit 0))
 
@@ -284,6 +287,24 @@
   (harness/configure socket
                      [(string here "/bin/janet") (string here "/visualize.janet")
                       "--supervise" socket])
+
+  # The repl window's pty, behind a SECOND supervisor -- the same machinery as
+  # the agent's, second instance, so the backlog, the reattach dance and the
+  # framing are all the code the harness already paid for. What it runs is
+  # ./repl, which is nc against this server's own repl socket: the page gets a
+  # cooked-mode terminal into the live image, exactly what a person at a shell
+  # gets. Keyed to the root like the agent's supervisor, and shared the same
+  # way; dev-only, because the socket it would connect to only exists in dev
+  # mode.
+  (def replterm-socket (socket-for root ".replterm.sock"))
+  (def repl-client
+    (when dev?
+      (harness/make-client replterm-socket
+                           [(string here "/bin/janet") (string here "/visualize.janet")
+                            "--supervise" replterm-socket])))
+  # Where this run's dev repl listens. Named after the port, so it is only
+  # knowable once the server has bound one -- set below, read per request.
+  (var repl-socket nil)
 
   (defn permitted?
     ``May this request drive the terminal?
@@ -394,6 +415,61 @@
                                   (when-let [g (get sent "generation")]
                                     (math/floor g))))]))
 
+      # -- the repl window --------------------------------------------------
+      # The harness endpoints again, one per one, against the second
+      # supervisor. The page drives both panes with the same code and only
+      # the prefix differs, which is the point: nothing below this comment
+      # knows it is a repl rather than an agent. Guarded by `dev?` first, so
+      # without dev mode these fall through to the 404 like any other
+      # unserved path.
+      (and dev? (= method "POST") (= path "/repl/start"))
+      (guarded (fn []
+                 (def sent (json/decode (request :body)))
+                 ["200 OK" "application/json"
+                  (json/encode
+                    (:start repl-client
+                            [(string here "/repl") repl-socket]
+                            root
+                            (math/floor (or (get sent "rows") 24))
+                            (math/floor (or (get sent "cols") 100))))]))
+
+      (and dev? (= method "POST") (= path "/repl/stop"))
+      (guarded (fn [] ["200 OK" "application/json"
+                       (json/encode (:stop repl-client))]))
+
+      (and dev? (= method "POST") (= path "/repl/input"))
+      (guarded (fn []
+                 (def sent (json/decode (request :body)))
+                 (def echo (:send repl-client
+                                  (string (get sent "text" ""))
+                                  (when-let [a (get sent "at")]
+                                    (math/floor a))))
+                 ["200 OK" "application/json"
+                  (json/encode (or echo {"ok" true}))]))
+
+      (and dev? (= method "POST") (= path "/repl/redraw"))
+      (guarded (fn []
+                 (:redraw repl-client)
+                 ["200 OK" "application/json" (json/encode {"ok" true})]))
+
+      (and dev? (= method "POST") (= path "/repl/resize"))
+      (guarded (fn []
+                 (def sent (json/decode (request :body)))
+                 (:resize repl-client
+                          (math/floor (or (get sent "rows") 24))
+                          (math/floor (or (get sent "cols") 100)))
+                 ["200 OK" "application/json" (json/encode {"ok" true})]))
+
+      (and dev? (= method "POST") (= path "/repl/poll"))
+      (guarded (fn []
+                 (def sent (json/decode (request :body)))
+                 ["200 OK" "application/json"
+                  (json/encode
+                    (:poll repl-client
+                           (math/floor (or (get sent "at") 0))
+                           (when-let [g (get sent "generation")]
+                             (math/floor g))))]))
+
       # Anything else in web/, served by name rather than by a route per file.
       #
       # THIS WAS A ROUTE PER FILE and it broke the whole page: app.js grew an
@@ -450,7 +526,7 @@
   # would be stolen by whichever bound last -- dev/serve deletes and rebinds a
   # taken name on purpose. The port is the one thing the walk just made
   # unique, which is why this waits until after the bind.
-  (def repl-socket (when dev? (socket-for root (string ".repl." bound ".sock"))))
+  (when dev? (set repl-socket (socket-for root (string ".repl." bound ".sock"))))
   (when dev? (dev/serve repl-socket this-env))
 
   # CTRL-C TAKES THE AGENT WITH IT, and this is the only thing that does.
@@ -469,16 +545,20 @@
                        (print)
                        (print "visualize: stopping the harness")
                        (try (harness/shutdown) ([_] nil))
+                       # The repl window's supervisor goes the same way: its
+                       # nc is talking to a socket about to be removed, so
+                       # there is nothing there worth outliving us.
+                       (when repl-client (try (:shutdown repl-client) ([_] nil)))
                        # The repl socket dies with its server, so its name
                        # should too: every run mints one now, and the port in
                        # the name means a restart rarely reclaims yesterday's.
                        (when repl-socket (try (os/rm repl-socket) ([_] nil)))
                        (os/exit 0)))
 
-  (printf "visualize: %s on %s" root url)
-  (printf "  config: %s" config-path)
-  (printf "  parsers: %s" (string/join (map |($ :name) specs) ", "))
-  (when dev? (printf "  repl: nc -U %s" repl-socket))
+  (print "visualize: " root " on " url)
+  (print "   config: "config-path)
+  (print "  parsers: "(string/join (map |($ :name) specs) ", "))
+  (when dev? (print "  repl: nc -U " repl-socket))
   (print "  ctrl-c to stop")
   # Off the server, not off the constant: they differ whenever the first
   # choice was taken, and printing the wrong one sends you to somebody else's
