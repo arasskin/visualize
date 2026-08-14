@@ -639,10 +639,14 @@ function makeTerminalPane(root, prefix) {
   // to ~30ms, which is the regime iTerm lives in. The frames can simply be
   // shown.
   const term = makeTerminal(screen, {
-    onPaint: (lines) => {
+    onPaint: (lines, changed) => {
       const grew = lines !== paintedLines;
       paintedLines = lines;
       if (grew && following) paneBody.scrollTop = paneBody.scrollHeight;
+      // A changed, non-growing paint is a program repainting in place --
+      // the answer to a batch of scroll reports. It releases the next
+      // batch: see the wheel pacing below.
+      if (changed && !grew) wheelBatchDone();
     },
   });
   let at = 0;              // how much of the session output we have consumed
@@ -971,53 +975,65 @@ function makeTerminalPane(root, prefix) {
   // pty and the transcript scrolled. With tracking off (the repl, a shell)
   // the wheel keeps scrolling the pane's own scrollback, and shift forces
   // that path the way real terminals do under a mouse-hungry program.
-  // BATCHED, AND PACED BY THE ROUND TRIP. A trackpad fires dozens of wheel
-  // events a second and momentum keeps firing them after the fingers stop.
-  // The first pacing bug was a report per event; the second was subtler: a
-  // TIMER decided the send rate. Batches left every 16ms, but a batch the
-  // program answers with nothing costs the server's input turnaround (~5ms
-  // streaming, up to ~60ms against a silent region -- measured), so sends
-  // outran completions four to one, and a long scroll banked seconds of
-  // stale reports that every later keystroke queued behind. The scroll bar
-  // seized; the drain outlived the gesture.
+  // BATCHED, AND PACED BY THE ANSWERING REPAINT. A trackpad fires dozens of
+  // wheel events a second and momentum keeps firing them after the fingers
+  // stop. Three pacing designs died here, each teaching the next: a report
+  // per event flooded the wire; a 16ms timer outran the server's input
+  // turnaround and banked seconds of backlog CLIENT-side; and pacing by our
+  // own POST completion (~3ms once reports went quiet) just moved the
+  // backlog across the pty -- WE finished sending instantly while claude
+  // consumed reports at its own repaint rate, and its stdin held the queue
+  // that kept scrolling after the fingers stopped.
   //
-  // So AT MOST ONE BATCH IS IN FLIGHT. Deltas accumulate meanwhile (the
-  // carry keeps a stream of fractions from rounding to nothing), clamped to
-  // a screenful -- excess momentum is dropped, never owed -- and the next
-  // batch leaves when the last one lands: the round trip itself sets the
-  // pace, exactly as it does for the poll chain. Reports go `quiet`: the
-  // repaint they provoke arrives on the parked poll, so waiting for an echo
-  // on the input reply bought nothing and cost most of the turnaround.
-  // Coordinates are read in the flush, off the gesture's hot path.
-  let wheelCarry = 0, wheelQueued = 0, wheelFlush = null, wheelInFlight = false;
+  // The consumer sets the pace, and the consumer speaks: the repaint that
+  // answers a batch is a changed, non-growing paint (the same signature the
+  // glide once keyed on), and only its arrival -- or a 150ms backstop, for
+  // a program at the top of its transcript with nothing to answer -- clears
+  // the way for the next batch. Sending at the program's own frame rate is
+  // the fastest rate that MEANS anything; everything above it is queue.
+  //
+  // Deltas accumulate between batches (the carry keeps fractions from
+  // rounding to nothing), with THREE SCREENFULS of momentum budget -- the
+  // previous single-screenful clamp is why a hard flick travelled a fraction
+  // of what iTerm gives -- and a 2x gain, tuned against iTerm's feel.
+  // Excess beyond the budget is dropped, never owed. Reports go `quiet`:
+  // their answer arrives on the parked poll, so the input reply's echo wait
+  // bought nothing. Coordinates are read in the flush, off the hot path.
+  const WHEEL_GAIN = 2;
+  let wheelCarry = 0, wheelQueued = 0, wheelFlush = null;
+  let wheelAwait = null;   // backstop timer while a batch awaits its repaint
   let wheelLast = { x: 0, y: 0 };
+  function wheelBatchDone() {
+    if (wheelAwait === null) return;
+    clearTimeout(wheelAwait);
+    wheelAwait = null;
+    flushWheel();
+  }
   function flushWheel() {
-    if (wheelInFlight || wheelQueued === 0) return;
+    if (wheelAwait !== null || wheelQueued === 0) return;
     const n = Math.max(-8, Math.min(8, wheelQueued));
     wheelQueued -= n;
     const box = cellSize();
     const rect = screen.getBoundingClientRect();
     const col = Math.max(1, Math.min(term.cols, Math.floor((wheelLast.x - rect.left) / box.w) + 1));
     const row = Math.max(1, Math.min(term.rows, Math.floor((wheelLast.y - rect.top) / box.h) + 1));
-    wheelInFlight = true;
-    sendInput(`\x1b[<${n < 0 ? 64 : 65};${col};${row}M`.repeat(Math.abs(n)), true)
-      .finally(() => {
-        wheelInFlight = false;
-        flushWheel();
-      });
+    wheelAwait = setTimeout(wheelBatchDone, 150);
+    sendInput(`\x1b[<${n < 0 ? 64 : 65};${col};${row}M`.repeat(Math.abs(n)), true);
   }
   screen.addEventListener('wheel', (event) => {
     if (!term.mouseReporting || event.shiftKey) return;
     event.preventDefault();
     // deltaMode 1 is already lines; 0 is pixels.
-    wheelCarry += event.deltaMode === 1 ? event.deltaY : event.deltaY / cellSize().h;
+    wheelCarry += WHEEL_GAIN
+      * (event.deltaMode === 1 ? event.deltaY : event.deltaY / cellSize().h);
     const n = Math.trunc(wheelCarry);
     wheelCarry -= n;
-    wheelQueued = Math.max(-term.rows, Math.min(term.rows, wheelQueued + n));
+    const budget = 3 * term.rows;
+    wheelQueued = Math.max(-budget, Math.min(budget, wheelQueued + n));
     wheelLast = { x: event.clientX, y: event.clientY };
     // One short timer coalesces the burst a single gesture-frame delivers;
-    // after it, completions drive the cadence.
-    if (wheelFlush !== null || wheelInFlight || wheelQueued === 0) return;
+    // after it, answering repaints drive the cadence.
+    if (wheelFlush !== null || wheelAwait !== null || wheelQueued === 0) return;
     wheelFlush = setTimeout(() => { wheelFlush = null; flushWheel(); }, 16);
   }, { passive: false });
 
