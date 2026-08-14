@@ -35,6 +35,13 @@
 (var- output nil)       # channel the pump thread writes into
 (var- backlog @[])      # chunks, for a page that reloads or arrives late
 (var- generation 0)     # bumped per start, so a stale client can tell
+# The pty's current size, remembered because a RECORDING is meaningless
+# without it: the backlog is bytes the program drew for a specific geometry,
+# and a page that reattaches must replay them into a grid of that size or
+# absolute cursor positions land in the wrong cells. Updated by start and
+# resize, reported in state.
+(var- pty-rows 24)
+(var- pty-cols 80)
 (var- exited false)
 
 (defn- drain
@@ -98,7 +105,9 @@
   {"running" (truthy? (running?))
    "generation" generation
    "argv" (if session (session :argv) [])
-   "chunks" (length backlog)})
+   "chunks" (length backlog)
+   "rows" pty-rows
+   "cols" pty-cols})
 
 (defn- start
   ``Start `argv` on a pty, replacing any session already running.
@@ -109,6 +118,8 @@
   (when session (try (pty/close session) ([_] nil)))
   (set backlog @[])
   (set exited false)
+  (set pty-rows rows)
+  (set pty-cols cols)
   (++ generation)
 
   # Generous, but the capacity is no longer what keeps the pump running --
@@ -121,20 +132,32 @@
   # session must be created on the side that uses it.
   (ev/thread
     (fn [[reply out command directory lines columns]]
-      (def opened (pty/open command lines columns
-                            (let [environment (os/environ)]
-                              (put environment "PWD" directory)
-                              environment)))
+      # The give happens WHATEVER pty/open does. A forkpty or exec that fails
+      # under resource pressure used to throw before the give, and the start
+      # op then blocked forever in ev/take -- wedging the supervisor for every
+      # later request, and with it the client, which had no deadline either.
+      (def opened (try (pty/open command lines columns
+                                 (let [environment (os/environ)]
+                                   (put environment "PWD" directory)
+                                   environment))
+                    ([e] {:error (string e)})))
       (ev/give reply opened)
-      (pty/pump opened (fn [chunk] (ev/give out chunk)))
-      (ev/give out :eof)
+      (unless (opened :error)
+        (pty/pump opened (fn [chunk] (ev/give out chunk)))
+        (ev/give out :eof))
       :done)
     [ready channel argv root rows cols]
     :nt (ev/thread-chan 2))
 
-  (set session (ev/take ready))
-  (set output channel)
-  (state))
+  (def opened (ev/take ready))
+  (if (opened :error)
+    (do (set session nil)
+        (set output nil)
+        (set exited true)
+        (merge (state) {"error" (opened :error)}))
+    (do (set session opened)
+        (set output channel)
+        (state))))
 
 (defn- stop
   ``Stop the harness, if one is running.
@@ -159,8 +182,27 @@
 (defn- resize
   "Tell the harness its window changed size."
   [rows cols]
+  (set pty-rows rows)
+  (set pty-cols cols)
   (when session
     (try (pty/resize session rows cols) ([_] nil)))
+  nil)
+
+(defn- redraw
+  ``Ask the program to repaint its whole screen, by the only universal means
+  a terminal has: the window changed size.
+
+  A reattaching page cannot reconstruct a perfect screen from the byte
+  history -- the recording may start mid-frame after the backlog cap trimmed
+  it, and it may span geometries. A full-screen program repaints cleanly on
+  SIGWINCH, so the size is nudged one column down and back. A line-oriented
+  program ignores both signals, which is also right: its replayed output was
+  already fine.``
+  []
+  (when session
+    (try (pty/resize session pty-rows (max 1 (dec pty-cols))) ([_] nil))
+    (ev/sleep 0.05)
+    (try (pty/resize session pty-rows pty-cols) ([_] nil)))
   nil)
 
 (defn- since
@@ -243,6 +285,9 @@
             "generation" (now "generation")}
            false])))
 
+    (= op "redraw")
+    (do (redraw) [{"ok" true} false])
+
     (= op "resize")
     (do (resize (number-at "rows" 24) (number-at "cols" 100))
         [{"ok" true} false])
@@ -266,7 +311,9 @@
       [{"text" text
         "at" next
         "running" (now "running")
-        "generation" (now "generation")}
+        "generation" (now "generation")
+        "rows" (now "rows")
+        "cols" (now "cols")}
        false])
 
     (= op "state") [(state) false]

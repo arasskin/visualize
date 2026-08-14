@@ -837,24 +837,44 @@ const harnessPanel = makePanel(harnessRoot, {
   width: 'min(52rem, 94vw)', height: '24rem',
   onOpen: async () => {
     screen.focus();
-    syncSize();
+    // One frame, so the panel's first-open default size has actually been
+    // laid out. measure() in the same tick as the click that opened the
+    // panel reads a half-sized body and starts the session ~30 columns wide.
+    await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => requestAnimationFrame(r));
     // ATTACH TO A SESSION THAT IS ALREADY RUNNING, and only start one when
-    // there is none.
-    //
-    // The old test was `generation === 0`, which is a fact about THIS PAGE,
-    // not about the server. After a reload the page's generation is 0 again
-    // while the supervisor is still running the agent -- so opening the panel
-    // killed the live session and replaced it. That is what "the first
-    // keystroke lags" turned out to be: the keystroke went to a shell that
-    // had just been shot, and nothing said so.
-    startPolling();
+    // there is none. (The old test was `generation === 0` -- a fact about
+    // THIS PAGE, not the server -- so a reload used to shoot the live agent
+    // and replace it, and the first keystroke went to a dead shell.)
     try {
-      const now = await harnessPost('poll', { at, generation });
+      const now = await harnessPost('poll', { at: 0, generation: 0 });
       if (now.running) {
-        // Somebody else's session -- ours from before the reload. Take it.
+        // REPLAY AT THE RECORDED GEOMETRY, NOT THE PANEL'S. The backlog is
+        // bytes the program drew for a specific terminal size; absolute
+        // cursor positions in it are meaningless in any other. Replaying a
+        // Claude session into a fresh differently-sized grid was scattering
+        // line fragments all over the reattached screen.
         generation = now.generation;
+        term.reset();
+        term.resize(now.rows || 24, now.cols || 80);
+        if (now.text) term.write(now.text);
+        at = now.at;
+        // NOW adapt to this panel: reflow the grid and tell the pty.
+        const size = measure();
+        if (term.resize(size.rows, size.cols)) {
+          await harnessPost('resize', size).catch(() => {});
+        }
+        // And ask the program for one clean frame. The recording may have
+        // been trimmed mid-frame by the backlog cap, and it may span old
+        // geometries; a full-screen program repaints itself completely on
+        // the resize nudge, painting over whatever the replay left. A
+        // line-oriented program ignores it, which is also right.
+        await harnessPost('redraw', {}).catch(() => {});
         setState('');
+        startPolling();
       } else {
+        syncSize();
+        startPolling();
         startHarness();
       }
     } catch (e) {

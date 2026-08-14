@@ -329,6 +329,11 @@
                  ["200 OK" "application/json"
                   (json/encode (or echo {"ok" true}))]))
 
+      (and (= method "POST") (= path "/harness/redraw"))
+      (guarded (fn []
+                 (harness/redraw)
+                 ["200 OK" "application/json" (json/encode {"ok" true})]))
+
       (and (= method "POST") (= path "/harness/resize"))
       (guarded (fn []
                  (def sent (json/decode (request :body)))

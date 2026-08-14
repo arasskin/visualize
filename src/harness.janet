@@ -139,7 +139,13 @@
   a truncated object. Throws if the connection is dead, which `ask` treats as
   "drop it and try a fresh one".``
   [connection message]
-  (:write connection (string (json/encode message) "\n"))
+  # TEN-SECOND DEADLINES on both directions. Without them, a supervisor that
+  # accepts and then wedges -- which one did, when a pty open failed before
+  # its reply was sent -- hangs this read forever, and the HTTP request above
+  # it, and the page above that. The longest honest operation here is a start
+  # under heavy load; ten seconds is far beyond it, and a timeout lands in
+  # `ask`'s retry path like any other dead connection.
+  (:write connection (string (json/encode message) "\n") 10)
   (def reply @"")
   (var line nil)
   (var reading true)
@@ -147,7 +153,7 @@
     (if-let [at (string/find "\n" (string reply))]
       (do (set line (string/slice (string reply) 0 at))
           (set reading false))
-      (if-let [chunk (:read connection 65536)]
+      (if-let [chunk (:read connection 65536 nil 10)]
         (buffer/push-string reply chunk)
         (set reading false))))
   (when line (json/decode line)))
@@ -233,6 +239,13 @@
   (ask {"op" "resize" "rows" rows "cols" cols})
   nil)
 
+(defn redraw
+  ``Ask the program to repaint its screen -- what a reattaching page needs,
+  since a byte-history replay cannot reconstruct a trimmed or resized frame.``
+  []
+  (ask {"op" "redraw"})
+  nil)
+
 (defn state
   "What the page needs to know about the session, without its output."
   []
@@ -268,8 +281,12 @@
     {"text" (or (get reply "text") "")
      "at" (or (get reply "at") at)
      "running" (truthy? (get reply "running"))
-     "generation" (or (get reply "generation") 0)}
-    {"text" "" "at" at "running" false "generation" 0}))
+     "generation" (or (get reply "generation") 0)
+     # The geometry the recording was made for. A reattaching page replays
+     # into a grid of THIS size, not the panel's -- see the attach path.
+     "rows" (or (get reply "rows") 24)
+     "cols" (or (get reply "cols") 80)}
+    {"text" "" "at" at "running" false "generation" 0 "rows" 24 "cols" 80}))
 
 (defn shutdown
   ``End the supervisor, killing the agent with it.
