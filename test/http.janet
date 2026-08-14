@@ -78,3 +78,19 @@
   (each found (or (peg/match ~(any (+ (* `from './` (<- (some (if-not "'" 1))) "'") 1)) script) [])
     (t/is= found (http/static-file (string "/" found))
            (string found " is imported by app.js and must be servable"))))
+
+(t/test "two servers walk to two ports, despite SO_REUSEPORT"
+  # THE FREEZE THAT CAME FROM DEVELOPING INSIDE THE TOOL. The runtime sets
+  # SO_REUSEPORT on every server socket, so binding a taken port SUCCEEDS --
+  # the port walk never walked, every sandbox server silently joined the live
+  # server's port, and the kernel split the page's requests between them:
+  # wrong token, wrong supervisor, a terminal frozen at random. The walk now
+  # probes by connecting, which cannot be fooled by a permissive bind.
+  (def handler (fn [_] ["200 OK" "text/plain" "a"]))
+  (def [one port-one loop-one] (http/serve 8931 5 handler))
+  (def [two port-two loop-two] (http/serve 8931 5 handler))
+  (t/ok (not= port-one port-two)
+        "the second server must not share the first one's port")
+  (t/is= (inc port-one) port-two "it lands on the very next port")
+  (:close one)
+  (:close two))

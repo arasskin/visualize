@@ -79,14 +79,37 @@
                        "\r\n"
                        payload)))
 
+(defn- answered?
+  ``Is something already serving this port?
+
+  Asked by CONNECTING, because asking by binding gets a lie: the runtime sets
+  SO_REUSEPORT on every server socket, so binding a taken port SUCCEEDS and
+  the kernel then splits incoming connections between the old server and the
+  new one. A connect tells the truth -- refused means free, accepted means
+  taken.``
+  [port]
+  (if-let [probe (try (net/connect "127.0.0.1" (string port)) ([_] nil))]
+    (do (try (:close probe) ([_] nil)) true)
+    false))
+
 (defn serve
-  ``Bind the first free port at or above `port` and serve `handler`.
+  ``Serve `handler` on the first genuinely free port at or above `port`.
 
   WALKING UP RATHER THAN DYING. The obvious behaviour -- bind one port, exit
   on "address already in use" -- fails constantly in the loop this tool is
   used in: another copy is often already up in another window, and the error
-  leaves you to go find out who has the port. Walking up to the first free one
-  and PRINTING WHICH beats printing a complaint.
+  leaves you to go find out who has the port.
+
+  PROBED, NOT JUST BOUND. The walk used to rely on bind failing for a taken
+  port, and bind does not fail: SO_REUSEPORT (set by the runtime on every
+  server socket) makes N binds of one port all succeed, with the kernel
+  spraying connections across them. Three servers ended up sharing 8770 --
+  the live one and two development sandboxes -- and the page's requests
+  landed on whichever the kernel picked: wrong token, wrong supervisor,
+  intermittent 403s, a terminal that froze whenever a sandbox was up. That
+  is what "developing from inside visualize freezes visualize" turned out
+  to be. There is a connect-then-bind race window, but the loser of that
+  race is a second copy started in the same instant, not a corrupted one.
 
   `handler` is (request) -> [status content-type body].``
   [port tries handler]
@@ -94,9 +117,10 @@
   (var bound nil)
   (for candidate port (+ port tries)
     (unless server
-      (when-let [attempt (try (net/server "127.0.0.1" (string candidate)) ([_] nil))]
-        (set server attempt)
-        (set bound candidate))))
+      (unless (answered? candidate)
+        (when-let [attempt (try (net/server "127.0.0.1" (string candidate)) ([_] nil))]
+          (set server attempt)
+          (set bound candidate)))))
   (unless server
     (errorf "no free port in %d-%d" port (+ port tries -1)))
   # Named `accept-loop` by the caller, never `loop`: that is a core macro, and
