@@ -610,9 +610,15 @@ let generation = 0;      // bumped server-side per start, so a restart resets us
 // Every terminal request carries the token; without it the server answers 403.
 // See `permitted?` in visualize.janet for why localhost alone is not enough.
 async function harnessPost(path, body = {}) {
+  // THE TIMEOUT IS WHAT SURVIVES A SUSPEND. A fetch that is in flight when
+  // the machine sleeps can come back neither resolved nor rejected, and the
+  // poll chain -- guarded by pollInFlight -- then waits on it forever: no
+  // polls, no error, a cursor still blinking because the blink is CSS. An
+  // aborted request rejects like any failure and lands in the retry path.
   const response = await fetch(`/harness/${path}?k=${encodeURIComponent(window.TOKEN)}`, {
     method: 'POST',
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000),
   });
   if (!response.ok) throw new Error(await response.text());
   return response.json();
@@ -644,6 +650,15 @@ async function poll() {
     // restarted agent leaves the page asking about chunks that no longer
     // exist, and the reply is empty forever.
     const out = await harnessPost('poll', { at, generation });
+    // A reply saying "could not reach the supervisor" is a failed request
+    // wearing a 200; treating its running=false/generation=0 as session
+    // truth is what blanked the screen after a suspend. Absent -- the socket
+    // file itself gone -- is different again: that is a supervisor shut down
+    // for real, and the honest state is exited, not eternal reconnecting.
+    if (out.reachable === false) {
+      if (out.absent) { setState('exited'); stopPolling(); return; }
+      throw new Error('supervisor unreachable');
+    }
     // A restart on the server means our screen belongs to a dead session, so
     // it is cleared before the new session's output is drawn onto it.
     //
@@ -679,12 +694,11 @@ async function poll() {
     // for good, leaving a live agent invisible behind a dead pane. Three in a
     // row means it is really gone.
     pollFailures++;
-    if (pollFailures >= 3) {
-      setState('disconnected');
-      stopPolling();
-    } else {
-      setState('retrying...');
-    }
+    // NEVER a terminal state. The server is on 127.0.0.1 and will come back
+    // -- from a restart, from the machine waking -- so the loop drops to a
+    // slow reconnect cadence rather than stopping. Stopping is what left a
+    // dead panel behind a live agent after every suspend.
+    setState(pollFailures >= 3 ? 'reconnecting...' : 'retrying...');
   }
 }
 
@@ -712,11 +726,14 @@ let lastOutput = 0;
 let pollTimer = null;
 let pollInFlight = false;
 
+const RECONNECT_DELAY = 2000;
+
 function scheduleNextPoll() {
   if (!polling) return;
   clearTimeout(pollTimer);
-  const busy = performance.now() - lastOutput < BUSY_WINDOW;
-  pollTimer = setTimeout(runPoll, busy ? BUSY_DELAY : IDLE_DELAY);
+  const delay = pollFailures >= 3 ? RECONNECT_DELAY
+    : (performance.now() - lastOutput < BUSY_WINDOW ? BUSY_DELAY : IDLE_DELAY);
+  pollTimer = setTimeout(runPoll, delay);
 }
 
 async function runPoll() {
@@ -837,17 +854,33 @@ const harnessPanel = makePanel(harnessRoot, {
   width: 'min(52rem, 94vw)', height: '24rem',
   onOpen: async () => {
     screen.focus();
-    // One frame, so the panel's first-open default size has actually been
-    // laid out. measure() in the same tick as the click that opened the
-    // panel reads a half-sized body and starts the session ~30 columns wide.
-    await new Promise(r => requestAnimationFrame(r));
-    await new Promise(r => requestAnimationFrame(r));
+    // A beat, so the panel's first-open default size has actually been laid
+    // out -- measure() in the same tick as the opening click reads a
+    // half-sized body and starts the session ~30 columns wide.
+    //
+    // A TIMER, NOT requestAnimationFrame. rAF does not fire while the tab is
+    // hidden, so an onOpen that awaited a frame in a background tab -- the
+    // panel reopening as the machine wakes, say -- suspended here forever:
+    // no attach, no start, a state line saying nothing. The same
+    // hidden-tab trap as the emulator's paint path, and the same fix.
+    await new Promise(r => setTimeout(r, 50));
     // ATTACH TO A SESSION THAT IS ALREADY RUNNING, and only start one when
     // there is none. (The old test was `generation === 0` -- a fact about
     // THIS PAGE, not the server -- so a reload used to shoot the live agent
     // and replace it, and the first keystroke went to a dead shell.)
     try {
       const now = await harnessPost('poll', { at: 0, generation: 0 });
+      // Unreachable is not "no session" -- starting here would shoot a live
+      // agent the moment the supervisor came back. But ABSENT is: no socket
+      // file means nothing has ever started, and starting is exactly what
+      // opening the panel is for. Confusing the two the other way left a
+      // fresh boot spinning at "reconnecting..." with nothing to reconnect
+      // to.
+      if (now.reachable === false && !now.absent) {
+        setState('reconnecting...');
+        startPolling();
+        return;
+      }
       if (now.running) {
         // REPLAY AT THE RECORDED GEOMETRY, NOT THE PANEL'S. The backlog is
         // bytes the program drew for a specific terminal size; absolute
@@ -902,6 +935,20 @@ function syncSize() {
 }
 
 window.addEventListener('resize', () => { if (!harnessPanel.shut) syncSize(); });
+
+// COMING BACK -- from a suspend, a hidden tab, a dropped network -- restarts
+// the conversation immediately rather than waiting out whatever backoff the
+// gap left armed. Restart-not-just-poll: if the machine slept mid-request the
+// chain may have been wedged in ways the timeout is still unwinding, and
+// startPolling on a live loop is a no-op anyway.
+for (const signal of ['visibilitychange', 'focus', 'online']) {
+  window.addEventListener(signal, () => {
+    if (document.hidden || harnessPanel.shut || generation === 0) return;
+    pollFailures = 0;
+    startPolling();
+    pollSoon();
+  });
+}
 
 // Under the config panel to start with, so both are visible at once.
 requestAnimationFrame(() => harnessPanel.place(12, 104));

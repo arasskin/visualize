@@ -285,8 +285,28 @@
      # The geometry the recording was made for. A reattaching page replays
      # into a grid of THIS size, not the panel's -- see the attach path.
      "rows" (or (get reply "rows") 24)
-     "cols" (or (get reply "cols") 80)}
-    {"text" "" "at" at "running" false "generation" 0 "rows" 24 "cols" 80}))
+     "cols" (or (get reply "cols") 80)
+     "reachable" true}
+    # UNREACHABLE IS NOT DEAD. This fallback used to say running=false,
+    # generation=0 -- and the page, taking it as truth, blanked its screen
+    # for the generation change, showed "exited", and stopped polling. All of
+    # that for one supervisor blip: a deadline expiring while the machine
+    # woke from sleep. The flag lets the page treat this as the failed
+    # request it is, and keep both its screen and its session.
+    # `absent` separates "safe to start a fresh session" from "wait, one is
+    # coming back". No socket file: nothing ever started, or a clean
+    # shutdown -- start away. File present: probe it. A unix connect with no
+    # listener is REFUSED instantly, which means the supervisor is dead and
+    # the file is a corpse a crash left behind -- also safe, since ensure
+    # clears it. Only accepted-but-unresponsive is a genuine blip (a machine
+    # mid-wake), where starting would shoot the session about to return.
+    {"text" "" "at" at "running" false "generation" 0 "rows" 24 "cols" 80
+     "reachable" false
+     "absent" (if (and socket-path (os/stat socket-path :mode))
+                (if-let [probe (try (net/connect :unix socket-path) ([_] nil))]
+                  (do (try (:close probe) ([_] nil)) false)
+                  true)
+                true)}))
 
 (defn shutdown
   ``End the supervisor, killing the agent with it.

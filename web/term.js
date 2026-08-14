@@ -91,10 +91,12 @@ export function makeTerminal(screen, options = {}) {
   // -- SGR, which is the overwhelming majority of what arrives ---------------
   // 30-37/90-97 foreground, 40-47/100-107 background, 38;5;N and 48;5;N for
   // the 256-colour palette (which is what both harnesses actually use).
-  const basic = ['#000000', '#c05c5c', '#5ca35c', '#c0a35c',
-                 '#5c7fc0', '#a35cc0', '#5cb0b0', '#c0c0c0'];
-  const bright = ['#6a6a6a', '#ff8a8a', '#8ae08a', '#ffe08a',
-                  '#8ab4ff', '#e08aff', '#8ae0e0', '#ffffff'];
+  // The 16 named colours live in style.css with the rest of the theme; the
+  // emulator refers to them and owns no colour of its own.
+  const names = ['black', 'red', 'green', 'yellow',
+                 'blue', 'magenta', 'cyan', 'white'];
+  const basic = names.map(n => `var(--term-${n})`);
+  const bright = names.map(n => `var(--term-bright-${n})`);
 
   // The xterm 256-colour cube, computed rather than tabulated.
   function palette(n) {
@@ -356,10 +358,9 @@ export function makeTerminal(screen, options = {}) {
     if (!c) return '';
     let fg = c.fg, bg = c.bg;
     // Inverse with no colours of its own swaps against the panel's own ink and
-    // ground. The ground is spelled out rather than taken from --term: that one
-    // is translucent, and a highlight you can see the graph through is not a
-    // highlight.
-    if (c.inverse) { const t = fg; fg = bg || 'var(--term-ink)'; bg = t || '#1a1a1c'; }
+    // ground. --term-ground rather than --term: that one is translucent, and a
+    // highlight you can see the graph through is not a highlight.
+    if (c.inverse) { const t = fg; fg = bg || 'var(--term-ink)'; bg = t || 'var(--term-ground)'; }
     const parts = [];
     if (fg) parts.push(`color:${fg}`);
     if (bg) parts.push(`background:${bg}`);
