@@ -246,6 +246,35 @@
   (check/ok found "the keystroke still reached the program")
   (harness/stop))
 
+(check/test "the DA1 scanner counts queries and carries a split one"
+  # Pure half of the fix: a read() splits the stream wherever it likes, so
+  # the scanner must find a query that arrives half in one chunk and half in
+  # the next -- and find it exactly once.
+  (check/is= [1 ""] (harness/da1-queries "" "\e[c"))
+  (check/is= [1 ""] (harness/da1-queries "" "before \e[0c after"))
+  (check/is= [2 ""] (harness/da1-queries "" "\e[c\e[c"))
+  (check/is= [0 "\e["] (harness/da1-queries "" "output ends \e["))
+  (check/is= [1 ""] (harness/da1-queries "\e[" "c and more"))
+  (check/is= [0 "\e[0"] (harness/da1-queries "\e[" "0"))
+  (check/is= [1 ""] (harness/da1-queries "\e[0" "c"))
+  (check/is= [0 ""] (harness/da1-queries "" "\e[0m is a colour, not a query"))
+  (check/is= [0 ""] (harness/da1-queries "\e[" "2J is a clear, not a query")))
+
+(check/test "a DA1 query is answered, page or no page"
+  # THE STARTUP FREEZE. claude sends ESC [ c and waits for the terminal to
+  # say what it is; a terminal that stays silent freezes it in exactly the
+  # reported shape. The emulator that could answer lives in a browser page
+  # that may not even be open -- so the supervisor answers, and this test
+  # runs with no page polling at all, which is the point. `head -c 5`
+  # consumes exactly the VT102 reply (ESC [ ? 6 c), so ANSWERED printing
+  # proves the bytes reached the program's stdin.
+  (harness/start ["/bin/sh" "-c"
+                  "stty raw -echo; printf '\\033[c'; head -c 5 >/dev/null; echo ANSWERED"]
+                 (os/cwd) 24 80)
+  (def [found _] (wait-for |(string/find "ANSWERED" $)))
+  (check/ok found "the reply reached the waiting program")
+  (harness/stop))
+
 (check/test "live reading continues past the backlog cap"
   # THE LONG-SESSION STALL. Chunk numbers used to be positions in the backlog
   # array, and the cap trims that array from the front -- so once a session

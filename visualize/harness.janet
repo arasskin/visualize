@@ -51,6 +51,49 @@
 (var- pty-cols 80)
 (var- exited false)
 
+# DA1 IS ANSWERED HERE, because nowhere else can do it correctly. The
+# emulator lives in the browser, but a page can attach late, reload -- which
+# replays the whole backlog -- or not be open at all. A replayed query must
+# not be answered a second time, and a program waiting with no page open must
+# not wait forever: claude sends ESC [ c at startup and a terminal that stays
+# silent freezes it. The supervisor is the one place the stream passes
+# exactly once, in real time, next to the pty the reply belongs in.
+#
+# The reply claims VT102 -- the classic minimal answer. Programs that ask are
+# overwhelmingly waiting for AN answer, and claiming a richer terminal would
+# invite features the emulator does not draw.
+(def- da1-reply "\e[?6c")
+
+# A read() splits the stream wherever it likes, so a query can arrive half in
+# one chunk and half in the next. The unfinished tail is carried into the
+# next scan; it never matched as a whole query, so completing it there
+# answers it exactly once.
+(var- da1-carry "")
+
+(defn da1-queries
+  ``How many DA1 queries (ESC [ c, ESC [ 0 c) finish in `carry` + `chunk`,
+  and the unfinished tail to carry into the next scan. Pure, for the tests:
+  returns [count next-carry].``
+  [carry chunk]
+  (def text (string carry chunk))
+  (def next-carry
+    (cond
+      (string/has-suffix? "\e[0" text) "\e[0"
+      (string/has-suffix? "\e[" text) "\e["
+      (string/has-suffix? "\e" text) "\e"
+      ""))
+  [(+ (length (string/find-all "\e[c" text))
+      (length (string/find-all "\e[0c" text)))
+   next-carry])
+
+(defn- answer-queries
+  "Reply to any device query the program just asked, straight into the pty."
+  [chunk]
+  (def [hits carry] (da1-queries da1-carry chunk))
+  (set da1-carry carry)
+  (when (and (pos? hits) session (not exited))
+    (repeat hits (try (pty/write-input session da1-reply) ([_] nil)))))
+
 (defn- drain
   ``Move whatever the pump thread has produced into the backlog.
 
@@ -64,6 +107,7 @@
       (if (= value :eof)
         (set exited true)
         (do (array/push backlog value)
+            (answer-queries value)
             (when (> (length backlog) backlog-limit)
               (array/remove backlog 0)
               (++ base)))))))
@@ -128,6 +172,7 @@
   (set backlog @[])
   (set base 0)
   (set exited false)
+  (set da1-carry "")
   (set pty-rows rows)
   (set pty-cols cols)
   (++ generation)
