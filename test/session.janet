@@ -193,6 +193,32 @@
             "the mismatch replays the new session rather than answering empty")
   (harness/stop))
 
+(check/test "a running session is there to be attached to, not restarted"
+  # THE FIRST-KEYSTROKE BUG. Opening the terminal panel used to call `start`
+  # whenever the PAGE's generation was 0 -- which is true of every freshly
+  # loaded page, including a reload of one whose session is still running. So
+  # a reload shot the agent and replaced it, and the first keystroke went to a
+  # shell that had just been killed. It read as lag; it was a dead session.
+  #
+  # What the page needs is exactly this: ask, and only start when nothing is
+  # running.
+  # `sleep 5`, not `sleep 30`: the check below takes a moment and the session
+  # has to outlive it, but a child still running when this file finishes
+  # loading disturbs the next module's reads.
+  (harness/start ["/bin/sh" "-c" "echo ALIVE-ALREADY; sleep 5"] (os/cwd) 24 80)
+  (wait-for |(string/find "ALIVE-ALREADY" $))
+  (def before ((harness/state) :generation))
+
+  # What a reloaded page now does: poll first, and believe the answer.
+  (def seen (harness/poll 0 0))
+  (check/ok (get seen "running")
+            "the page can see that a session is already running")
+  (check/ok (string/find "ALIVE-ALREADY" (get seen "text" ""))
+            "and gets its output without restarting it")
+  (check/is= before ((harness/state) :generation)
+             "asking must not bump the generation -- that would mean a restart")
+  (harness/stop))
+
 (check/test "shutdown ends the supervisor and takes the socket with it"
   # What ctrl-c does. Also this suite's teardown: leaving a supervisor behind
   # would make the next run adopt a session it did not start, and the tests

@@ -791,12 +791,31 @@ screen.addEventListener('paste', (event) => {
 const harnessPanel = makePanel(harnessRoot, {
   minWidth: 360, minHeight: 200,
   width: 'min(52rem, 94vw)', height: '24rem',
-  onOpen: () => {
+  onOpen: async () => {
     screen.focus();
-    // Start on first open rather than at page load: a graph tool should not
-    // spawn an agent because you happened to open it.
-    if (!polling && generation === 0) startHarness();
-    else { syncSize(); startPolling(); }
+    syncSize();
+    // ATTACH TO A SESSION THAT IS ALREADY RUNNING, and only start one when
+    // there is none.
+    //
+    // The old test was `generation === 0`, which is a fact about THIS PAGE,
+    // not about the server. After a reload the page's generation is 0 again
+    // while the supervisor is still running the agent -- so opening the panel
+    // killed the live session and replaced it. That is what "the first
+    // keystroke lags" turned out to be: the keystroke went to a shell that
+    // had just been shot, and nothing said so.
+    startPolling();
+    try {
+      const now = await harnessPost('poll', { at, generation });
+      if (now.running) {
+        // Somebody else's session -- ours from before the reload. Take it.
+        generation = now.generation;
+        setState('');
+      } else {
+        startHarness();
+      }
+    } catch (e) {
+      setState('disconnected');
+    }
   },
   // Collapsed, the session keeps running -- it is a window, not a switch --
   // but polling a screen nobody can see is wasted traffic.
