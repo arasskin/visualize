@@ -367,18 +367,53 @@
     # to notice and re-poll, because that costs a round trip during which the
     # screen is empty, and because the supervisor is the only side that knows
     # what a generation means.
+    #
+    # WITH `wait`, THE REQUEST PARKS until there is something to say. This is
+    # what turned the transport from polling into streaming: instead of the
+    # page asking four times a second and output waiting up to 250ms for the
+    # next ask, the ask is already here when the output arrives and leaves
+    # ~10ms later. Parking is safe because every connection is answered in
+    # its own fiber -- a held since blocks nobody -- and bounded because a
+    # deadline is not optional on localhost either: the page's fetch has its
+    # own timeout, and a park that outlived it would answer a closed socket.
+    # The park ends early when the generation changes (a restart mid-park
+    # must replay NOW, not at the deadline) or the session dies (the page
+    # should hear "exited" promptly). The reply carries `waited` whenever
+    # wait was asked for, honoured or not: the page uses it to tell a
+    # supervisor that streams from an old one that ignores the key, and
+    # falls back to its timer cadence rather than spinning.
     (let [asked (number-at "generation" -1)
-          now (session-state)
-          stale (and (>= asked 0) (not= asked (now "generation")))
-          [text next] (session-since (if stale 0 (number-at "at" 0)))]
-      [{"text" text
-        "at" next
-        "running" (now "running")
-        "generation" (now "generation")
-        "rows" (now "rows")
-        "cols" (now "cols")
-        "trimmed" (now "trimmed")}
-       false])
+          wait (min 25000 (number-at "wait" 0))]
+      (when (pos? wait)
+        (def entry (session-state))
+        (def from (number-at "at" 0))
+        (def deadline (+ (os/clock :monotonic) (/ wait 1000)))
+        (var parked true)
+        (while parked
+          (drain)
+          (def now (session-state))
+          (def total (+ base (length backlog)))
+          (cond
+            # A generation mismatch replays from zero: answer now.
+            (and (>= asked 0) (not= asked (now "generation"))) (set parked false)
+            # Output beyond the caller's position: answer now.
+            (> total (max base (min from total))) (set parked false)
+            # The session's liveness flipped mid-park: answer now.
+            (not= (now "running") (entry "running")) (set parked false)
+            (>= (os/clock :monotonic) deadline) (set parked false)
+            (ev/sleep 0.01))))
+      (let [now (session-state)
+            stale (and (>= asked 0) (not= asked (now "generation")))
+            [text next] (session-since (if stale 0 (number-at "at" 0)))]
+        [{"text" text
+          "at" next
+          "running" (now "running")
+          "generation" (now "generation")
+          "rows" (now "rows")
+          "cols" (now "cols")
+          "trimmed" (now "trimmed")
+          "waited" (pos? wait)}
+         false]))
 
     (= op "state") [(session-state) false]
 
@@ -481,13 +516,16 @@
   reply routinely exceeds one chunk, and a single :read would hand json/decode
   a truncated object. Throws if the connection is dead, which `ask` treats as
   "drop it and try a fresh one".``
-  [connection message]
-  # TEN-SECOND DEADLINES on both directions. Without them, a supervisor that
-  # accepts and then wedges -- which one did, when a pty open failed before
-  # its reply was sent -- hangs this read forever, and the HTTP request above
-  # it, and the page above that. The longest honest operation here is a start
-  # under heavy load; ten seconds is far beyond it, and a timeout lands in
-  # `ask`'s retry path like any other dead connection.
+  [connection message &opt deadline]
+  # TEN-SECOND DEADLINES on both directions, by default. Without them, a
+  # supervisor that accepts and then wedges -- which one did, when a pty open
+  # failed before its reply was sent -- hangs this read forever, and the HTTP
+  # request above it, and the page above that. The longest honest ordinary
+  # operation is a start under heavy load; ten seconds is far beyond it, and
+  # a timeout lands in `ask`'s retry path like any other dead connection.
+  # A parked `since` (see the wait handling in `handle`) is the one caller
+  # that legitimately holds longer, and it says so.
+  (default deadline 10)
   (:write connection (string (json/encode message) "\n") 10)
   (def reply @"")
   (var line nil)
@@ -496,7 +534,7 @@
     (if-let [at (string/find "\n" (string reply))]
       (do (set line (string/slice (string reply) 0 at))
           (set reading false))
-      (if-let [chunk (:read connection 65536 nil 10)]
+      (if-let [chunk (:read connection 65536 nil deadline)]
         (buffer/push-string reply chunk)
         (set reading false))))
   (when line (json/decode line)))
@@ -728,10 +766,33 @@
    # which is what stops a page from sitting blank in front of a restarted
    # agent.
    :poll
-   (fn [_ at &opt generation]
-     (def reply (ask (if generation
-                       {"op" "since" "at" at "generation" generation}
-                       {"op" "since" "at" at})))
+   (fn [_ at &opt generation wait]
+     (def message @{"op" "since" "at" at})
+     (when generation (put message "generation" generation))
+     (def reply
+       (if (and wait (pos? wait))
+         # A waiting poll must not hold the pinned connection's turn: input
+         # and resize share it, and a keystroke queued behind a 20-second
+         # park is a frozen keyboard. So ask the cheap question over the
+         # pinned path first -- during a streaming burst there is already
+         # output, and this answers without opening anything -- and only a
+         # quiet session parks, on a PRIVATE connection whose lifetime is
+         # the park. That keeps connection churn to one per quiet period
+         # rather than the one-per-poll that used to feed the macOS fd race.
+         (let [quick (ask message)]
+           # Park only on a quiet, LIVE session: text in hand answers now,
+           # and a dead session's "exited" must reach the page promptly, not
+           # after a park that can learn nothing.
+           (if (or (nil? quick)
+                   (not (empty? (get quick "text" "")))
+                   (not (truthy? (get quick "running"))))
+             quick
+             (if-let [conn (connect)]
+               (defer (:close conn)
+                 (put message "wait" wait)
+                 (try (talk conn message (+ 10 (/ wait 1000))) ([_] nil)))
+               quick)))
+         (ask message)))
      (if reply
        {"text" (or (get reply "text") "")
         "at" (or (get reply "at") at)
@@ -742,6 +803,9 @@
         "rows" (or (get reply "rows") 24)
         "cols" (or (get reply "cols") 80)
         "trimmed" (truthy? (get reply "trimmed"))
+        # Whether the supervisor understood `wait` -- the page's signal that
+        # it may chain polls with no timer instead of pacing them.
+        "waited" (truthy? (get reply "waited"))
         "reachable" true}
        # UNREACHABLE IS NOT DEAD. This fallback used to say running=false,
        # generation=0 -- and the page, taking it as truth, blanked its screen
@@ -835,8 +899,8 @@
 
 (defn poll
   "The whole answer to one `/harness/poll`, in a single round trip."
-  [at &opt generation]
-  (:poll default-client at generation))
+  [at &opt generation wait]
+  (:poll default-client at generation wait))
 
 (defn shutdown
   "End the supervisor, killing the agent with it. Called on ctrl-c only."

@@ -413,7 +413,13 @@
                                   # Absent from an older page, which then gets
                                   # the previous behaviour rather than an error.
                                   (when-let [g (get sent "generation")]
-                                    (math/floor g))))]))
+                                    (math/floor g))
+                                  # How long the page is willing to have this
+                                  # request PARK for output -- the streaming
+                                  # transport. Absent from an older page,
+                                  # which keeps polling on its own timers.
+                                  (when-let [w (get sent "wait")]
+                                    (math/floor w))))]))
 
       # -- the repl window --------------------------------------------------
       # The harness endpoints again, one per one, against the second
@@ -468,7 +474,9 @@
                     (:poll repl-client
                            (math/floor (or (get sent "at") 0))
                            (when-let [g (get sent "generation")]
-                             (math/floor g))))]))
+                             (math/floor g))
+                           (when-let [w (get sent "wait")]
+                             (math/floor w))))]))
 
       # Anything else in web/, served by name rather than by a route per file.
       #

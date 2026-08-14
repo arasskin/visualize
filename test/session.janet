@@ -77,6 +77,40 @@
   (check/ok found "the harness sees the new window size")
   (harness/stop))
 
+(check/test "a waiting poll parks until output arrives"
+  # The streaming transport: a poll carrying `wait` PARKS at the supervisor
+  # and answers the moment there is something to say. Three properties, each
+  # against the real socket: quiet-then-output answers early with the output;
+  # quiet-throughout answers empty at the deadline, marked `waited` so the
+  # page knows parking is supported; already-pending output answers at once.
+  (harness/start ["/bin/sh" "-c" "echo FIRST; sleep 1; echo LATER; sleep 5"]
+                 (os/cwd) 24 80)
+  (wait-for |(string/find "FIRST" $))
+  (def head (harness/poll 0))
+  (def caught-up (head "at"))
+  (def gen (head "generation"))
+  # Parked, then woken by LATER: back well before the 8s deadline, and not
+  # instantly -- instant-and-empty is exactly the spin this exists to kill.
+  (def t0 (os/clock :monotonic))
+  (def woken (harness/poll caught-up gen 8000))
+  (def elapsed (- (os/clock :monotonic) t0))
+  (check/ok (string/find "LATER" (woken "text")) "the park returns the output that woke it")
+  (check/ok (woken "waited") "and says it parked")
+  (check/ok (< elapsed 7) "woken by output, not the deadline")
+  (check/ok (> elapsed 0.3) "genuinely parked rather than answering empty")
+  # Quiet throughout: the deadline answers, empty but marked.
+  (def t1 (os/clock :monotonic))
+  (def quiet (harness/poll (woken "at") gen 400))
+  (check/is= "" (quiet "text"))
+  (check/ok (quiet "waited"))
+  (check/ok (> (- (os/clock :monotonic) t1) 0.3) "held until the deadline")
+  # Output already pending answers immediately, no park.
+  (def t2 (os/clock :monotonic))
+  (def pending (harness/poll 0 gen 8000))
+  (check/ok (string/find "FIRST" (pending "text")))
+  (check/ok (< (- (os/clock :monotonic) t2) 1) "pending output never waits")
+  (harness/stop))
+
 (check/test "starting again replaces the session and bumps the generation"
   # The page watches this number: a change means its screen belongs to a dead
   # session and has to be thrown away rather than appended to.

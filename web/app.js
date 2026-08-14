@@ -689,7 +689,7 @@ function makeTerminalPane(root, prefix) {
 
   // Every terminal request carries the token; without it the server answers 403.
   // See `permitted?` in visualize.janet for why localhost alone is not enough.
-  async function post(path, body = {}) {
+  async function post(path, body = {}, timeoutMs = 15000) {
     // THE TIMEOUT IS WHAT SURVIVES A SUSPEND. A fetch that is in flight when
     // the machine sleeps can come back neither resolved nor rejected, and the
     // poll chain -- guarded by pollInFlight -- then waits on it forever: no
@@ -698,7 +698,7 @@ function makeTerminalPane(root, prefix) {
     const response = await fetch(`/${prefix}/${path}?k=${encodeURIComponent(window.TOKEN)}`, {
       method: 'POST',
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     if (!response.ok) throw new Error(await response.text());
     return response.json();
@@ -740,7 +740,12 @@ function makeTerminalPane(root, prefix) {
       // restarted agent leaves the page asking about chunks that no longer
       // exist, and the reply is empty forever.
       const askedAt = at, askedGen = generation;
-      const out = await post('poll', { at: askedAt, generation: askedGen });
+      // `wait` invites the supervisor to PARK this request until it has
+      // something to say -- the streaming transport. Output leaves the pty
+      // and lands here ~10ms later instead of waiting out a poll timer. The
+      // fetch timeout leaves 10s of headroom over the park.
+      const out = await post('poll', { at: askedAt, generation: askedGen,
+                                       wait: LONGPOLL_WAIT }, LONGPOLL_WAIT + 10000);
       // A reply saying "could not reach the supervisor" is a failed request
       // wearing a 200; treating its running=false/generation=0 as session
       // truth is what blanked the screen after a suspend. Absent -- the socket
@@ -781,6 +786,13 @@ function makeTerminalPane(root, prefix) {
       setState(out.running ? '' : 'exited');
       if (!out.running) stopPolling();
       pollFailures = 0;
+      // A reply that says `waited` came from a supervisor that parks; the
+      // next ask should already be on its way when output arrives, so the
+      // chain re-polls with no timer at all. Judged per reply, not once:
+      // the supervisor under this page can change across a restart, and an
+      // old one that ignores `wait` answers instantly without the marker --
+      // chaining on THAT would be a busy-spin, so it keeps its timers.
+      streaming = !!out.waited;
     } catch (e) {
       // A SINGLE dropped request must not kill the terminal. The server answers
       // hundreds of polls an hour, and one 500 -- a transient race, a supervisor
@@ -812,6 +824,10 @@ function makeTerminalPane(root, prefix) {
   // the round trip itself is the pacing.
   const IDLE_DELAY = 250;
   const BUSY_DELAY = 0;
+  // How long one poll may park server-side before answering empty. Under the
+  // supervisor's own 25s cap; the page's fetch timeout rides 10s above it.
+  const LONGPOLL_WAIT = 20000;
+  let streaming = false;
   // How long output keeps the loop in its fast mode after the last byte, so a
   // pause between two chunks of the same response does not drop it back to idle.
   const BUSY_WINDOW = 900;
@@ -846,6 +862,12 @@ function makeTerminalPane(root, prefix) {
   function scheduleNextPoll() {
     if (!polling) return;
     clearTimeout(pollTimer);
+    // Streaming healthy: no timer at all. The next long-poll goes out on the
+    // spot and parks server-side until there is something to say -- and a
+    // DIRECT call rather than setTimeout(0) matters in a hidden tab, where
+    // timers are clamped to a second but a fetch continuation still runs,
+    // so output keeps flowing to a tab the user cannot currently see.
+    if (streaming && pollFailures === 0) { pollTimer = null; runPoll(); return; }
     const delay = pollFailures >= 3 ? RECONNECT_DELAY
       : (performance.now() - lastOutput < BUSY_WINDOW ? BUSY_DELAY : IDLE_DELAY);
     pollTimer = setTimeout(runPoll, delay);
