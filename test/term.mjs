@@ -99,6 +99,37 @@ term.reset();
 term.write('\x1b[?25l\x1b[?2004h\x1b[?2026hshown');
 check('private modes do not print', term.text()[0], 'shown');
 
+// Mouse tracking decides where the wheel goes: claude turns it on at startup
+// and scrolls its own transcript on wheel reports, never the terminal -- so
+// the host forwards the wheel exactly while these modes are on.
+ok('the mouse starts with the browser', term.mouseReporting === false);
+term.write('\x1b[?1000h\x1b[?1002h\x1b[?1003h\x1b[?1006h');
+ok('tracking plus SGR hands the wheel to the program', term.mouseReporting === true);
+term.write('\x1b[?1000;1002;1003l');
+ok('turning tracking off hands it back', term.mouseReporting === false);
+term.reset();
+term.write('\x1b[?1000;1006h');
+ok('one h can carry several modes', term.mouseReporting === true);
+term.reset();
+ok('a session reset clears the modes', term.mouseReporting === false);
+
+// Synchronized output: claude brackets every repaint in ?2026h..?2026l so a
+// frame lands whole. Holding the paint while a frame is open is what keeps
+// typing and scrolling from flickering through half-painted states.
+term.reset();
+term.write('one');
+term.write('\x1b[?2026h two');
+ok('an open frame holds the paint', !screen.innerHTML.includes('two'));
+term.write(' three\x1b[?2026l');
+ok('closing the frame paints it whole', screen.innerHTML.includes('one two three'));
+
+// And an open frame must never become a frozen screen: a program that dies
+// mid-repaint -- or an l the backlog trim ate -- is painted by the backstop.
+term.reset();
+term.write('\x1b[?2026hwedged');
+await new Promise((r) => setTimeout(r, 300));
+ok('a frame that never closes paints via the backstop', screen.innerHTML.includes('wedged'));
+
 term.reset();
 term.write('1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7');
 check('the screen scrolls at the bottom', term.text()[5], '7');
@@ -163,6 +194,83 @@ check('a resize storm leaves one copy, not one per clear',
 term.reset();
 for (let i = 1; i <= 12; i++) term.write(`line ${i}\r\n`);
 check('scrolled-off rows stay in scrollback', screen.innerHTML.split('\n')[0], 'line 1');
+
+// -- the split view: history appended once, live repainted -------------------
+// The scrolling jank, root-caused: render() rebuilt scrollback + grid as one
+// innerHTML string every paint -- 67x the cost of an empty screen at full
+// scrollback, a full DOM teardown per frame, scroll anchoring with nothing
+// stable to hold, selection dead every write. The fix splits the screen at
+// the immutability boundary. These tests run the DOM path against a stub
+// document and pin both the behaviour and the cost model.
+function domScreen() {
+  const el = (className) => ({
+    className, _kids: [], _html: '',
+    set innerHTML(v) { this._html = v; this._kids = []; this.sets = (this.sets || 0) + 1; },
+    get innerHTML() { return this._html; },
+    insertAdjacentHTML(_, h) { this._kids.push(h); this.appends = (this.appends || 0) + 1; },
+    get firstChild() { return this._kids.length ? this._kids[0] : null; },
+    removeChild() { this._kids.shift(); },
+  });
+  const screen = {
+    ownerDocument: { createElement: () => el('') },
+    _parts: [],
+    append(...parts) { this._parts = parts; },
+    get history() { return this._parts[0]; },
+    get live() { return this._parts[1]; },
+  };
+  return screen;
+}
+
+{
+  const s = domScreen();
+  const t = makeTerminal(s, { rows: 4, cols: 20, showCursor: false });
+  t.write('one\r\ntwo\r\nthree\r\nfour\r\nfive');
+  check('a scrolled-off row lands in history, rendered',
+        s.history._kids, ['<div>one</div>']);
+  check('the live block holds only the grid',
+        s.live.innerHTML.split('\n'), ['two', 'three', 'four', 'five']);
+
+  const appendsBefore = s.history.appends;
+  const before = s.history._kids.join('');
+  // Ten x's stay inside the row; a wrap would scroll, which APPENDS -- that
+  // is history growing, not history being rewritten.
+  for (let i = 0; i < 10; i++) t.write('x');
+  ok('streaming never rewrites history',
+     s.history.appends === appendsBefore && s.history._kids.join('') === before);
+
+  t.resize(2, 20);
+  check('a shrink banks the surplus rows into history',
+        s.history._kids.length, 3);
+
+  t.reset();
+  ok('reset clears history with the screen', s.history._kids.length === 0);
+}
+
+{
+  // The cap trims the DOM alongside the model.
+  const s = domScreen();
+  const t = makeTerminal(s, { rows: 2, cols: 10, showCursor: false, scrollback: 3 });
+  for (let i = 0; i < 8; i++) t.write(`r${i}\r\n`);
+  ok('history keeps at most the cap', s.history._kids.length === 3);
+}
+
+{
+  // THE COST MODEL, pinned: a write at full scrollback must cost what a write
+  // at empty scrollback costs, because a paint no longer touches history.
+  // The old render was ~67x here; 3x is generous headroom for noise.
+  const s = domScreen();
+  const t = makeTerminal(s, { rows: 24, cols: 113, showCursor: false });
+  const cost = () => {
+    const t0 = performance.now();
+    for (let i = 0; i < 60; i++) t.write('x');
+    return (performance.now() - t0) / 60;
+  };
+  const shallow = cost();
+  for (let i = 0; i < 2100; i++) t.write(`filler line ${i}\r\n`);
+  const deep = cost();
+  ok(`a write at depth 2000 costs like a write at depth 0 (${shallow.toFixed(3)}ms vs ${deep.toFixed(3)}ms)`,
+     deep < Math.max(shallow, 0.02) * 3);
+}
 
 // -- painting when there are no frames --------------------------------------
 // THE FROZEN-SCREEN BUG. requestAnimationFrame does not fire in a hidden tab,

@@ -29,6 +29,19 @@ export function makeTerminal(screen, options = {}) {
   let grid = [];
   let cursor = { row: 0, col: 0, visible: true };
   let saved = null;
+  // Whether the program asked for the mouse (?1000/1002/1003) and for SGR
+  // encoding (?1006). Claude turns all four on at startup and scrolls its
+  // own transcript on wheel events -- it never scrolls the terminal -- so
+  // whoever hosts this emulator must forward the wheel when this is on, or
+  // history is unreachable. See the wheel listener in app.js.
+  let mouse = { tracking: false, sgr: false };
+  // ?2026, synchronized output: the program brackets a repaint between h and
+  // l so the terminal shows whole frames, never a half-painted one. Claude
+  // wraps every frame in it. Honouring it is what keeps typing and scrolling
+  // from flickering -- paints hold while a frame is open -- and the backstop
+  // timer in write() covers a program that opens a frame and dies.
+  let sync = false;
+  let syncTimer = null;
   // Pending attributes, applied to every cell written until they change.
   let attr = { fg: null, bg: null, bold: false, dim: false, underline: false,
                inverse: false };
@@ -37,6 +50,33 @@ export function makeTerminal(screen, options = {}) {
   // terminal in its default mode has no scrollback of its own.
   let scrollback = [];
   const scrollbackLimit = options.scrollback || 2000;
+
+  // -- the two-part view ------------------------------------------------------
+  // History is IMMUTABLE BY CONSTRUCTION: a row that scrolls off the grid
+  // never changes again. The render used to ignore that and rebuild
+  // scrollback + grid as one innerHTML string every paint -- measured at 67x
+  // the cost of an empty screen once scrollback was full, plus a full DOM
+  // teardown that broke scroll anchoring and killed any selection every
+  // frame. So the screen is two elements: `.history`, appended to exactly
+  // once per row as it dies, and `.live`, the only part a paint rewrites.
+  // The browser then has stable nodes to anchor scrolling to, selection in
+  // history survives streaming, and per-frame cost stops depending on how
+  // long the session has run.
+  //
+  // Headless (the node tests) has no document; there the render keeps the
+  // old single-string shape, which is also what `scrollbackVisible` tests
+  // rely on. The split is a DOM optimisation, not a model change.
+  const doc = screen.ownerDocument;
+  const dom = !!(doc && doc.createElement);
+  let historyEl = null;
+  let liveEl = null;
+  if (dom) {
+    historyEl = doc.createElement('div');
+    historyEl.className = 'history';
+    liveEl = doc.createElement('div');
+    liveEl.className = 'live';
+    screen.append(historyEl, liveEl);
+  }
 
   function reset() {
     grid = [];
@@ -52,10 +92,51 @@ export function makeTerminal(screen, options = {}) {
     return grid[r][c];
   }
 
-  function scrollUp() {
-    const gone = grid.shift();
+  // One row as HTML, runs of identical styling merged into single spans.
+  // `cursorCol` marks the cell wearing the cursor; history rows pass null,
+  // which is also why banking a row is cheap -- no per-cell cursor check.
+  function rowHTML(row, cursorCol) {
+    let line = '';
+    let runStyle = null;
+    let run = '';
+    const flush = () => {
+      if (!run) return;
+      line += runStyle
+        ? `<span style="${runStyle}">${escapeHtml(run)}</span>`
+        : escapeHtml(run);
+      run = '';
+    };
+    for (let c = 0; c < row.length; c++) {
+      if (c === cursorCol) {
+        flush();
+        line += `<span class="cursor">${escapeHtml(row[c].ch)}</span>`;
+        runStyle = null;
+        continue;
+      }
+      const style = styleOf(row[c]);
+      if (style !== runStyle) { flush(); runStyle = style; }
+      run += row[c].ch;
+    }
+    flush();
+    // Trailing blanks render identically and are most of a sparse row.
+    return line.replace(/\s+$/, '');
+  }
+
+  // A row leaves the grid for good: remember it, and in the DOM render it
+  // NOW, once -- the only time this row will ever be serialized.
+  function bankRow(gone) {
     scrollback.push(gone);
-    if (scrollback.length > scrollbackLimit) scrollback.shift();
+    if (dom && options.scrollbackVisible !== false) {
+      historyEl.insertAdjacentHTML('beforeend', `<div>${rowHTML(gone, null)}</div>`);
+    }
+    if (scrollback.length > scrollbackLimit) {
+      scrollback.shift();
+      if (dom && historyEl.firstChild) historyEl.removeChild(historyEl.firstChild);
+    }
+  }
+
+  function scrollUp() {
+    bankRow(grid.shift());
     grid.push(Array.from({ length: cols }, blank));
   }
 
@@ -232,6 +313,16 @@ export function makeTerminal(screen, options = {}) {
       i++;
     }
 
+    if (sync) {
+      // A frame is open: hold the paint for the l that closes it. The
+      // backstop is for a frame that never closes -- a crash mid-repaint, an
+      // l lost to a trimmed backlog -- because a held paint must never
+      // become a frozen screen.
+      if (syncTimer === null) {
+        syncTimer = setTimeout(() => { syncTimer = null; sync = false; paint(); }, 250);
+      }
+      return;
+    }
     paint();
   }
 
@@ -296,13 +387,22 @@ export function makeTerminal(screen, options = {}) {
     const n = p0 === 0 ? 1 : p0;
 
     if (priv) {
-      // The private modes both harnesses use. Cursor visibility is the only
-      // one with a visible effect here: bracketed paste (2004) and
-      // synchronized output (2026) are promises to the program about how
-      // input arrives and how frames are batched, and honouring them changes
-      // nothing about what is drawn.
+      // The private modes both harnesses use. Cursor visibility changes what
+      // is drawn; the mouse modes change where the wheel GOES; synchronized
+      // output (2026) changes WHEN the paint happens. Bracketed paste (2004)
+      // remains a promise about input framing that changes nothing here.
+      // One h/l can carry several modes.
       if (final === 'h' || final === 'l') {
-        if (p0 === 25) cursor.visible = final === 'h';
+        const on = final === 'h';
+        for (const p of params) {
+          if (p === 25) cursor.visible = on;
+          else if (p === 1000 || p === 1002 || p === 1003) mouse.tracking = on;
+          else if (p === 1006) mouse.sgr = on;
+          else if (p === 2026) {
+            sync = on;
+            if (!on && syncTimer !== null) { clearTimeout(syncTimer); syncTimer = null; }
+          }
+        }
       }
       return;
     }
@@ -418,70 +518,70 @@ export function makeTerminal(screen, options = {}) {
       if (mine !== ticket || !painting) return;  // stale, or already painted
       painting = false;
       if (timer !== null) { clearTimeout(timer); timer = null; }
-      render();
+      const lines = render();
       // After, not before: a caller following the output needs the DOM to
-      // have its new height when it decides where to scroll.
-      if (options.onPaint) options.onPaint();
+      // have its new height when it decides where to scroll. The line count
+      // rides along so the caller can tell whether the height CAN have moved
+      // without reading the layout to find out.
+      if (options.onPaint) options.onPaint(lines);
     };
 
-    // The frame is the fast path and paints within ~16ms when the tab is
-    // visible. The timer only exists to cover the case where no frame is
-    // coming, so its delay must not become the thing a visible tab waits for
-    // -- 100ms here was adding most of a tenth of a second to every keystroke
-    // echo. Zero lets the browser coalesce the two naturally: whichever runs
-    // first paints, and a visible tab almost always sees the frame.
-    if (hasFrames) requestAnimationFrame(run);
-    timer = setTimeout(run, 0);
-    // With no frames at all -- node, a test -- a zero timeout is still
-    // asynchronous, and callers expect the paint to have happened by the time
-    // `write` returns. So do it now and let the timer find nothing to do.
-    if (!hasFrames) run();
+    // THE FRAME PACES THE VISIBLE TAB. A real terminal does not render per
+    // chunk: it mutates a screen model as bytes arrive and samples it at the
+    // display's own rhythm, which is why iTerm is smooth under the same
+    // stream. An earlier version raced this rAF against a zero timer to
+    // shave the keystroke echo, and the timer won every time -- so a scroll
+    // burst, arriving as dozens of chunks a second, rebuilt the whole DOM at
+    // macrotask rate and the pane visibly janked. Renders now wait for the
+    // frame -- at most one per refresh, ~16ms worst case on the echo, which
+    // is the same beat every native terminal draws on.
+    //
+    // The timer stays, at slower-than-a-frame, because rAF DOES NOT FIRE in
+    // a hidden tab: without the backup, output received while hidden set the
+    // `painting` guard, never painted, and the screen stayed frozen after
+    // the tab came back -- cursor still blinking, because the blink is CSS.
+    if (hasFrames) {
+      requestAnimationFrame(run);
+      timer = setTimeout(run, 40);
+    } else {
+      // With no frames at all -- node, a test -- callers expect the paint to
+      // have happened by the time `write` returns.
+      run();
+    }
   }
 
   function render() {
-    const out = [];
+    const withCursor = options.showCursor !== false && cursor.visible;
+
+    if (dom) {
+      // ONLY THE GRID. History was rendered row by row as it was banked and
+      // is never touched here -- which is the entire point of the split: the
+      // cost of a paint is 24 rows whatever the session's age, and the
+      // browser keeps stable nodes to anchor scrolling and selection to.
+      const out = [];
+      for (let r = 0; r < grid.length; r++) {
+        out.push(rowHTML(grid[r], withCursor && r === cursor.row ? cursor.col : null));
+      }
+      // Blank lines at the bottom are noise, but the cursor's line must stay.
+      let last = out.length - 1;
+      while (last > cursor.row && out[last] === '') last--;
+      liveEl.innerHTML = out.slice(0, last + 1).join('\n');
+      return scrollback.length + last + 1;
+    }
+
+    // Headless: the whole view as one string, exactly as before the split.
     const all = options.scrollbackVisible === false
       ? grid
       : scrollback.concat(grid);
     const cursorRow = scrollback.length + cursor.row;
-
+    const out = [];
     for (let r = 0; r < all.length; r++) {
-      const row = all[r];
-      let line = '';
-      let runStyle = null;
-      let run = '';
-
-      const flush = () => {
-        if (!run) return;
-        line += runStyle
-          ? `<span style="${runStyle}">${escapeHtml(run)}</span>`
-          : escapeHtml(run);
-        run = '';
-      };
-
-      for (let c = 0; c < row.length; c++) {
-        const isCursor = options.showCursor !== false
-          && cursor.visible && r === cursorRow && c === cursor.col;
-        const style = styleOf(row[c]);
-        if (isCursor) {
-          flush();
-          line += `<span class="cursor">${escapeHtml(row[c].ch)}</span>`;
-          runStyle = null;
-          continue;
-        }
-        if (style !== runStyle) { flush(); runStyle = style; }
-        run += row[c].ch;
-      }
-      flush();
-      // Trailing blanks are dropped: they render identically and a full-width
-      // grid of spaces is most of the bytes on a mostly-empty screen.
-      out.push(line.replace(/\s+$/, ''));
+      out.push(rowHTML(all[r], withCursor && r === cursorRow ? cursor.col : null));
     }
-
-    // Blank lines at the bottom are noise, but the cursor's line must stay.
     let last = out.length - 1;
     while (last > cursorRow && out[last] === '') last--;
     screen.innerHTML = out.slice(0, last + 1).join('\n');
+    return last + 1;
   }
 
   function escapeHtml(text) {
@@ -500,7 +600,7 @@ export function makeTerminal(screen, options = {}) {
       row.length = cols;
     }
     while (grid.length < rows) grid.push(Array.from({ length: cols }, blank));
-    while (grid.length > rows) scrollback.push(grid.shift());
+    while (grid.length > rows) bankRow(grid.shift());
     cursor.row = Math.min(cursor.row, rows - 1);
     cursor.col = Math.min(cursor.col, cols - 1);
     paint();
@@ -510,9 +610,19 @@ export function makeTerminal(screen, options = {}) {
   return {
     write,
     resize,
-    reset() { reset(); scrollback = []; paint(); },
+    reset() {
+      reset();
+      scrollback = [];
+      if (dom) historyEl.innerHTML = '';
+      mouse = { tracking: false, sgr: false };
+      sync = false;
+      if (syncTimer !== null) { clearTimeout(syncTimer); syncTimer = null; }
+      paint();
+    },
     get rows() { return rows; },
     get cols() { return cols; },
+    // True when wheel events belong to the program, as SGR reports.
+    get mouseReporting() { return mouse.tracking && mouse.sgr; },
     get cursor() { return { ...cursor }; },
     // Exposed for tests: the visible screen as plain text, one string per row.
     text() { return grid.map((row) => row.map((c) => c.ch).join('').replace(/\s+$/, '')); },

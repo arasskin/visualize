@@ -266,6 +266,20 @@ button:disabled { opacity: .5; cursor: progress; }
   font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--term-ink); white-space: pre; tab-size: 8;
 }
+/* History rows are one element each, written once when the row scrolls off
+   and never touched again -- which is what lets the browser skip layout and
+   paint for everything offscreen. The intrinsic size keeps the scrollbar
+   honest for rows the browser has skipped; it must track the line-height
+   above. */
+.screen .history > div {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1.35em;
+}
+/* An empty history row is an empty <div>, which would collapse to nothing --
+   the old single-string render kept a newline there. The ::before space holds
+   the line open without polluting copied text, since pseudo-content is not
+   part of the selection. */
+.screen .history > div:empty::before { content: "\a0"; }
 /* The cell the cursor is on. Painted as a background rather than a caret so
    it survives the screen being rebuilt on every frame. Opaque, unlike the
    panel: a cursor you can see the graph through is not a cursor. */

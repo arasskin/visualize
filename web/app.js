@@ -620,9 +620,17 @@ function makeTerminalPane(root, prefix) {
     following = paneBody.scrollTop + paneBody.clientHeight
       >= paneBody.scrollHeight - 4;
   });
+  // The pin runs only when the rendered line count moved: scrollHeight is a
+  // forced layout, and a scroll-through-history repaint redraws the same 33
+  // rows at display rate -- reading the layout back after every one of those
+  // renders was half the jank the rAF pacing in term.js fixed the other
+  // half of. Same row count, same height, nothing to pin.
+  let paintedLines = 0;
   const term = makeTerminal(screen, {
-    onPaint: () => {
-      if (following) paneBody.scrollTop = paneBody.scrollHeight;
+    onPaint: (lines) => {
+      const grew = lines !== paintedLines;
+      paintedLines = lines;
+      if (grew && following) paneBody.scrollTop = paneBody.scrollHeight;
     },
   });
   let at = 0;              // how much of the session output we have consumed
@@ -650,14 +658,25 @@ function makeTerminalPane(root, prefix) {
   // How many rows and columns fit the panel right now. Measured from a real
   // character rather than assumed: the monospace face and its size come from
   // CSS, so hardcoding a cell size here would break the moment either changed.
-  function measure() {
+  // Cached: the probe forces a synchronous layout, and the wheel handler asks
+  // at trackpad rate -- a reflow per wheel tick, against a render per frame,
+  // is layout thrash a person sees as jank. The size only changes with the
+  // font, so syncSize (every geometry change passes through it) invalidates.
+  let cell = null;
+  function cellSize() {
+    if (cell) return cell;
     const probe = document.createElement('span');
     probe.textContent = 'M';
     probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre';
     screen.appendChild(probe);
     const box = probe.getBoundingClientRect();
     probe.remove();
-    const cw = box.width || 7, ch = box.height || 16;
+    cell = { w: box.width || 7, h: box.height || 16 };
+    return cell;
+  }
+
+  function measure() {
+    const { w: cw, h: ch } = cellSize();
     return {
       rows: Math.max(4, Math.floor((paneBody.clientHeight - 24) / ch)),
       cols: Math.max(20, Math.floor((paneBody.clientWidth - 12) / cw)),
@@ -907,6 +926,48 @@ function makeTerminalPane(root, prefix) {
     if (text) sendInput(text);
   });
 
+  // THE WHEEL BELONGS TO THE PROGRAM WHEN THE PROGRAM ASKED FOR IT. Claude
+  // turns on mouse tracking at startup and never scrolls the terminal -- a
+  // 358KB capture of a session held not one newline -- so its history is not
+  // in this pane's scrollback and never will be. It lives inside claude,
+  // which repaints the transcript in place when a wheel report arrives,
+  // exactly as it does in iTerm. Measured live: three SGR wheel-ups at the
+  // pty and the transcript scrolled. With tracking off (the repl, a shell)
+  // the wheel keeps scrolling the pane's own scrollback, and shift forces
+  // that path the way real terminals do under a mouse-hungry program.
+  // BATCHED, NOT PER EVENT. A trackpad fires dozens of wheel events a second
+  // and momentum keeps firing them after the fingers stop; a report per event
+  // is a POST per event, each provoking a full-frame repaint from claude --
+  // a queue of stale scrolls still draining seconds later. Deltas accumulate
+  // (the carry keeps a stream of fractions from rounding to nothing) and
+  // flush a few times a second, capped, so the view tracks the gesture and
+  // excess momentum is dropped rather than owed. Coordinates are read in the
+  // flush, off the gesture's hot path.
+  let wheelCarry = 0, wheelQueued = 0, wheelFlush = null;
+  let wheelLast = { x: 0, y: 0 };
+  screen.addEventListener('wheel', (event) => {
+    if (!term.mouseReporting || event.shiftKey) return;
+    event.preventDefault();
+    // deltaMode 1 is already lines; 0 is pixels.
+    wheelCarry += event.deltaMode === 1 ? event.deltaY : event.deltaY / cellSize().h;
+    const n = Math.trunc(wheelCarry);
+    wheelCarry -= n;
+    wheelQueued += n;
+    wheelLast = { x: event.clientX, y: event.clientY };
+    if (wheelFlush !== null || wheelQueued === 0) return;
+    wheelFlush = setTimeout(() => {
+      wheelFlush = null;
+      const n = Math.max(-8, Math.min(8, wheelQueued));
+      wheelQueued = 0;
+      if (n === 0) return;
+      const box = cellSize();
+      const rect = screen.getBoundingClientRect();
+      const col = Math.max(1, Math.min(term.cols, Math.floor((wheelLast.x - rect.left) / box.w) + 1));
+      const row = Math.max(1, Math.min(term.rows, Math.floor((wheelLast.y - rect.top) / box.h) + 1));
+      sendInput(`\x1b[<${n < 0 ? 64 : 65};${col};${row}M`.repeat(Math.abs(n)));
+    }, 30);
+  }, { passive: false });
+
   const termPanel = makePanel(root, {
     minWidth: 360, minHeight: 200,
     width: 'min(52rem, 94vw)', height: '24rem',
@@ -989,6 +1050,7 @@ function makeTerminalPane(root, prefix) {
   // the harness redrawing its whole screen hundreds of times.
   let sizing = null;
   function syncSize() {
+    cell = null;
     clearTimeout(sizing);
     sizing = setTimeout(() => {
       const size = measure();
