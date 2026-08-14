@@ -645,6 +645,31 @@ function makeTerminalPane(root, prefix) {
       if (grew && following) paneBody.scrollTop = paneBody.scrollHeight;
     },
   });
+  // -- the stall detector ----------------------------------------------------
+  // The server side was exonerated at 7,900 reports/s with 16ms worst-case
+  // turnaround; the ~10s scroll hangs therefore live somewhere in THIS
+  // page or its browser. Instead of theorizing, record: main-thread stalls
+  // (longtask entries) and gaps in the poll chain land in a ring, the worst
+  // recent one is named in the state line, and window.__diag() dumps the
+  // ring for a bug report. Costs nothing until something stalls.
+  const diag = [];
+  function diagNote(kind, ms) {
+    diag.push({ t: Math.round(performance.now()), kind, ms: Math.round(ms) });
+    if (diag.length > 60) diag.shift();
+    if (ms > 2000) setState(`stalled ${(ms / 1000).toFixed(1)}s (${kind})`);
+  }
+  if (prefix === 'harness') window.__diag = () => diag.slice();
+  if (typeof PerformanceObserver === 'function' && prefix === 'harness') {
+    try {
+      new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          if (entry.duration > 250) diagNote('main-thread', entry.duration);
+        }
+      }).observe({ entryTypes: ['longtask'] });
+    } catch (e) { /* longtask unsupported: the ring still gets poll gaps */ }
+  }
+  let lastPollDone = 0;
+
   let at = 0;              // how much of the session output we have consumed
   let polling = false;     // is the loop running? (see scheduleNextPoll)
   let pollFailures = 0;    // consecutive misses; three in a row means gone
@@ -762,6 +787,13 @@ function makeTerminalPane(root, prefix) {
       setState(out.running ? '' : 'exited');
       if (!out.running) stopPolling();
       pollFailures = 0;
+      // A gap in the chain longer than a park can explain is a stall --
+      // network, browser scheduling, or an aborted fetch retried late.
+      const done = performance.now();
+      if (lastPollDone && done - lastPollDone > LONGPOLL_WAIT + 5000) {
+        diagNote('poll-gap', done - lastPollDone);
+      }
+      lastPollDone = done;
       // A reply that says `waited` came from a supervisor that parks; the
       // next ask should already be on its way when output arrives, so the
       // chain re-polls with no timer at all. Judged per reply, not once:

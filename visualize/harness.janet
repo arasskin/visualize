@@ -189,6 +189,11 @@
    "chunks" (+ base (length backlog))
    "rows" pty-rows
    "trimmed" (pos? base)
+   # Input accepted from the page but not yet taken by the pty. A number
+   # that grows and sticks is a program that has stopped reading stdin --
+   # the observable that separates "our pipeline stalled" from "the
+   # program did".
+   "unsent" (length unsent)
    "cols" pty-cols})
 
 (defn- session-start
