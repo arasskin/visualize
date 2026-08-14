@@ -1114,7 +1114,12 @@ function makeTerminalPane(root, prefix) {
           // the resize nudge, painting over whatever the replay left. A
           // line-oriented program ignores it, which is also right.
           await post('redraw', {}).catch(() => {});
-          setState('');
+          // A SERVER FROM BEFORE TEAR REPORTING answers without `from`, and
+          // the page then cannot tell a torn stream from an update -- the
+          // exact silent degradation that once cost a whole debugging round
+          // while every fix sat unrun on disk. Say so instead.
+          setState(now.from === undefined || now.from < 0
+            ? 'server outdated — restart ./visualize' : '');
           startPolling();
         } else {
           syncSize();
