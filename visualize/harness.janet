@@ -331,7 +331,17 @@
       # Wait for the pump to produce something, checking often. `drain` is what
       # moves the pty's output into the backlog, and the timer in
       # `keep-draining` is doing it too -- this just gets there sooner.
-      (var waited 0)
+      #
+      # UNLESS THE SENDER SAYS `quiet`. The wait exists for typing, where the
+      # echo riding home on this reply is the difference between instant and
+      # laggy. Mouse reports are the opposite case: the program often answers
+      # them with NOTHING (a transcript already at its top), the full wait
+      # then costs ~48ms per batch against a 16ms send cadence, and a long
+      # scroll banked seconds of stale reports for every later keystroke to
+      # queue behind. A quiet input returns at once; whatever repaint it
+      # provokes reaches the page on the parked poll, which is faster than
+      # this wait ever was.
+      (var waited (if (truthy? (get message "quiet")) 24 0))
       (while (and (< waited 24) (= (length backlog) before))
         (++ waited)
         (ev/sleep 0.002)
@@ -723,10 +733,11 @@
    # has to wait for this request to return before it can ask what happened.
    # Without `at` it answers nil as it always did.
    :send
-   (fn [_ text &opt at]
-     (def reply (ask (if at
-                       {"op" "input" "text" text "at" at}
-                       {"op" "input" "text" text})))
+   (fn [_ text &opt at quiet]
+     (def message @{"op" "input" "text" text})
+     (when at (put message "at" at))
+     (when quiet (put message "quiet" true))
+     (def reply (ask message))
      (when (and reply (get reply "text"))
        {"text" (get reply "text")
         "at" (or (get reply "at") at)
@@ -871,10 +882,11 @@
   ``Type at the harness.
 
   With `at`, the reply carries the ECHO -- everything the program printed in
-  response, in the same round trip; without it, nil. See :send in
-  `make-client`.``
-  [text &opt at]
-  (:send default-client text at))
+  response, in the same round trip; without it, nil. `quiet` skips the echo
+  wait entirely -- for mouse reports, whose answer arrives on the parked
+  poll. See :send in `make-client`.``
+  [text &opt at quiet]
+  (:send default-client text at quiet))
 
 (defn resize
   "Tell the harness its window changed size."

@@ -385,7 +385,8 @@
                  # one round trip for a keystroke and its echo. See `send`.
                  (def echo (harness/send (string (get sent "text" ""))
                                          (when-let [a (get sent "at")]
-                                           (math/floor a))))
+                                           (math/floor a))
+                                         (truthy? (get sent "quiet"))))
                  ["200 OK" "application/json"
                   (json/encode (or echo {"ok" true}))]))
 
@@ -449,7 +450,8 @@
                  (def echo (:send repl-client
                                   (string (get sent "text" ""))
                                   (when-let [a (get sent "at")]
-                                    (math/floor a))))
+                                    (math/floor a))
+                                  (truthy? (get sent "quiet"))))
                  ["200 OK" "application/json"
                   (json/encode (or echo {"ok" true}))]))
 

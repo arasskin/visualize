@@ -111,6 +111,25 @@
   (check/ok (< (- (os/clock :monotonic) t2) 1) "pending output never waits")
   (harness/stop))
 
+(check/test "a quiet input skips the echo wait"
+  # Mouse reports ride input requests but need no echo riding back -- the
+  # parked poll carries the repaint. Against a program that echoes NOTHING,
+  # a plain input holds the full echo wait (~48ms) and a quiet one returns
+  # at once; the difference is what kept a scroll gesture's report queue
+  # draining long after the fingers stopped.
+  (harness/start ["/bin/sh" "-c" "stty -echo; sleep 5"] (os/cwd) 24 80)
+  (ev/sleep 0.4)
+  (def head (harness/poll 0))
+  (def t0 (os/clock :monotonic))
+  (harness/send "x" (head "at"))
+  (def loud (- (os/clock :monotonic) t0))
+  (def t1 (os/clock :monotonic))
+  (harness/send "x" (head "at") true)
+  (def quick (- (os/clock :monotonic) t1))
+  (check/ok (> loud 0.04) "a plain input against a silent program holds the echo wait")
+  (check/ok (< quick 0.03) "a quiet one returns without it")
+  (harness/stop))
+
 (check/test "starting again replaces the session and bumps the generation"
   # The page watches this number: a change means its screen belongs to a dead
   # session and has to be thrown away rather than appended to.

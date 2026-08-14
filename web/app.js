@@ -920,11 +920,12 @@ function makeTerminalPane(root, prefix) {
   // typing laggy. The queue is empty at human typing speed anyway; it only
   // fills when keys arrive faster than a localhost round trip.
   let inputTurn = Promise.resolve();
-  function sendInput(text) {
-    if (!text) return;
+  function sendInput(text, quiet) {
+    if (!text) return inputTurn;
     inputTurn = inputTurn.then(() => {
       const askedAt = at, askedGen = generation;
-      return post('input', { text, at: askedAt })
+      return post('input', quiet ? { text, at: askedAt, quiet: true }
+                                 : { text, at: askedAt })
         .then((out) => {
           if (!out || out.text === undefined) return;
           // A poll got home first with these same bytes; the echo is already
@@ -951,6 +952,7 @@ function makeTerminalPane(root, prefix) {
           pollSoon();
         });
     });
+    return inputTurn;
   }
 
   // Paste, which a harness is used with constantly.
@@ -969,16 +971,41 @@ function makeTerminalPane(root, prefix) {
   // pty and the transcript scrolled. With tracking off (the repl, a shell)
   // the wheel keeps scrolling the pane's own scrollback, and shift forces
   // that path the way real terminals do under a mouse-hungry program.
-  // BATCHED, NOT PER EVENT. A trackpad fires dozens of wheel events a second
-  // and momentum keeps firing them after the fingers stop; a report per event
-  // is a POST per event, each provoking a full-frame repaint from claude --
-  // a queue of stale scrolls still draining seconds later. Deltas accumulate
-  // (the carry keeps a stream of fractions from rounding to nothing) and
-  // flush a few times a second, capped, so the view tracks the gesture and
-  // excess momentum is dropped rather than owed. Coordinates are read in the
-  // flush, off the gesture's hot path.
-  let wheelCarry = 0, wheelQueued = 0, wheelFlush = null;
+  // BATCHED, AND PACED BY THE ROUND TRIP. A trackpad fires dozens of wheel
+  // events a second and momentum keeps firing them after the fingers stop.
+  // The first pacing bug was a report per event; the second was subtler: a
+  // TIMER decided the send rate. Batches left every 16ms, but a batch the
+  // program answers with nothing costs the server's input turnaround (~5ms
+  // streaming, up to ~60ms against a silent region -- measured), so sends
+  // outran completions four to one, and a long scroll banked seconds of
+  // stale reports that every later keystroke queued behind. The scroll bar
+  // seized; the drain outlived the gesture.
+  //
+  // So AT MOST ONE BATCH IS IN FLIGHT. Deltas accumulate meanwhile (the
+  // carry keeps a stream of fractions from rounding to nothing), clamped to
+  // a screenful -- excess momentum is dropped, never owed -- and the next
+  // batch leaves when the last one lands: the round trip itself sets the
+  // pace, exactly as it does for the poll chain. Reports go `quiet`: the
+  // repaint they provoke arrives on the parked poll, so waiting for an echo
+  // on the input reply bought nothing and cost most of the turnaround.
+  // Coordinates are read in the flush, off the gesture's hot path.
+  let wheelCarry = 0, wheelQueued = 0, wheelFlush = null, wheelInFlight = false;
   let wheelLast = { x: 0, y: 0 };
+  function flushWheel() {
+    if (wheelInFlight || wheelQueued === 0) return;
+    const n = Math.max(-8, Math.min(8, wheelQueued));
+    wheelQueued -= n;
+    const box = cellSize();
+    const rect = screen.getBoundingClientRect();
+    const col = Math.max(1, Math.min(term.cols, Math.floor((wheelLast.x - rect.left) / box.w) + 1));
+    const row = Math.max(1, Math.min(term.rows, Math.floor((wheelLast.y - rect.top) / box.h) + 1));
+    wheelInFlight = true;
+    sendInput(`\x1b[<${n < 0 ? 64 : 65};${col};${row}M`.repeat(Math.abs(n)), true)
+      .finally(() => {
+        wheelInFlight = false;
+        flushWheel();
+      });
+  }
   screen.addEventListener('wheel', (event) => {
     if (!term.mouseReporting || event.shiftKey) return;
     event.preventDefault();
@@ -986,20 +1013,12 @@ function makeTerminalPane(root, prefix) {
     wheelCarry += event.deltaMode === 1 ? event.deltaY : event.deltaY / cellSize().h;
     const n = Math.trunc(wheelCarry);
     wheelCarry -= n;
-    wheelQueued += n;
+    wheelQueued = Math.max(-term.rows, Math.min(term.rows, wheelQueued + n));
     wheelLast = { x: event.clientX, y: event.clientY };
-    if (wheelFlush !== null || wheelQueued === 0) return;
-    wheelFlush = setTimeout(() => {
-      wheelFlush = null;
-      const n = Math.max(-8, Math.min(8, wheelQueued));
-      wheelQueued = 0;
-      if (n === 0) return;
-      const box = cellSize();
-      const rect = screen.getBoundingClientRect();
-      const col = Math.max(1, Math.min(term.cols, Math.floor((wheelLast.x - rect.left) / box.w) + 1));
-      const row = Math.max(1, Math.min(term.rows, Math.floor((wheelLast.y - rect.top) / box.h) + 1));
-      sendInput(`\x1b[<${n < 0 ? 64 : 65};${col};${row}M`.repeat(Math.abs(n)));
-    }, 16);
+    // One short timer coalesces the burst a single gesture-frame delivers;
+    // after it, completions drive the cadence.
+    if (wheelFlush !== null || wheelInFlight || wheelQueued === 0) return;
+    wheelFlush = setTimeout(() => { wheelFlush = null; flushWheel(); }, 16);
   }, { passive: false });
 
   const termPanel = makePanel(root, {
