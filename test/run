@@ -51,8 +51,10 @@ fi
 # itself, and reports leftovers that were never there. Anchoring on the
 # absolute path is no good either: `ps` reports a command AS INVOKED, so a
 # supervisor started as `./bin/janet` does not match one spelled in full.
+# The `--supervise` flag is the discriminator: without it the same command
+# line is the web server, which a suite must never count as a leak.
 count_supervisors() {
-  pgrep -f "src/supervisor\.janet" 2>/dev/null | wc -l | tr -d ' '
+  pgrep -f "visualize\.janet --supervise" 2>/dev/null | wc -l | tr -d ' '
 }
 
 survivors=$(count_supervisors)
@@ -65,6 +67,6 @@ done
 
 if [ "$survivors" -ne 0 ]; then
   echo "  FAIL  $survivors supervisor process(es) survived the suite" >&2
-  pgrep -lf "src/supervisor\.janet" >&2 || true
+  pgrep -lf "visualize\.janet --supervise" >&2 || true
   exit 1
 fi

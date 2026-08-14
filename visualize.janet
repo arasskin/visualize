@@ -228,6 +228,18 @@
   (string base "/visualize-" (string/format "%08x" digest) ".sock"))
 
 (defn main [& args]
+  # ONE PROGRAM, TWO ROLES. Run plainly, this is the web server. Run with
+  # --supervise it is the process that owns the terminal, spawned by the
+  # server's own client half and outliving it -- see src/harness.janet for
+  # why the pty cannot live here. Orchestrating both roles from this one
+  # entry point means there is exactly one program to install, one to spawn,
+  # and one place that knows how the pieces fit.
+  (when (= (get args 1) "--supervise")
+    (def path (get args 2))
+    (unless path (error "usage: visualize --supervise <socket-path>"))
+    (harness/supervise path)
+    (os/exit 0))
+
   (def root (os/realpath (or (get args 1) (os/cwd))))
   (def here (os/realpath (string (dyn :current-file) "/..")))
   (def web-dir (string here "/web"))
@@ -244,7 +256,8 @@
   # two calls is two chances for that to stop being true.
   (def socket (socket-for root))
   (harness/configure socket
-                     [(string here "/bin/janet") (string here "/src/supervisor.janet") socket])
+                     [(string here "/bin/janet") (string here "/visualize.janet")
+                      "--supervise" socket])
 
   (defn permitted?
     ``May this request drive the terminal?

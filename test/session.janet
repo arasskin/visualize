@@ -6,10 +6,10 @@
 #
 # THROUGH THE SOCKET, NOT AROUND IT. Every call below crosses into a real
 # supervisor process -- spawned by the first `start`, exactly as the server
-# spawns one. Testing src/supervisor.janet's functions directly would be
+# spawns one. Testing the session-owning functions directly would be
 # easier and would check the half that never breaks: the interesting failures
-# are spawning, framing and reconnection, and all three live in the gap
-# between the two files.
+# are spawning, framing and reconnection, and all three live on the wire
+# between the two processes.
 
 (import ../src/harness)
 (import ./harness :as check)
@@ -18,7 +18,7 @@
 # the supervisor belonging to a visualize the user has open.
 (def- root (os/realpath (string (dyn :current-file) "/../..")))
 (def- socket (string (string/trimr (or (os/getenv "TMPDIR") "/tmp") "/") "/visualize-test.sock"))
-(harness/configure socket [(string root "/bin/janet") (string root "/src/supervisor.janet") socket])
+(harness/configure socket [(string root "/bin/janet") (string root "/visualize.janet") "--supervise" socket])
 
 (defn- wait-for
   ``Poll until `ready?` passes or the patience runs out.
@@ -114,7 +114,7 @@
   (harness/start ["/bin/sh" "-c" "echo SURVIVOR; sleep 5"] (os/cwd) 24 80)
   (wait-for |(string/find "SURVIVOR" $))
   (harness/configure socket
-                     [(string root "/bin/janet") (string root "/src/supervisor.janet") socket])
+                     [(string root "/bin/janet") (string root "/visualize.janet") "--supervise" socket])
   (def now (harness/state))
   (check/ok (now :running) "the session is still running for a new client")
   # From 0, because a fresh page has seen nothing -- this is the reload path.

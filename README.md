@@ -213,7 +213,9 @@ src/scan.janet      walk the tree, read every file on all cores, build the graph
 src/parser.janet    what a language spec is, and how one is run
 src/parsers.janet   find the specs in parsers/ at runtime
 src/pty.janet       a pseudo-terminal, via libc's forkpty through the FFI
-src/harness.janet   the agent session: pump thread, backlog, resize
+src/harness.janet   the agent session, both halves: the owner (run as
+                    `visualize --supervise`, outliving the server) and the
+                    client the HTTP routes talk through
 src/dot.janet       prefix matching, filtering, and the DOT that comes out
 src/color.janet     the palette, the ramp, and WCAG-checked label ink
 src/config.janet    the sandbox the config runs in
