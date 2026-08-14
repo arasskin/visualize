@@ -247,6 +247,26 @@ function domScreen() {
 }
 
 {
+  // THE CHANGED FLAG: onPaint's second argument says whether the paint moved
+  // any ink. The glide in app.js glides only on a changed, non-growing paint
+  // -- a transcript scroll -- so a paint that redraws the identical frame
+  // (a mouse report echoed back as invisible CSI, a cursor motion with the
+  // cursor hidden) must say so, or scrolling claude would lurch on echoes.
+  const s = domScreen();
+  const flags = [];
+  const t = makeTerminal(s, { rows: 4, cols: 20, showCursor: false,
+                              onPaint: (_lines, changed) => flags.push(changed) });
+  t.write('hello');
+  ok('a paint that draws reports changed', flags[flags.length - 1] === true);
+  t.write('\x1b[H');
+  ok('a paint that moves no ink reports unchanged',
+     flags[flags.length - 1] === false);
+  t.write('\x1b[2Jwiped');
+  ok('the next real change reports changed again',
+     flags[flags.length - 1] === true);
+}
+
+{
   // The cap trims the DOM alongside the model.
   const s = domScreen();
   const t = makeTerminal(s, { rows: 2, cols: 10, showCursor: false, scrollback: 3 });

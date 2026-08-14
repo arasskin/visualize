@@ -275,6 +275,10 @@ button:disabled { opacity: .5; cursor: progress; }
   content-visibility: auto;
   contain-intrinsic-size: auto 1.35em;
 }
+/* The live block glides between the line-quantized frames a mouse-tracking
+   program paints while scrolling its transcript -- see the glide in app.js.
+   will-change keeps that 90ms transform on the compositor. */
+.screen .live { will-change: transform; }
 /* An empty history row is an empty <div>, which would collapse to nothing --
    the old single-string render kept a newline there. The ::before space holds
    the line open without polluting copied text, since pseudo-content is not

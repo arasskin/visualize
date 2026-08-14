@@ -626,11 +626,60 @@ function makeTerminalPane(root, prefix) {
   // renders was half the jank the rAF pacing in term.js fixed the other
   // half of. Same row count, same height, nothing to pin.
   let paintedLines = 0;
+
+  // -- gliding between line-quantized frames ---------------------------------
+  // A TUI with the mouse scrolls its transcript a whole row per wheel report
+  // and repaints at the new position -- the pty protocol has no fractional
+  // scroll, so the motion arrives as line-sized jumps in any terminal. The
+  // repaint itself tells us how to smooth it: when the shifted frame lands,
+  // start the live block translated by exactly the rows we asked for and let
+  // it glide to rest. Content ends precisely where the program put it; only
+  // the travel is animated. No prediction: the glide starts at the paint,
+  // not at the wheel.
+  //
+  // `glidePending` is set by the wheel flush below and consumed by the FIRST
+  // paint after it -- claude answers a batch of reports with one repaint --
+  // then expires quickly so a paint caused by ordinary output cannot inherit
+  // a stale glide and lurch.
+  let glidePending = 0;
+  let glideArmed = 0;
+  const liveEl = () => screen.querySelector('.live');
+
+  function glide(linesMoved) {
+    const live = liveEl();
+    if (!live) return;
+    const px = linesMoved * cellSize().h;
+    if (!px) return;
+    live.style.transition = 'none';
+    live.style.transform = `translateY(${px}px)`;
+    // A forced reflow, so the transition below animates FROM the offset
+    // rather than batching both writes into one style update.
+    live.getBoundingClientRect();
+    live.style.transition = 'transform 90ms cubic-bezier(.2,.6,.3,1)';
+    live.style.transform = 'translateY(0)';
+    live.addEventListener('transitionend', () => {
+      live.style.transition = '';
+      live.style.transform = '';
+    }, { once: true });
+  }
+
   const term = makeTerminal(screen, {
-    onPaint: (lines) => {
+    onPaint: (lines, changed) => {
       const grew = lines !== paintedLines;
       paintedLines = lines;
       if (grew && following) paneBody.scrollTop = paneBody.scrollHeight;
+      // CONSUME OR DROP, NEVER LINGER: an armed glide that missed its frame
+      // must not fire on some unrelated paint seconds later. And the frame
+      // it wants is precisely a transcript scroll's: content CHANGED, height
+      // did NOT grow -- a program scrolling its own history repaints in
+      // place. A growing paint is streaming (the follow-pin owns that), and
+      // an unchanged one is an echo artifact; both drop the glide.
+      if (glidePending) {
+        if (!grew && changed && performance.now() - glideArmed < 400) {
+          glide(glidePending);
+        }
+        glidePending = 0;
+      }
     },
   });
   let at = 0;              // how much of the session output we have consumed
@@ -965,7 +1014,17 @@ function makeTerminalPane(root, prefix) {
       const col = Math.max(1, Math.min(term.cols, Math.floor((wheelLast.x - rect.left) / box.w) + 1));
       const row = Math.max(1, Math.min(term.rows, Math.floor((wheelLast.y - rect.top) / box.h) + 1));
       sendInput(`\x1b[<${n < 0 ? 64 : 65};${col};${row}M`.repeat(Math.abs(n)));
-    }, 30);
+      // Arm the glide: the next paint is the frame the program draws in
+      // answer to these reports, shifted by n rows. Wheel down (n > 0)
+      // moves the transcript up, so the glide starts n rows LOW and rises
+      // to rest -- the same sign as n, which is why it is passed through.
+      // ACCUMULATED, not assigned: at per-frame flush cadence two batches of
+      // reports can land before the program's one repaint that answers both,
+      // and the glide must cover the total shift. Capped at a screenful --
+      // beyond that a glide is a blur pretending to be motion.
+      glidePending = Math.max(-term.rows, Math.min(term.rows, glidePending + n));
+      glideArmed = performance.now();
+    }, 16);
   }, { passive: false });
 
   const termPanel = makePanel(root, {

@@ -70,6 +70,7 @@ export function makeTerminal(screen, options = {}) {
   const dom = !!(doc && doc.createElement);
   let historyEl = null;
   let liveEl = null;
+  let lastLiveHTML = null;
   if (dom) {
     historyEl = doc.createElement('div');
     historyEl.className = 'history';
@@ -518,12 +519,13 @@ export function makeTerminal(screen, options = {}) {
       if (mine !== ticket || !painting) return;  // stale, or already painted
       painting = false;
       if (timer !== null) { clearTimeout(timer); timer = null; }
-      const lines = render();
+      const [lines, changed] = render();
       // After, not before: a caller following the output needs the DOM to
       // have its new height when it decides where to scroll. The line count
       // rides along so the caller can tell whether the height CAN have moved
-      // without reading the layout to find out.
-      if (options.onPaint) options.onPaint(lines);
+      // without reading the layout to find out; `changed` says whether this
+      // paint moved any ink at all.
+      if (options.onPaint) options.onPaint(lines, changed);
     };
 
     // THE FRAME PACES THE VISIBLE TAB. A real terminal does not render per
@@ -565,8 +567,15 @@ export function makeTerminal(screen, options = {}) {
       // Blank lines at the bottom are noise, but the cursor's line must stay.
       let last = out.length - 1;
       while (last > cursor.row && out[last] === '') last--;
-      liveEl.innerHTML = out.slice(0, last + 1).join('\n');
-      return scrollback.length + last + 1;
+      const html = out.slice(0, last + 1).join('\n');
+      // Whether this paint CHANGED anything is part of the paint's story: the
+      // glide in app.js must fire on a repaint that moved content (a
+      // transcript scroll) and not on one that re-drew the same frame (a
+      // mouse report echoed back as invisible CSI, a cursor blink).
+      const changed = html !== lastLiveHTML;
+      lastLiveHTML = html;
+      if (changed) liveEl.innerHTML = html;
+      return [scrollback.length + last + 1, changed];
     }
 
     // Headless: the whole view as one string, exactly as before the split.
@@ -581,7 +590,7 @@ export function makeTerminal(screen, options = {}) {
     let last = out.length - 1;
     while (last > cursorRow && out[last] === '') last--;
     screen.innerHTML = out.slice(0, last + 1).join('\n');
-    return last + 1;
+    return [last + 1, true];
   }
 
   function escapeHtml(text) {
