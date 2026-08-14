@@ -38,54 +38,6 @@ export function makeTerminal(screen, options = {}) {
   let scrollback = [];
   const scrollbackLimit = options.scrollback || 2000;
 
-  // Rows a clear-screen banked in scrollback, still PROVISIONAL. A harness
-  // clears for two reasons and only one of them makes the bank history: after
-  // a resize it clears and repaints the SAME conversation at the new width,
-  // so banking unconditionally left one near-duplicate of the screen per
-  // clear -- a resize drag, a dozen SIGWINCHes long, filled scrollback with a
-  // dozen copies of the final frame. Each bank therefore stays on this list
-  // until the live screen once again contains its rows' ink, at which point
-  // the bank was the first half of a redraw and dissolves. Ink that never
-  // comes back was genuinely cleared away, and that bank stays for good.
-  let banks = [];
-
-  // A row's ink: its visible content with the spacing squeezed out, so the
-  // same words at a different width -- rewrapped, or clipped by the truncating
-  // reflow in resize() -- still compare equal. Cells that show as colour
-  // rather than a glyph count too, as a placeholder.
-  function ink(row) {
-    let s = '';
-    for (const c of row) {
-      if (c.ch !== ' ') s += c.ch;
-      else if (c.bg || c.inverse || c.underline) s += '\x00';
-    }
-    return s;
-  }
-
-  // A bank dissolves when its rows' inks all reappear on the live screen, in
-  // order -- as substrings rather than lines, since the repaint wraps them
-  // wherever the new width falls. Checked after every write; a bank that
-  // never matches is simply never removed, which errs toward keeping history.
-  function settleBanks() {
-    if (banks.length === 0) return;
-    const now = grid.map(ink).join('');
-    banks = banks.filter((bank) => {
-      let pos = 0;
-      let matched = false;
-      for (const rowInk of bank.inks) {
-        if (!rowInk) continue;
-        const at = now.indexOf(rowInk, pos);
-        if (at === -1) return true;      // not (yet) redrawn: keep waiting
-        pos = at + rowInk.length;
-        matched = true;
-      }
-      if (!matched) return true;         // nothing visible to compare against
-      const mine = new Set(bank.rows);
-      scrollback = scrollback.filter((r) => !mine.has(r));
-      return false;
-    });
-  }
-
   function reset() {
     grid = [];
     for (let r = 0; r < rows; r++) {
@@ -205,29 +157,16 @@ export function makeTerminal(screen, options = {}) {
 
   function eraseInDisplay(mode) {
     if (mode === 2 || mode === 3) {
-      // Clearing the whole screen. A harness does this when it resizes:
-      // clear, then repaint only the frame that fits -- so whatever is on
-      // the grid right now is history that will never be drawn again. It
-      // moves into scrollback rather than vanishing, which is the same
-      // stance the pane already takes on 3J: it offers scrollback the
-      // terminal itself does not. Trailing blank rows are dropped so
-      // clearing a half-empty screen does not bank a page of nothing.
-      // The bank is provisional -- see `banks` above -- because the other
-      // reason a harness clears is to repaint this very screen, and banking
-      // that one is duplication, not preservation.
-      const visible = (c) => c.ch !== ' ' || c.bg || c.inverse || c.underline;
-      let keep = grid.length;
-      while (keep > 0 && !grid[keep - 1].some(visible)) keep--;
-      const banked = grid.slice(0, keep);
-      for (const row of banked) {
-        scrollback.push(row);
-        if (scrollback.length > scrollbackLimit) scrollback.shift();
-      }
-      if (keep > 0) {
-        banks.push({ rows: banked, inks: banked.map(ink) });
-        // A bank that old is not being repainted; stop watching for it.
-        if (banks.length > 12) banks.shift();
-      }
+      // A clear clears, exactly as it does in a real terminal: nothing is
+      // saved. An earlier version banked the doomed screen into scrollback and
+      // tried to guess afterwards whether the clear was a resize-repaint
+      // (delete the copy) or a real discard (keep it). The guess compared the
+      // cleared rows against the repaint, and Claude's status line always
+      // holds a ticking timer -- one character of drift and a whole stale
+      // frame, input box and all, sat in scrollback forever. The harness
+      // commits real history the one unambiguous way a terminal has: by
+      // scrolling it off the top, where scrollUp banks it. What it clears,
+      // it meant to clear.
       for (let r = 0; r < rows; r++) grid[r] = Array.from({ length: cols }, blank);
       return;
     }
@@ -293,7 +232,6 @@ export function makeTerminal(screen, options = {}) {
       i++;
     }
 
-    settleBanks();
     paint();
   }
 
@@ -572,7 +510,7 @@ export function makeTerminal(screen, options = {}) {
   return {
     write,
     resize,
-    reset() { reset(); scrollback = []; banks = []; paint(); },
+    reset() { reset(); scrollback = []; paint(); },
     get rows() { return rows; },
     get cols() { return cols; },
     get cursor() { return { ...cursor }; },

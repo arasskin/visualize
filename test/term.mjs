@@ -127,49 +127,29 @@ check('resize keeps the contents', term.text()[0], 'hello');
 check('resize updates the size', [term.rows, term.cols], [10, 40]);
 ok('resizing to the same size is a no-op', term.resize(10, 40) === false);
 
-// A harness answers a resize by clearing the whole screen (2J, often with 3J)
-// and repainting only the frame that fits the new size. The screenful under
-// that clear used to vanish -- resizing the panel visibly ate history -- so
-// clearing banks the screen in scrollback instead of discarding it.
+// A clear clears, exactly as in a real terminal: nothing is saved. An earlier
+// version banked the doomed screen into scrollback and tried to guess
+// afterwards whether the clear was a resize-repaint (delete the copy) or a
+// real discard (keep it). The guess required every banked row to be repainted,
+// and the harness's status line always holds a ticking timer -- one character
+// of drift stranded a whole stale frame, input box and all, in scrollback for
+// good. History is what the harness scrolls off the top, the one signal in
+// the stream that is never ambiguous.
 term.reset();
 term.write('old 1\r\nold 2\x1b[2J\x1b[Hfresh');
-check('clear-screen banks the screen in scrollback',
-      screen.innerHTML.split('\n').slice(0, 3), ['old 1', 'old 2', 'fresh']);
-check('clear-screen still clears the grid', term.text()[0], 'fresh');
+check('clear-screen discards the screen', screen.innerHTML.split('\n'), ['fresh']);
+check('clear-screen clears the grid', term.text()[0], 'fresh');
 
-// But a clear is more often the FIRST HALF OF A REDRAW: on resize the harness
-// clears and repaints the same conversation at the new width. Banking every
-// such clear left one near-duplicate of the screen per clear, and a resize
-// drag fires a dozen of them -- the symptom was scrollback holding the final
-// frame over and over, each copy wrapped slightly differently. A bank is
-// therefore provisional: when the live screen again contains the banked rows'
-// ink, the bank was a redraw echo and dissolves.
+// The case that killed the banking version: a clear whose repaint differs by
+// one ticked character must leave no stale copy of the old frame.
 term.reset();
-term.write('alpha\r\nbeta');
-term.write('\x1b[2J\x1b[Halpha\r\nbeta');
-check('a repaint of the same screen dissolves the bank',
-      screen.innerHTML.split('\n'), ['alpha', 'beta']);
+term.write('reply text\r\n2m 56s');
+term.write('\x1b[2J\x1b[Hreply text\r\n2m 57s');
+check('an almost-identical repaint leaves no stale frame',
+      screen.innerHTML.split('\n'), ['reply text', '2m 57s']);
 
-// The comparison is ink, not lines: the same words rewrapped at a new width
-// still match.
-term.reset();
-term.write('one two\r\nthree');
-term.write('\x1b[2J\x1b[Hone two three');
-check('a rewrapped repaint still dissolves the bank',
-      screen.innerHTML.split('\n'), ['one two three']);
-
-// A width shrink clips the grid before the clear even arrives (resize()
-// reflows by truncating), so the banked rows are fragments of the lines the
-// repaint redraws in full. Fragments match as substrings.
-term.reset();
-term.write('a long line of words\r\ntail');
-term.resize(10, 12);
-term.write('\x1b[2J\x1b[Ha long line\r\nof words\r\ntail');
-check('a clipped bank dissolves into the full repaint',
-      screen.innerHTML.split('\n'), ['a long line', 'of words', 'tail']);
-term.resize(10, 40);
-
-// Each clear in a storm settles against its own repaint.
+// A resize drag is a storm of clear-and-repaints; each clear discards, so the
+// storm leaves one frame, not one per clear.
 term.reset();
 term.write('frame');
 term.write('\x1b[2J\x1b[Hframe');
@@ -177,6 +157,12 @@ term.write('\x1b[2J\x1b[Hframe');
 term.write('\x1b[2J\x1b[Hframe');
 check('a resize storm leaves one copy, not one per clear',
       screen.innerHTML.split('\n'), ['frame']);
+
+// What scrolls off the top is the history that IS kept -- now the only way
+// anything enters scrollback while the size holds still.
+term.reset();
+for (let i = 1; i <= 12; i++) term.write(`line ${i}\r\n`);
+check('scrolled-off rows stay in scrollback', screen.innerHTML.split('\n')[0], 'line 1');
 
 // -- painting when there are no frames --------------------------------------
 // THE FROZEN-SCREEN BUG. requestAnimationFrame does not fire in a hidden tab,
