@@ -24,7 +24,8 @@ export function makeTerminal(screen, options = {}) {
   // A cell is { ch, fg, bg, bold, dim, underline, inverse }. Null fg/bg mean
   // "the default", which the CSS supplies.
   const blank = () => ({ ch: ' ', fg: null, bg: null, bold: false, dim: false,
-                         underline: false, inverse: false });
+                         underline: false, inverse: false,
+                         wide: false, cont: false });
 
   let grid = [];
   let cursor = { row: 0, col: 0, visible: true };
@@ -70,7 +71,14 @@ export function makeTerminal(screen, options = {}) {
   const dom = !!(doc && doc.createElement);
   let historyEl = null;
   let liveEl = null;
-  let lastLiveHTML = null;
+  // The live block is ONE ELEMENT PER ROW, and these run parallel to its
+  // children: the HTML each row currently holds. A paint compares and writes
+  // only the rows that differ -- wterm calls this dirty-row tracking, and it
+  // is what lets a one-cell change (a cursor step, a spinner tick) touch one
+  // div instead of tearing down the whole grid. It is also what lets a
+  // selection in the live region survive a paint that did not touch its rows.
+  let liveDivs = [];
+  let liveHTML = [];
   if (dom) {
     historyEl = doc.createElement('div');
     historyEl.className = 'history';
@@ -108,9 +116,19 @@ export function makeTerminal(screen, options = {}) {
       run = '';
     };
     for (let c = 0; c < row.length; c++) {
+      // The continuation half of a wide pair renders nothing: its character
+      // already spans both cells, held to exactly that span by the CSS class.
+      if (row[c].cont && c !== cursorCol) continue;
       if (c === cursorCol) {
         flush();
-        line += `<span class="cursor">${escapeHtml(row[c].ch)}</span>`;
+        line += `<span class="cursor${row[c].wide ? ' w' : ''}">${escapeHtml(row[c].ch || ' ')}</span>`;
+        runStyle = null;
+        continue;
+      }
+      if (row[c].wide) {
+        flush();
+        const style = styleOf(row[c]);
+        line += `<span class="w"${style ? ` style="${style}"` : ''}>${escapeHtml(row[c].ch)}</span>`;
         runStyle = null;
         continue;
       }
@@ -149,16 +167,102 @@ export function makeTerminal(screen, options = {}) {
     }
   }
 
+  // -- character width --------------------------------------------------------
+  // A wide character owns TWO cells, and pretending otherwise misaligns every
+  // column to its right -- claude's output is full of emoji, and each one
+  // used to shear the rest of its row. The ranges are the East Asian
+  // Wide/Fullwidth blocks plus the emoji-presentation blocks: not the whole
+  // of Unicode's width data, but the part these harnesses emit. Sorted, for
+  // the binary search.
+  const wideRanges = [
+    [0x1100, 0x115F],   // Hangul Jamo
+    [0x231A, 0x231B], [0x23E9, 0x23EC], [0x23F0, 0x23F0], [0x23F3, 0x23F3],
+    [0x25FD, 0x25FE], [0x2614, 0x2615], [0x2648, 0x2653], [0x267F, 0x267F],
+    [0x2693, 0x2693], [0x26A1, 0x26A1], [0x26AA, 0x26AB], [0x26BD, 0x26BE],
+    [0x26C4, 0x26C5], [0x26CE, 0x26CE], [0x26D4, 0x26D4], [0x26EA, 0x26EA],
+    [0x26F2, 0x26F3], [0x26F5, 0x26F5], [0x26FA, 0x26FA], [0x26FD, 0x26FD],
+    [0x2705, 0x2705], [0x270A, 0x270B], [0x2728, 0x2728], [0x274C, 0x274C],
+    [0x274E, 0x274E], [0x2753, 0x2755], [0x2757, 0x2757], [0x2795, 0x2797],
+    [0x27B0, 0x27B0], [0x27BF, 0x27BF], [0x2B1B, 0x2B1C], [0x2B50, 0x2B50],
+    [0x2B55, 0x2B55],
+    [0x2E80, 0x303E],   // CJK radicals, punctuation
+    [0x3041, 0x33FF],   // kana, CJK symbols
+    [0x3400, 0x4DBF], [0x4E00, 0x9FFF],   // CJK ideographs
+    [0xA000, 0xA4CF],   // Yi
+    [0xAC00, 0xD7A3],   // Hangul syllables
+    [0xF900, 0xFAFF],   // CJK compatibility
+    [0xFE30, 0xFE4F],   // CJK compatibility forms
+    [0xFF00, 0xFF60], [0xFFE0, 0xFFE6],   // fullwidth forms
+    [0x1F000, 0x1F0FF],  // mahjong, dominoes, cards
+    [0x1F18E, 0x1F18E], [0x1F191, 0x1F19A],
+    [0x1F200, 0x1F2FF],  // enclosed ideographs
+    [0x1F300, 0x1F64F],  // emoji proper
+    [0x1F680, 0x1F6FF],  // transport
+    [0x1F900, 0x1FAFF],  // supplemental emoji
+    [0x20000, 0x3FFFD],  // CJK extensions
+  ];
+  // Marks that occupy no cell of their own: combining accents, the variation
+  // selectors, ZWJ. They attach to the character before them rather than
+  // being dropped, so what selection copies out is what the program printed.
+  const zeroRanges = [
+    [0x0300, 0x036F], [0x1AB0, 0x1AFF], [0x1DC0, 0x1DFF],
+    [0x200B, 0x200D], [0x20D0, 0x20FF], [0xFE00, 0xFE0F], [0xE0100, 0xE01EF],
+  ];
+  function inRanges(ranges, cp) {
+    let lo = 0, hi = ranges.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (cp < ranges[mid][0]) hi = mid - 1;
+      else if (cp > ranges[mid][1]) lo = mid + 1;
+      else return true;
+    }
+    return false;
+  }
+  function charWidth(cp) {
+    if (inRanges(zeroRanges, cp)) return 0;
+    return inRanges(wideRanges, cp) ? 2 : 1;
+  }
+
+  // Overwriting either half of a wide pair orphans the other half, which
+  // becomes a plain space -- the classic terminal answer, and the one that
+  // keeps the row the right length.
+  function unpair(r, c) {
+    const t = cell(r, c);
+    if (!t) return;
+    if (t.cont) {
+      const left = cell(r, c - 1);
+      if (left && left.wide) { left.ch = ' '; left.wide = false; }
+    }
+    if (t.wide) {
+      const right = cell(r, c + 1);
+      if (right && right.cont) { right.ch = ' '; right.cont = false; }
+    }
+    t.wide = false;
+    t.cont = false;
+  }
+
   function putChar(ch) {
+    const width = charWidth(ch.codePointAt(0));
+    // Zero width: the mark belongs to the character before it. `col - 1` may
+    // be the continuation half of a wide pair; the character lives one left.
+    if (width === 0) {
+      let c = cursor.col - 1;
+      if (c >= 0 && grid[cursor.row][c] && grid[cursor.row][c].cont) c--;
+      const prev = cell(cursor.row, c);
+      if (prev) prev.ch += ch;
+      return;
+    }
     // Wrap at the right edge rather than overwriting the last column, which
     // is what a terminal does and what the harnesses assume when they draw
-    // a full-width box.
-    if (cursor.col >= cols) {
+    // a full-width box. A wide character that would straddle the edge wraps
+    // whole -- half an emoji is not a thing a terminal prints.
+    if (cursor.col + width > cols) {
       cursor.col = 0;
       newline();
     }
     const target = cell(cursor.row, cursor.col);
     if (target) {
+      unpair(cursor.row, cursor.col);
       target.ch = ch;
       target.fg = attr.fg;
       target.bg = attr.bg;
@@ -166,8 +270,18 @@ export function makeTerminal(screen, options = {}) {
       target.dim = attr.dim;
       target.underline = attr.underline;
       target.inverse = attr.inverse;
+      if (width === 2) {
+        target.wide = true;
+        const next = cell(cursor.row, cursor.col + 1);
+        if (next) {
+          unpair(cursor.row, cursor.col + 1);
+          Object.assign(next, blank());
+          next.ch = '';
+          next.cont = true;
+        }
+      }
     }
-    cursor.col++;
+    cursor.col += width;
   }
 
   // -- SGR, which is the overwhelming majority of what arrives ---------------
@@ -310,8 +424,18 @@ export function makeTerminal(screen, options = {}) {
       if (ch === '\x07') { i++; continue; }              // bell: nothing to ring
       if (ch < ' ' && ch !== '\x1b') { i++; continue; }  // other C0: ignored
 
-      putChar(ch);
-      i++;
+      // BY CODE POINT, not UTF-16 unit: an emoji is a surrogate pair, and
+      // feeding putChar the halves painted two garbage cells. A high
+      // surrogate at the end of the chunk waits for its partner exactly as a
+      // split escape sequence does.
+      const cp = data.codePointAt(i);
+      if (cp >= 0xd800 && cp <= 0xdbff && i + 1 >= data.length) {
+        pending = data.slice(i);
+        break;
+      }
+      const glyph = String.fromCodePoint(cp);
+      putChar(glyph);
+      i += glyph.length;
     }
 
     if (sync) {
@@ -556,10 +680,14 @@ export function makeTerminal(screen, options = {}) {
     const withCursor = options.showCursor !== false && cursor.visible;
 
     if (dom) {
-      // ONLY THE GRID. History was rendered row by row as it was banked and
-      // is never touched here -- which is the entire point of the split: the
-      // cost of a paint is 24 rows whatever the session's age, and the
-      // browser keeps stable nodes to anchor scrolling and selection to.
+      // ONLY THE GRID, AND ONLY ITS DIRTY ROWS. History was rendered row by
+      // row as it was banked and is never touched here; the live rows keep
+      // their last serialization alongside, and a paint writes just the rows
+      // whose HTML differs. The cost of a typical frame is one or two divs,
+      // not twenty-four -- and `changed` (whether ANY row moved) is part of
+      // the paint's story: the glide in app.js must fire on a repaint that
+      // moved content and not on one that re-drew the same frame (a mouse
+      // report echoed back as invisible CSI).
       const out = [];
       for (let r = 0; r < grid.length; r++) {
         out.push(rowHTML(grid[r], withCursor && r === cursor.row ? cursor.col : null));
@@ -567,15 +695,28 @@ export function makeTerminal(screen, options = {}) {
       // Blank lines at the bottom are noise, but the cursor's line must stay.
       let last = out.length - 1;
       while (last > cursor.row && out[last] === '') last--;
-      const html = out.slice(0, last + 1).join('\n');
-      // Whether this paint CHANGED anything is part of the paint's story: the
-      // glide in app.js must fire on a repaint that moved content (a
-      // transcript scroll) and not on one that re-drew the same frame (a
-      // mouse report echoed back as invisible CSI, a cursor blink).
-      const changed = html !== lastLiveHTML;
-      lastLiveHTML = html;
-      if (changed) liveEl.innerHTML = html;
-      return [scrollback.length + last + 1, changed];
+      const want = last + 1;
+      let changed = false;
+      while (liveDivs.length > want) {
+        liveEl.removeChild(liveDivs.pop());
+        liveHTML.pop();
+        changed = true;
+      }
+      for (let r = 0; r < want; r++) {
+        if (r >= liveDivs.length) {
+          const div = doc.createElement('div');
+          div.innerHTML = out[r];
+          liveEl.appendChild(div);
+          liveDivs.push(div);
+          liveHTML.push(out[r]);
+          changed = true;
+        } else if (liveHTML[r] !== out[r]) {
+          liveDivs[r].innerHTML = out[r];
+          liveHTML[r] = out[r];
+          changed = true;
+        }
+      }
+      return [scrollback.length + want, changed];
     }
 
     // Headless: the whole view as one string, exactly as before the split.
@@ -622,7 +763,12 @@ export function makeTerminal(screen, options = {}) {
     reset() {
       reset();
       scrollback = [];
-      if (dom) historyEl.innerHTML = '';
+      if (dom) {
+        historyEl.innerHTML = '';
+        liveEl.innerHTML = '';
+        liveDivs = [];
+        liveHTML = [];
+      }
       mouse = { tracking: false, sgr: false };
       sync = false;
       if (syncTimer !== null) { clearTimeout(syncTimer); syncTimer = null; }

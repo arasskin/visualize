@@ -283,7 +283,13 @@ button:disabled { opacity: .5; cursor: progress; }
    the old single-string render kept a newline there. The ::before space holds
    the line open without polluting copied text, since pseudo-content is not
    part of the selection. */
-.screen .history > div:empty::before { content: "\a0"; }
+.screen .history > div:empty::before,
+.screen .live > div:empty::before { content: "\a0"; }
+/* A wide character -- emoji, CJK -- owns exactly two cells. The emulator
+   marks it (see charWidth in term.js) and this box forces the glyph's
+   advance to precisely 2ch whatever the font renders it at, which is what
+   keeps every column to its right aligned. */
+.screen .w { display: inline-block; width: 2ch; }
 /* The cell the cursor is on. Painted as a background rather than a caret so
    it survives the screen being rebuilt on every frame. Opaque, unlike the
    panel: a cursor you can see the graph through is not a cursor. */

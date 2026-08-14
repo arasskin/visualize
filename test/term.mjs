@@ -208,8 +208,13 @@ function domScreen() {
     set innerHTML(v) { this._html = v; this._kids = []; this.sets = (this.sets || 0) + 1; },
     get innerHTML() { return this._html; },
     insertAdjacentHTML(_, h) { this._kids.push(h); this.appends = (this.appends || 0) + 1; },
+    appendChild(child) { this._kids.push(child); },
     get firstChild() { return this._kids.length ? this._kids[0] : null; },
-    removeChild() { this._kids.shift(); },
+    removeChild(child) {
+      if (child === undefined || child === this._kids[0]) { this._kids.shift(); return; }
+      const i = this._kids.indexOf(child);
+      if (i >= 0) this._kids.splice(i, 1);
+    },
   });
   const screen = {
     ownerDocument: { createElement: () => el('') },
@@ -227,8 +232,8 @@ function domScreen() {
   t.write('one\r\ntwo\r\nthree\r\nfour\r\nfive');
   check('a scrolled-off row lands in history, rendered',
         s.history._kids, ['<div>one</div>']);
-  check('the live block holds only the grid',
-        s.live.innerHTML.split('\n'), ['two', 'three', 'four', 'five']);
+  check('the live block holds only the grid, one div per row',
+        s.live._kids.map((d) => d._html), ['two', 'three', 'four', 'five']);
 
   const appendsBefore = s.history.appends;
   const before = s.history._kids.join('');
@@ -244,6 +249,43 @@ function domScreen() {
 
   t.reset();
   ok('reset clears history with the screen', s.history._kids.length === 0);
+}
+
+{
+  // WIDE CHARACTERS own two cells. Emoji and CJK used to get one, shearing
+  // every column to their right -- and an emoji, being a surrogate pair, was
+  // actually fed to the grid as two broken halves.
+  const t = makeTerminal({ innerHTML: '' }, { rows: 4, cols: 10, showCursor: false,
+                                 scrollbackVisible: false });
+  t.write('\u{1F525}x');           // fire emoji, then x
+  ok('an emoji advances the cursor two cells', t.cursor.col === 3);
+  check('the glyph and its neighbour survive intact', t.text()[0], '\u{1F525}x');
+  t.write('\r\u4E2D\u6587');       // CJK: two ideographs
+  ok('CJK ideographs are wide too', t.cursor.col === 4);
+  t.write('\ra');                  // overwrite the first half of a pair
+  check('overwriting half a wide pair spaces the orphan', t.text()[0], 'a \u6587');
+
+  // A surrogate pair split across two chunks -- a 64KB read can land
+  // anywhere -- must wait for its other half, like a split escape does.
+  const t2 = makeTerminal({ innerHTML: '' }, { rows: 2, cols: 10, showCursor: false,
+                                  scrollbackVisible: false });
+  const fire = '\u{1F525}';
+  t2.write(fire[0]);
+  t2.write(fire[1]);
+  check('a surrogate pair split across chunks reassembles', t2.text()[0], fire);
+
+  // A wide char that would straddle the right edge wraps whole.
+  const t3 = makeTerminal({ innerHTML: '' }, { rows: 2, cols: 3, showCursor: false,
+                                  scrollbackVisible: false });
+  t3.write('ab\u{1F525}');
+  check('a wide char never straddles the edge', t3.text()[1], fire);
+
+  // Combining marks attach to the character before them, zero cells wide.
+  const t4 = makeTerminal({ innerHTML: '' }, { rows: 2, cols: 10, showCursor: false,
+                                  scrollbackVisible: false });
+  t4.write('e\u0301x');            // e + combining acute + x
+  ok('a combining mark takes no cell', t4.cursor.col === 2);
+  check('the mark rides its base character', t4.text()[0], 'e\u0301x');
 }
 
 {
@@ -264,6 +306,24 @@ function domScreen() {
   t.write('\x1b[2Jwiped');
   ok('the next real change reports changed again',
      flags[flags.length - 1] === true);
+}
+
+{
+  // DIRTY ROWS: a paint rewrites only the rows whose HTML moved. A write
+  // that touches the bottom row must not re-set the top ones -- that is the
+  // whole difference between one div of work per frame and a grid teardown,
+  // and it is what lets a selection in untouched live rows survive a paint.
+  const s = domScreen();
+  const t = makeTerminal(s, { rows: 4, cols: 20, showCursor: false });
+  t.write('alpha\r\nbeta\r\ngamma');
+  const setsBefore = s.live._kids.map((d) => d.sets || 0);
+  t.write('!');   // appends to the gamma row only
+  const setsAfter = s.live._kids.map((d) => d.sets || 0);
+  ok('a bottom-row write leaves the upper rows untouched',
+     setsAfter[0] === setsBefore[0] && setsAfter[1] === setsBefore[1]
+       && setsAfter[2] === setsBefore[2] + 1);
+  check('and the touched row holds the new text',
+        s.live._kids[2]._html, 'gamma!');
 }
 
 {
