@@ -327,6 +327,59 @@ function domScreen() {
 }
 
 {
+  // DEFERRED WRAP: printing in the last column leaves the wrap OWED, and
+  // any cursor motion cancels the debt. The naive version parked the cursor
+  // one past the edge, where CSI C clamped it backward and the next
+  // printable wrapped spuriously -- one-cell drifts that a delta-painting
+  // program (claude patches lines in place and rarely clears) accumulated
+  // into smeared frames.
+  const t = makeTerminal({ innerHTML: '' }, { rows: 4, cols: 10,
+    showCursor: false, scrollbackVisible: false });
+  t.write('0123456789');
+  ok('a full line leaves the cursor on its last column',
+     t.cursor.row === 0 && t.cursor.col === 9);
+  t.write('x');
+  check('the next printable pays the wrap', t.text().slice(0, 2), ['0123456789', 'x']);
+  // Motion cancels the debt: full line, cursor-forward, overwrite in place.
+  const t2 = makeTerminal({ innerHTML: '' }, { rows: 4, cols: 10,
+    showCursor: false, scrollbackVisible: false });
+  t2.write('0123456789\x1b[Cq');
+  check('a cursor motion cancels the owed wrap: no phantom row',
+        t2.text().slice(0, 2), ['012345678q', '']);
+  // SGR between the last column and the wrap must NOT cancel it.
+  const t3 = makeTerminal({ innerHTML: '' }, { rows: 4, cols: 10,
+    showCursor: false, scrollbackVisible: false });
+  t3.write('0123456789\x1b[31mx');
+  check('colour changes do not cancel the wrap',
+        t3.text().slice(0, 2), ['0123456789', 'x']);
+  // CR after a full line rewrites the SAME row.
+  const t4 = makeTerminal({ innerHTML: '' }, { rows: 4, cols: 10,
+    showCursor: false, scrollbackVisible: false });
+  t4.write('0123456789\rZ');
+  check('carriage return lands on the same row',
+        t4.text()[0], 'Z123456789');
+}
+
+{
+  // THE ALTERNATE SCREEN: claude runs its whole TUI there. Entering clears
+  // (ignoring that clear was the margin garbage in the field -- pre-claude
+  // content stayed visible wherever claude never painted), leaving
+  // restores, and rows scrolled off while inside are repaint debris, not
+  // history.
+  const s = domScreen();
+  const t = makeTerminal(s, { rows: 3, cols: 20, showCursor: false });
+  t.write('shell prompt $');
+  t.write('\x1b[?1049h');
+  check('entering the alternate screen clears it', t.text(), ['', '', '']);
+  t.write('tui frame');
+  for (let i = 0; i < 6; i++) t.write(`\r\nspill ${i}`);
+  check('rows scrolled off inside it never reach history',
+        s.history._kids.length, 0);
+  t.write('\x1b[?1049l');
+  check('leaving restores what was there', t.text()[0], 'shell prompt $');
+}
+
+{
   // THE SHIFT DETECTOR: the one consumption signal the wheel pacing can
   // trust. A frame whose rows MOVED to new indices is a program answering
   // scroll reports; a frame that changed in place -- a ticking status line,

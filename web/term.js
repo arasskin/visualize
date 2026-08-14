@@ -30,6 +30,19 @@ export function makeTerminal(screen, options = {}) {
   let grid = [];
   let cursor = { row: 0, col: 0, visible: true };
   let saved = null;
+  // DEFERRED WRAP, as every real terminal does it. Printing in the last
+  // column leaves the cursor ON that column with the wrap owed; the next
+  // printable pays it, and any explicit cursor motion cancels it. The naive
+  // version let the cursor sit one past the edge, where a following CSI C
+  // clamped it BACKWARD and a following printable wrapped SPURIOUSLY --
+  // off-by-ones that claude's delta renderer (which patches lines in place
+  // and rarely clears) accumulated into smeared frames.
+  let wrapPending = false;
+  // The alternate screen (?1049). Claude runs its whole TUI there. Entering
+  // clears; leaving restores what was; and rows scrolled off while inside
+  // VANISH rather than entering scrollback -- an alt-screen program's
+  // repaint debris is not history.
+  let altSaved = null;
   // Whether the program asked for the mouse (?1000/1002/1003) and for SGR
   // encoding (?1006). Claude turns all four on at startup and scrolls its
   // own transcript on wheel events -- it never scrolls the terminal -- so
@@ -93,6 +106,8 @@ export function makeTerminal(screen, options = {}) {
       grid.push(Array.from({ length: cols }, blank));
     }
     cursor = { row: 0, col: 0, visible: true };
+    wrapPending = false;
+    altSaved = null;
   }
   reset();
 
@@ -144,6 +159,7 @@ export function makeTerminal(screen, options = {}) {
   // A row leaves the grid for good: remember it, and in the DOM render it
   // NOW, once -- the only time this row will ever be serialized.
   function bankRow(gone) {
+    if (altSaved) return;
     scrollback.push(gone);
     if (dom && options.scrollbackVisible !== false) {
       historyEl.insertAdjacentHTML('beforeend', `<div>${rowHTML(gone, null)}</div>`);
@@ -252,10 +268,14 @@ export function makeTerminal(screen, options = {}) {
       if (prev) prev.ch += ch;
       return;
     }
-    // Wrap at the right edge rather than overwriting the last column, which
-    // is what a terminal does and what the harnesses assume when they draw
-    // a full-width box. A wide character that would straddle the edge wraps
-    // whole -- half an emoji is not a thing a terminal prints.
+    // Pay the owed wrap first; then a wide character that would straddle
+    // the edge wraps whole -- half an emoji is not a thing a terminal
+    // prints.
+    if (wrapPending) {
+      wrapPending = false;
+      cursor.col = 0;
+      newline();
+    }
     if (cursor.col + width > cols) {
       cursor.col = 0;
       newline();
@@ -281,7 +301,13 @@ export function makeTerminal(screen, options = {}) {
         }
       }
     }
-    cursor.col += width;
+    const next = cursor.col + width;
+    if (next >= cols) {
+      cursor.col = cols - 1;
+      wrapPending = true;
+    } else {
+      cursor.col = next;
+    }
   }
 
   // -- SGR, which is the overwhelming majority of what arrives ---------------
@@ -413,10 +439,11 @@ export function makeTerminal(screen, options = {}) {
         continue;
       }
 
-      if (ch === '\n') { newline(); i++; continue; }
-      if (ch === '\r') { cursor.col = 0; i++; continue; }
-      if (ch === '\b') { cursor.col = Math.max(0, cursor.col - 1); i++; continue; }
+      if (ch === '\n') { wrapPending = false; newline(); i++; continue; }
+      if (ch === '\r') { wrapPending = false; cursor.col = 0; i++; continue; }
+      if (ch === '\b') { wrapPending = false; cursor.col = Math.max(0, cursor.col - 1); i++; continue; }
       if (ch === '\t') {
+        wrapPending = false;
         cursor.col = Math.min(cols - 1, (Math.floor(cursor.col / 8) + 1) * 8);
         i++;
         continue;
@@ -488,10 +515,12 @@ export function makeTerminal(screen, options = {}) {
 
     if (next === '7') { saved = { ...cursor, attr: { ...attr } }; return 2; }
     if (next === '8') {
+      wrapPending = false;
       if (saved) { cursor.row = saved.row; cursor.col = saved.col; attr = { ...saved.attr }; }
       return 2;
     }
     if (next === 'M') {   // reverse index: up, scrolling if at the top
+      wrapPending = false;
       if (cursor.row === 0) { grid.unshift(Array.from({ length: cols }, blank)); grid.splice(rows, 1); }
       else cursor.row--;
       return 2;
@@ -514,8 +543,9 @@ export function makeTerminal(screen, options = {}) {
     if (priv) {
       // The private modes both harnesses use. Cursor visibility changes what
       // is drawn; the mouse modes change where the wheel GOES; synchronized
-      // output (2026) changes WHEN the paint happens. Bracketed paste (2004)
-      // remains a promise about input framing that changes nothing here.
+      // output (2026) changes WHEN the paint happens; the alternate screen
+      // (1049/1047) swaps the whole grid. Bracketed paste (2004) remains a
+      // promise about input framing that changes nothing here.
       // One h/l can carry several modes.
       if (final === 'h' || final === 'l') {
         const on = final === 'h';
@@ -523,6 +553,36 @@ export function makeTerminal(screen, options = {}) {
           if (p === 25) cursor.visible = on;
           else if (p === 1000 || p === 1002 || p === 1003) mouse.tracking = on;
           else if (p === 1006) mouse.sgr = on;
+          else if (p === 1049 || p === 1047) {
+            // ENTERING CLEARS, LEAVING RESTORES -- and ignoring this mode
+            // was the margin garbage in the field: claude runs its TUI in
+            // the alternate screen, the switch's implicit clear never
+            // happened, and whatever predated claude stayed visible
+            // wherever claude never painted.
+            if (on && !altSaved) {
+              altSaved = { grid, cursor: { ...cursor } };
+              grid = [];
+              for (let r = 0; r < rows; r++) {
+                grid.push(Array.from({ length: cols }, blank));
+              }
+              cursor = { row: 0, col: 0, visible: cursor.visible };
+              wrapPending = false;
+            } else if (!on && altSaved) {
+              grid = altSaved.grid;
+              cursor = altSaved.cursor;
+              altSaved = null;
+              wrapPending = false;
+              // The restored grid predates any resize made while inside.
+              for (const row of grid) {
+                while (row.length < cols) row.push(blank());
+                row.length = cols;
+              }
+              while (grid.length < rows) grid.push(Array.from({ length: cols }, blank));
+              while (grid.length > rows) grid.pop();
+              cursor.row = Math.min(cursor.row, rows - 1);
+              cursor.col = Math.min(cursor.col, cols - 1);
+            }
+          }
           else if (p === 2026) {
             sync = on;
             if (!on && syncTimer !== null) { clearTimeout(syncTimer); syncTimer = null; }
@@ -532,6 +592,10 @@ export function makeTerminal(screen, options = {}) {
       return;
     }
 
+    // Any cursor motion or edit cancels an owed wrap, exactly as xterm
+    // does; SGR (m) must NOT -- colour changes between the last column and
+    // the wrap are routine.
+    if ('ABCDEFGHfdJKLMP@Xsur'.includes(final)) wrapPending = false;
     switch (final) {
       case 'A': cursor.row = Math.max(0, cursor.row - n); break;
       case 'B': cursor.row = Math.min(rows - 1, cursor.row + n); break;
