@@ -362,6 +362,17 @@
   (def now (harness/poll at 0))
   (check/ok (get now "trimmed")
             "the session reports its history as trimmed, so a reattach knows not to replay it")
+  # THE TEAR IS REPORTED. A client whose position the trim passed receives a
+  # stream starting beyond what it asked for, and `from` says so -- which is
+  # how the page knows to reset and ask for a repaint instead of painting a
+  # stream that begins mid-escape-sequence.
+  (def gen (get now "generation"))
+  (def torn (harness/poll 1 gen))
+  (check/ok (> (get torn "from") 1)
+            "a reply past a trimmed position reports where it really starts")
+  (def intact (harness/poll at gen))
+  (check/is= at (get intact "from")
+             "an untrimmed position reports exactly itself")
   (harness/stop)
   (harness/shutdown)   # do not leave a small-cap supervisor for later tests
   (os/setenv "VISUALIZE_BACKLOG" nil)

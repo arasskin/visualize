@@ -736,7 +736,20 @@ function makeTerminalPane(root, prefix) {
         at = 0;
         term.reset();
       }
-      if (out.text) {
+      // A TORN STREAM IS NOT AN UPDATE. When the backlog cap trims past our
+      // position, the reply's text starts BEYOND what we asked for --
+      // `from` says so -- and begins mid-frame, possibly mid-escape (a
+      // literal "[7C" painted on screen was this bug wearing its cause).
+      // Writing it smears garbage over a stale grid. Reset instead, take
+      // the new position, and ask the program to repaint whole: SIGWINCH
+      // reaches anything full-screen, and a line program's next output
+      // starts clean anyway.
+      if (out.from > askedAt && askedAt > 0 && out.generation === askedGen) {
+        term.reset();
+        at = out.at;
+        lastOutput = performance.now();
+        post('redraw').catch(() => {});
+      } else if (out.text) {
         term.write(out.text);
         at = out.at;
         // Output just arrived, so the next poll should be immediate: an agent
@@ -936,7 +949,14 @@ function makeTerminalPane(root, prefix) {
             at = 0;
             term.reset();
           }
-          if (out.text) {
+          // The same torn-stream guard as the poll path: an echo that
+          // starts past our position lost bytes to the backlog cap.
+          if (out.from > askedAt && askedAt > 0 && out.generation === askedGen) {
+            term.reset();
+            at = out.at;
+            lastOutput = performance.now();
+            post('redraw').catch(() => {});
+          } else if (out.text) {
             term.write(out.text);
             at = out.at;
             lastOutput = performance.now();

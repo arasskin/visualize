@@ -273,7 +273,12 @@
   # not noticed) gets clamped to the end -- the generation check is what
   # handles that case properly.
   (def from (max base (min at total)))
-  [(string/join (slice backlog (- from base)) "") total])
+  # `from` rides along: a caller whose position was trimmed away receives a
+  # stream that STARTS PAST what it asked for, and cannot know unless told --
+  # the text alone looks like any other update while actually beginning
+  # mid-escape-sequence. (Seen in the field as a literal "[7C" on screen and
+  # frames smeared over stale rows: the torn stream's ESC went missing.)
+  [(string/join (slice backlog (- from base)) "") total from])
 
 # -- the protocol -------------------------------------------------------------
 #
@@ -349,11 +354,12 @@
       (if (neg? at)
         # An older page that does not send `at` gets the old answer.
         [{"ok" true} false]
-        (let [[text next] (session-since at)
+        (let [[text next from] (session-since at)
               now (session-state)]
           [{"ok" true
             "text" text
             "at" next
+            "from" from
             "running" (now "running")
             "generation" (now "generation")}
            false])))
@@ -414,9 +420,10 @@
             (ev/sleep 0.01))))
       (let [now (session-state)
             stale (and (>= asked 0) (not= asked (now "generation")))
-            [text next] (session-since (if stale 0 (number-at "at" 0)))]
+            [text next from] (session-since (if stale 0 (number-at "at" 0)))]
         [{"text" text
           "at" next
+          "from" from
           "running" (now "running")
           "generation" (now "generation")
           "rows" (now "rows")
@@ -773,6 +780,7 @@
      (when (and reply (get reply "text"))
        {"text" (get reply "text")
         "at" (or (get reply "at") at)
+        "from" (or (get reply "from") -1)
         "running" (truthy? (get reply "running"))
         "generation" (or (get reply "generation") 0)}))
 
@@ -837,6 +845,9 @@
      (if reply
        {"text" (or (get reply "text") "")
         "at" (or (get reply "at") at)
+        # Where the reply's text actually starts. -1 from a supervisor that
+        # predates tear reporting; the page then skips tear detection.
+        "from" (or (get reply "from") -1)
         "running" (truthy? (get reply "running"))
         "generation" (or (get reply "generation") 0)
         # The geometry the recording was made for. A reattaching page replays
