@@ -601,7 +601,25 @@ const harnessRoot = document.getElementById('harness');
 const harnessState = document.getElementById('harness-state');
 const screen = document.getElementById('screen');
 
-const term = makeTerminal(screen);
+// Follow the output the way a terminal does -- but only while the view is at
+// the bottom. The flag comes from the user's own scrolling, so scrolling up
+// to read mid-stream is honoured for as long as they stay up, and returning
+// to the bottom re-arms the follow. The pin itself happens in onPaint, after
+// the DOM has its new height: paints are deferred a frame, so pinning at
+// write time scrolls to the PREVIOUS frame's bottom -- and, measured there,
+// "am I at the bottom?" is off by up to a whole chunk, which is what made an
+// earlier version stop following fast streams.
+const harnessBody = harnessRoot.querySelector('.panel-body');
+let following = true;
+harnessBody.addEventListener('scroll', () => {
+  following = harnessBody.scrollTop + harnessBody.clientHeight
+    >= harnessBody.scrollHeight - 4;
+});
+const term = makeTerminal(screen, {
+  onPaint: () => {
+    if (following) harnessBody.scrollTop = harnessBody.scrollHeight;
+  },
+});
 let at = 0;              // how much of the harness output we have consumed
 let polling = false;     // is the loop running? (see scheduleNextPoll)
 let pollFailures = 0;    // consecutive misses; three in a row means gone
@@ -680,9 +698,8 @@ async function poll() {
       // mid-response has more coming, and this is what keeps streaming smooth
       // rather than stepping along at the idle delay.
       lastOutput = performance.now();
-      // Follow the output, the way a terminal does.
-      const body = harnessRoot.querySelector('.panel-body');
-      body.scrollTop = body.scrollHeight;
+      // Following the output happens in the emulator's onPaint, once the
+      // new height exists to scroll to.
     }
     setState(out.running ? '' : 'exited');
     if (!out.running) stopPolling();
@@ -827,8 +844,6 @@ function sendInput(text) {
         term.write(out.text);
         at = out.at;
         lastOutput = performance.now();
-        const body = harnessRoot.querySelector('.panel-body');
-        body.scrollTop = body.scrollHeight;
       }
       // Whatever follows the echo -- a command's output, an agent's answer --
       // arrives on the polling loop, which is now in its fast mode.

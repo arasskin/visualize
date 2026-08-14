@@ -411,6 +411,9 @@ export function makeTerminal(screen, options = {}) {
       painting = false;
       if (timer !== null) { clearTimeout(timer); timer = null; }
       render();
+      // After, not before: a caller following the output needs the DOM to
+      // have its new height when it decides where to scroll.
+      if (options.onPaint) options.onPaint();
     };
 
     // The frame is the fast path and paints within ~16ms when the tab is
