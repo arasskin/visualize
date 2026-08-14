@@ -29,11 +29,20 @@
 # that runs for hours does not grow without bound -- the browser only ever
 # needs enough to redraw its screen, and the emulator's own scrollback holds
 # the rest on the client side.
-(def- backlog-limit 4000)
+(def- backlog-limit
+  (or (scan-number (or (os/getenv "VISUALIZE_BACKLOG") "")) 4000))
 
 (var- session nil)      # the live pty, or nil
 (var- output nil)       # channel the pump thread writes into
 (var- backlog @[])      # chunks, for a page that reloads or arrives late
+# How many chunks have ever been trimmed off the front. Chunk numbers the
+# clients hold are ABSOLUTE -- base + position -- because the cap shifts every
+# array position when it trims. Numbering by position stalled every long
+# session: once length pinned at the cap, a client whose `at` equalled it got
+# an empty reply from then on, forever, while reloads (which start at zero)
+# happily saw everything. Live output stopping while reloads work is exactly
+# that bug's face.
+(var- base 0)
 (var- generation 0)     # bumped per start, so a stale client can tell
 # The pty's current size, remembered because a RECORDING is meaningless
 # without it: the backlog is bytes the program drew for a specific geometry,
@@ -58,7 +67,8 @@
         (set exited true)
         (do (array/push backlog value)
             (when (> (length backlog) backlog-limit)
-              (array/remove backlog 0)))))))
+              (array/remove backlog 0)
+              (++ base)))))))
 
 # THE TERMINAL USED TO HANG HERE, and the mechanism is worth stating because
 # nothing about it looks like a bug at the call site.
@@ -105,8 +115,9 @@
   {"running" (truthy? (running?))
    "generation" generation
    "argv" (if session (session :argv) [])
-   "chunks" (length backlog)
+   "chunks" (+ base (length backlog))
    "rows" pty-rows
+   "trimmed" (pos? base)
    "cols" pty-cols})
 
 (defn- start
@@ -117,6 +128,7 @@
   [argv root rows cols]
   (when session (try (pty/close session) ([_] nil)))
   (set backlog @[])
+  (set base 0)
   (set exited false)
   (set pty-rows rows)
   (set pty-cols cols)
@@ -212,8 +224,13 @@
   reload replays from the beginning and a live page only gets what is new.``
   [at]
   (drain)
-  (def from (max 0 (min at (length backlog))))
-  [(string/join (slice backlog from) "") (length backlog)])
+  (def total (+ base (length backlog)))
+  # Clamped to what still exists: a client older than the trim gets
+  # everything retained, and one from the future (a restarted session it has
+  # not noticed) gets clamped to the end -- the generation check is what
+  # handles that case properly.
+  (def from (max base (min at total)))
+  [(string/join (slice backlog (- from base)) "") total])
 
 # -- the protocol -------------------------------------------------------------
 #
@@ -313,7 +330,8 @@
         "running" (now "running")
         "generation" (now "generation")
         "rows" (now "rows")
-        "cols" (now "cols")}
+        "cols" (now "cols")
+        "trimmed" (now "trimmed")}
        false])
 
     (= op "state") [(state) false]

@@ -890,7 +890,13 @@ const harnessPanel = makePanel(harnessRoot, {
         generation = now.generation;
         term.reset();
         term.resize(now.rows || 24, now.cols || 80);
-        if (now.text) term.write(now.text);
+        // A TRIMMED HISTORY IS NOT REPLAYED. Once the backlog cap has eaten
+        // the front, what remains starts mid-frame -- often mid-escape --
+        // and painting it fills the scrollback with garbage the redraw
+        // nudge cannot reach, because a TUI repaints its live rows and
+        // nothing above them. Skipping the replay costs old scrollback and
+        // buys a clean screen; the nudge below fills in the current frame.
+        if (now.text && !now.trimmed) term.write(now.text);
         at = now.at;
         // NOW adapt to this panel: reflow the grid and tell the pty.
         const size = measure();

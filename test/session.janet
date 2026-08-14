@@ -246,6 +246,45 @@
   (check/ok found "the keystroke still reached the program")
   (harness/stop))
 
+(check/test "live reading continues past the backlog cap"
+  # THE LONG-SESSION STALL. Chunk numbers used to be positions in the backlog
+  # array, and the cap trims that array from the front -- so once a session
+  # produced more chunks than the cap, the length pinned there, a client
+  # whose `at` had reached it got an empty reply, and got one forever after.
+  # Live output stopped while a reload (which starts from zero) showed
+  # everything: exactly the reported shape. Numbers are absolute now.
+  #
+  # The cap is shrunk via the env knob so this runs in seconds; each printf
+  # is followed by a drip of sleep so the pty delivers many small chunks
+  # rather than one big one.
+  (os/setenv "VISUALIZE_BACKLOG" "40")
+  (harness/shutdown)   # the running supervisor has the old cap
+  (ev/sleep 0.3)
+  (harness/start ["/bin/sh" "-c"
+                  "i=0; while [ $i -lt 300 ]; do echo tick-$i; i=$((i+1)); sleep 0.005; done; echo CAP-DONE"]
+                 (os/cwd) 24 80)
+  # Follow INCREMENTALLY, as the page does -- never from zero.
+  (var at 0)
+  (var seen @"")
+  (var tries 0)
+  (while (and (< tries 600) (not (string/find "CAP-DONE" (string seen))))
+    (++ tries)
+    (ev/sleep 0.03)
+    (def reply (harness/poll at 0))
+    (buffer/push-string seen (get reply "text" ""))
+    (set at (get reply "at" at)))
+  (check/ok (string/find "CAP-DONE" (string seen))
+            "incremental polling reaches the end of a session larger than the cap")
+  (check/ok (string/find "tick-299" (string seen))
+            "and the late output arrived live, not only on reload")
+  (def now (harness/poll at 0))
+  (check/ok (get now "trimmed")
+            "the session reports its history as trimmed, so a reattach knows not to replay it")
+  (harness/stop)
+  (harness/shutdown)   # do not leave a small-cap supervisor for later tests
+  (os/setenv "VISUALIZE_BACKLOG" nil)
+  (ev/sleep 0.3))
+
 (check/test "shutdown ends the supervisor and takes the socket with it"
   # What ctrl-c does. Also this suite's teardown: leaving a supervisor behind
   # would make the next run adopt a session it did not start, and the tests

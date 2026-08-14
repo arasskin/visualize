@@ -286,6 +286,7 @@
      # into a grid of THIS size, not the panel's -- see the attach path.
      "rows" (or (get reply "rows") 24)
      "cols" (or (get reply "cols") 80)
+     "trimmed" (truthy? (get reply "trimmed"))
      "reachable" true}
     # UNREACHABLE IS NOT DEAD. This fallback used to say running=false,
     # generation=0 -- and the page, taking it as truth, blanked its screen
