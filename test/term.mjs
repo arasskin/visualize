@@ -124,6 +124,16 @@ check('resize keeps the contents', term.text()[0], 'hello');
 check('resize updates the size', [term.rows, term.cols], [10, 40]);
 ok('resizing to the same size is a no-op', term.resize(10, 40) === false);
 
+// A harness answers a resize by clearing the whole screen (2J, often with 3J)
+// and repainting only the frame that fits the new size. The screenful under
+// that clear used to vanish -- resizing the panel visibly ate history -- so
+// clearing banks the screen in scrollback instead of discarding it.
+term.reset();
+term.write('old 1\r\nold 2\x1b[2J\x1b[Hfresh');
+check('clear-screen banks the screen in scrollback',
+      screen.innerHTML.split('\n').slice(0, 3), ['old 1', 'old 2', 'fresh']);
+check('clear-screen still clears the grid', term.text()[0], 'fresh');
+
 // -- painting when there are no frames --------------------------------------
 // THE FROZEN-SCREEN BUG. requestAnimationFrame does not fire in a hidden tab,
 // and the paint used to be scheduled on it alone -- setting a `painting` guard

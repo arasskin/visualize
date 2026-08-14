@@ -157,8 +157,20 @@ export function makeTerminal(screen, options = {}) {
 
   function eraseInDisplay(mode) {
     if (mode === 2 || mode === 3) {
-      // Clearing the whole screen: keep what scrolled off, since the pane
-      // offers scrollback the terminal itself does not.
+      // Clearing the whole screen. A harness does this when it resizes:
+      // clear, then repaint only the frame that fits -- so whatever is on
+      // the grid right now is history that will never be drawn again. It
+      // moves into scrollback rather than vanishing, which is the same
+      // stance the pane already takes on 3J: it offers scrollback the
+      // terminal itself does not. Trailing blank rows are dropped so
+      // clearing a half-empty screen does not bank a page of nothing.
+      const visible = (c) => c.ch !== ' ' || c.bg || c.inverse || c.underline;
+      let keep = grid.length;
+      while (keep > 0 && !grid[keep - 1].some(visible)) keep--;
+      for (let r = 0; r < keep; r++) {
+        scrollback.push(grid[r]);
+        if (scrollback.length > scrollbackLimit) scrollback.shift();
+      }
       for (let r = 0; r < rows; r++) grid[r] = Array.from({ length: cols }, blank);
       return;
     }
