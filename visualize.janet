@@ -565,11 +565,15 @@
                        (when repl-socket (try (os/rm repl-socket) ([_] nil)))
                        (os/exit 0)))
 
+  (defn align-word
+    [word to]
+    (string ;(map (fn [_] " ") (range (- (length to) (length word)))) word))
+
   (print "visualize: " root " on " url)
-  (print "   config: "config-path)
-  (print "  parsers: "(string/join (map |($ :name) specs) ", "))
-  (when dev? (print "  repl: nc -U " repl-socket))
-  (print "  ctrl-c to stop")
+  (print (align-word "config: " "visualize: ") config-path)
+  (print (align-word "parsers: " "visualize: ") (string/join (map |($ :name) specs) ", "))
+  (when dev? (print (align-word "repl: " "visualize: ") "nc -U " repl-socket))
+  (print "ctrl-c to stop")
   # Off the server, not off the constant: they differ whenever the first
   # choice was taken, and printing the wrong one sends you to somebody else's
   # page.
