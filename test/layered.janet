@@ -429,3 +429,61 @@
 # built on one would assert nothing. It needs a group genuinely narrower on one
 # rank than another AND enough of a tail after it for the shove to accumulate,
 # which so far only the real graph produces.
+
+#
+# `settle` -- the one place separation happens.
+#
+
+(t/test "settle keeps the order and the gaps"
+  (def w @{"a" 60 "b" 60 "c" 60})
+  # All three want the same spot; they spread symmetrically around it.
+  (def out (layered/settle ["a" "b" "c"] (fn [_] 0) w 20))
+  (t/is= 0 (out "b") "the middle one keeps what it wanted")
+  (t/is= -80 (out "a"))
+  (t/is= 80 (out "c") "and the others clear it by width + gap"))
+
+(t/test "settle leaves a roomy layer alone"
+  (def w @{"a" 60 "b" 60})
+  (def out (layered/settle ["a" "b"] (fn [n] (if (= n "a") -100 100)) w 20))
+  (t/is= -100 (out "a"))
+  (t/is= 100 (out "b") "nothing moves when nothing overlaps"))
+
+(t/test "a fixed node holds its place and the rest give way"
+  # A group's member is fixed: its column IS the box, so it is the one thing
+  # that may not be traded away.
+  (def w @{"a" 60 "g" 60})
+  (def out (layered/settle ["a" "g"] (fn [_] 100) w 20 (fn [n] (= n "g"))))
+  (t/is= 100 (out "g") "the fixed node kept its position")
+  (t/is= 20 (out "a") "and its neighbour moved instead"))
+
+(t/test "a bound survives a merge"
+  # THE BUG THIS EXISTS FOR. The bounds were combined with a `cond` that read
+  # as four clauses rather than three, so a pair with either side missing
+  # answered nil and the bound vanished -- which held while every block was
+  # one node and stopped holding the moment two merged. A node with a hard
+  # floor against a group's box sat inside it anyway.
+  (def w @{"a" 60 "b" 60})
+  (def out (layered/settle ["a" "b"] (fn [_] 0) w 20 nil
+                           (fn [n] (when (= n "b") 500))))
+  (t/ok (>= (out "b") 500) "the floor held even though the two blocks merged")
+  (t/ok (<= (+ (out "a") 30 20) (- (out "b") 30)) "and they are still apart")
+  (def ceil (layered/settle ["a" "b"] (fn [_] 0) w 20 nil nil
+                            (fn [n] (when (= n "a") -200))))
+  (t/ok (<= (ceil "a") -200) "a ceiling survives it too"))
+
+(t/test "no layer comes out overlapping, whatever is asked of it"
+  # The property the whole arrangement exists for: passes say what they want
+  # and `settle` decides, so non-overlap is a property of the output rather
+  # than of the order the passes ran in.
+  (def names (map |(string "n" $) (range 12)))
+  (def w (table ;(mapcat |[$ 70] names)))
+  # Everything wants the same place, half of it is fixed there, and two have
+  # bounds that contradict each other.
+  (def out (layered/settle names (fn [_] 0) w 20
+                           (fn [n] (find |(= $ n) ["n3" "n7"]))
+                           (fn [n] (when (= n "n5") 400))
+                           (fn [n] (when (= n "n5") -400))))
+  (def sorted (sorted-by |(out $) names))
+  (for i 0 (- (length sorted) 1)
+    (t/ok (>= (- (out (sorted (+ i 1))) (out (sorted i))) 69.9)
+          "neighbours stay a node apart")))

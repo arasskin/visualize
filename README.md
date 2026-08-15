@@ -192,7 +192,7 @@ in between. Cycles are broken by provisionally reversing the edges that close
 them, so a dependency loop draws as an arrow running back up the page rather
 than being silently rewritten.
 
-Five things in there are what closed the gap with `dot`, each one measured
+Six things in there are what closed the gap with `dot`, each one measured
 against `dot`'s own output on this repository's graph:
 
 - **A long edge is threaded through real bend points**, one per layer it
@@ -215,9 +215,11 @@ against `dot`'s own output on this repository's graph:
   *wrong* rather than for groups being layer-shaped: a single rect around
   scattered members swallows whatever sits between them, and a group split
   across two ranks then looked like two groups. So the layout keeps a group
-  over itself across layers and reserves its full width on every rank it
-  spans, evicting anything ungrouped that would land inside. The layer grows
-  rather than the box telling a lie.
+  over itself across layers and a member stands for the whole rectangle when
+  the layer is packed, so a group two members wide on one rank takes that
+  much room on every rank it spans. Packing against the member instead let a
+  neighbour sit flush against the node and inside the box that reached over
+  it from the rank beneath.
 - **The crossing sweep scores a group as one node.** Every member on a layer
   takes the median of all their neighbours together, so the group and the
   nodes around it are seated in the same decision. Ordering the layer first
@@ -229,12 +231,23 @@ against `dot`'s own output on this repository's graph:
   it. Scoring them together puts it 13 units away, directly above. Cohesion
   still runs, and still last, because a shared median makes members *want*
   the same slot without guaranteeing it.
+- **Every pass says what it wants; one function decides where things go.** A
+  node has several things pulling on it — sit over your parents, lie on the
+  line your edge wants, stay out of a box you are not in — and each of those
+  used to move the node itself and sweep the layer apart afterwards. A sweep
+  pushes one way, so the passes undid each other in sequence: clearing a box
+  shoved a node onto its neighbour, the next sweep shoved it back into the
+  box, and the picture kept whichever defect the last pass left. Adding a
+  pass meant finding out which of the others it broke. Now a pass contributes
+  a desired position, a hard bound, or a pin, and `settle` returns the
+  closest arrangement that keeps the order and the gaps — so non-overlap is a
+  property of the output rather than of the order the passes ran in.
 
 Sizes are fitted to what `dot` produced for the same labels rather than
 guessed. That sounds cosmetic and is not: `place-x` separates nodes by their
 drawn width, so an ellipse 78% too wide made *the layout* that much too wide.
-Together these took the picture from 2163×668 to 1339×737, against `dot`'s
-1140×629, and cut edge crossings from 44 to 8.
+Together these took the picture from 2163×668 to 1144×737, against `dot`'s
+1140×629, and cut edge crossings from 44 to 5.
 
 What it deliberately does not do is what made graphviz big: no spline routing,
 no port constraints, no orthogonal edges. A dependency graph needs none of
@@ -461,7 +474,7 @@ pane                type into a pane from a shell, so agent work is visible
 tools/replay.mjs    run a captured session through the emulator, headlessly
 web/term.js         a terminal emulator, in the ~25 sequences agents emit
 web/                the page: vanilla HTML, CSS and JS, no build step
-test/               477 assertions, no framework
+test/               498 assertions, no framework
 bin/janet           the compiled runtime (gitignored build artifact)
 ```
 
@@ -483,7 +496,7 @@ inverts the whole SVG rather than trying to re-colour it.
 ./test/run
 ```
 
-477 assertions (plus 82 for the terminal emulator, under node), no test
+498 assertions (plus 82 for the terminal emulator, under node), no test
 framework — the harness is 70 lines in
 `test/harness.janet`, because a dependency is a dependency. It runs against
 the **vendored** runtime, not whatever `janet` is on PATH: a green run against

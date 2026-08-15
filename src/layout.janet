@@ -37,6 +37,12 @@
       graph
       {:measure (fn [name]
                   (svg/width-of (or (get (get opts :labels {}) name) name)))
+       # The renderer draws a group's box outside its members, so the layout
+       # has to keep strangers out of THAT rectangle rather than out of the
+       # members' extent -- see svg/group-inset. This is the seam: `layered`
+       # knows nothing about SVG and `svg` decides nothing about placement,
+       # so the number crosses here rather than being written down twice.
+       :group-inset svg/group-inset
        # Which group claims a node, so the layout can keep a group's members
        # side by side -- see `cohere`. Nil when nothing is grouped, which
        # skips the pass entirely.

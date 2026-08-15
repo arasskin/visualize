@@ -30,6 +30,18 @@
 (def- line-height 14)  # a label line, in user units
 (def- char-width 6.1)  # an average glyph at font-size 11 -- see width-of
 
+(def group-inset
+  ``How far outside its members a group's box is drawn.
+
+  Exported because the layout has to keep non-members out of the rectangle
+  that actually appears, not out of the members' bounding box. They were two
+  separate numbers -- this one, and the gap the layout evicted to -- and the
+  difference was the margin a node ended up with: seven units, which is close
+  enough to nothing that `tools/replay` overlapped the `web` box by four. A
+  box containing a node it does not group is the one thing a box must never
+  do, so there is one number and both halves read it.``
+  13)
+
 (defn- escape [text]
   (->> (string text)
        (string/replace-all "&" "&amp;")
@@ -220,7 +232,7 @@
       (def members (filter |(and (places $) (= g (group-for $)))
                            (map |($ :name) nodes)))
       (when (not (empty? members))
-        (def inset 13)
+        (def inset group-inset)
         (def head 12)   # room for the name, above the topmost member
         (var minx math/inf) (var maxx (- math/inf))
         (var miny math/inf) (var maxy (- math/inf))

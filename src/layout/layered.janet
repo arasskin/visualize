@@ -31,6 +31,7 @@
   {:layer-gap 92       # vertical distance between layers
    :node-gap 20        # minimum horizontal gap between neighbours
    :bend-width 12      # the column a through-edge reserves on a layer it crosses
+   :group-inset 0      # how far outside its members a group's box is drawn
    :sweeps 8})         # crossing-reduction passes (down and up count as one)
 
 #
@@ -322,6 +323,127 @@
 # 3. Placement.
 #
 
+(defn settle
+  ``Place one layer: the positions closest to `want` that keep the order and
+  the gaps.
+
+  THIS IS THE ONE PLACE SEPARATION HAPPENS, and that is the point of it.
+  Every pass in `place-x` wants nodes somewhere -- over their parents, on a
+  straight line, outside a group's box -- and each used to move them itself
+  and then sweep the layer apart afterwards. A sweep can only push one way,
+  so the passes undid each other: clearing a box shoved a node onto its
+  neighbour, the next sweep shoved it back into the box, and the picture came
+  out with whichever defect the last pass happened to leave. Passes now say
+  what they WANT and this decides where things go, so non-overlap is a
+  property of the output rather than of the order the passes ran in.
+
+  The algorithm is the classic one for isotonic placement with minimum gaps:
+  walk left to right building blocks of nodes that have been pushed into
+  contact, and whenever a new node would overlap the block behind it, merge
+  the two and re-place the merged block at the average of what its members
+  wanted. A block only ever grows, so this is linear, and the result is the
+  arrangement minimising the total squared distance from `want`.
+
+  `fixed` names nodes that may not move at all -- a group's members, whose
+  column IS the box. A block containing one of those is placed to satisfy it
+  rather than the average; two conflicting fixed nodes in one block cannot
+  both be had, and the leftmost wins, which is the same rule the order
+  already encodes.
+
+  `floor` and `ceiling` are hard bounds per node, used to keep a stranger out
+  of a group's box. They cannot be desires: a desire is an average, and a
+  block merging around a node averages its wish away -- which is exactly how
+  a node evicted from a box got pulled back into it by the neighbours it
+  merged with. A bound survives the merge because it moves the whole block.``
+  [names want widths gap &opt fixed floor ceiling]
+  (default fixed (fn [_] false))
+  (default floor (fn [_] nil))
+  (default ceiling (fn [_] nil))
+  (def out @{})
+  # Each block: the names in it, where its left edge wants to be, and the
+  # total width it needs. `pin` is the position a fixed member demands for
+  # the block's left edge, or nil.
+  (def blocks @[])
+  (each name names
+    (def w (widths name))
+    (def half (/ w 2))
+    (def left (- (want name) half))
+    # Bounds are carried as bounds on the BLOCK's left edge, so a merge just
+    # takes the tighter of the two and the whole block honours it.
+    # A bound is stored as a bound on the BLOCK's left edge, so it has to be
+    # translated by how far into the block the node sits -- at creation that
+    # is zero, and every merge below shifts it by the width taken on in
+    # front. Storing the node's own bound and applying it to the block start
+    # is the same mistake as forgetting the offset in any prefix sum: it
+    # holds while every block is one node and quietly stops holding the
+    # moment two merge, which is why `src/watchdog` sat 33 units inside a box
+    # it had a floor against.
+    (array/push blocks @{:names @[name] :left left :width w
+                         :pin (when (fixed name) left)
+                         :low (when-let [f (floor name)] (- f half))
+                         :high (when-let [c (ceiling name)] (- c half))})
+    # Merge backwards while this block starts before the previous one ends.
+    (while (and (> (length blocks) 1)
+                (let [b (last blocks)
+                      a (blocks (- (length blocks) 2))]
+                  (< (b :left) (+ (a :left) (a :width) gap))))
+      (def b (array/pop blocks))
+      (def a (last blocks))
+      # The merged block's left edge: what the two halves wanted, weighted by
+      # how many nodes each speaks for, unless one of them is pinned.
+      (def a-n (length (a :names)))
+      (def b-n (length (b :names)))
+      (def b-left-in-a (- (b :left) (+ (a :width) gap)))
+      (def merged (/ (+ (* a-n (a :left)) (* b-n b-left-in-a)) (+ a-n b-n)))
+      # TWO PINS IN ONE BLOCK ARE AVERAGED, not resolved in favour of the
+      # first. Taking the leftmost silently threw away the other group's
+      # column: `src.term`'s members and `web`'s ended up in one block on a
+      # crowded rank, `web/app` lost its pin, and the `web` box stretched a
+      # hundred units across to reach the member that had kept it -- with
+      # `tools/replay` inside the gap. Neither pin can be had exactly once
+      # they are in contact, so both give equally.
+      (def b-pin (when (b :pin) (- (b :pin) (+ (a :width) gap))))
+      (def pin (cond
+                 (and (a :pin) b-pin) (/ (+ (a :pin) b-pin) 2)
+                 (a :pin) (a :pin)
+                 b-pin))
+      # The tighter of the two bounds, translated into the merged block's
+      # frame. Written as a `cond` this read `(cond (and l r) (max l r) l r)`,
+      # which is four clauses rather than three: `l` became a TEST and `r` its
+      # body, so a pair with either side missing answered nil and the bound
+      # vanished. Every block of more than one node lost its floor that way,
+      # which is why a node with a hard floor against a group's box still sat
+      # inside it.
+      (defn shift [v] (when v (- v (+ (a :width) gap))))
+      (def low (let [l (a :low) r (shift (b :low))]
+                 (if (and l r) (max l r) (or l r))))
+      (def high (let [l (a :high) r (shift (b :high))]
+                  (if (and l r) (min l r) (or l r))))
+      (put a :left (or pin merged))
+      (put a :width (+ (a :width) gap (b :width)))
+      (put a :pin pin)
+      (put a :low low)
+      (put a :high high)
+      (array/concat (a :names) (b :names))))
+  # Lay each block out from its left edge, in order, honouring its bounds.
+  # A floor beats a ceiling where the two cannot both hold: the floor is what
+  # keeps a node out of a group's box, and a box containing a node it does
+  # not group is the defect that has to be impossible.
+  (var edge nil)
+  (each b blocks
+    (var left (b :left))
+    (when (b :high) (set left (min left (b :high))))
+    (when (b :low) (set left (max left (b :low))))
+    # Never behind the block before it -- the bounds must not undo the order.
+    (when edge (set left (max left edge)))
+    (var cursor left)
+    (each name (b :names)
+      (def w (widths name))
+      (put out name (+ cursor (/ w 2)))
+      (set cursor (+ cursor w gap)))
+    (set edge cursor))
+  out)
+
 (defn- widths-of
   "Each node's drawn width, so placement can respect a long label."
   [names measure]
@@ -332,309 +454,263 @@
 (defn place-x
   ``An x for every node, layer by layer.
 
-  Each node is pulled toward the average x of its neighbours in the layer
-  above, then the layer is swept left-to-right to push apart anything that
-  now overlaps. Repeated a few times, this is the priority method, and it is
-  what makes a parent sit over the middle of its children instead of every
-  layer being packed flush left.
+  EVERY PASS SAYS WHAT IT WANTS; `settle` DECIDES WHERE THINGS GO. A node has
+  several things pulling on it -- sit over your parents, sit under your
+  children, lie on the straight line your edge wants, stay out of a box you
+  are not in -- and each of those used to move the node itself and then sweep
+  the layer apart afterwards. A sweep only pushes one way, so the passes
+  undid each other in sequence: clearing a group's box shoved a node onto its
+  neighbour, the next sweep shoved it back into the box, and the picture came
+  out with whichever defect the last pass happened to leave. Adding a pass
+  meant finding out which of the others it broke.
+
+  So the desires are computed first, combined, and handed to `settle` once
+  per layer, which returns the closest arrangement that keeps the order and
+  the gaps. Non-overlap is now a property of the OUTPUT rather than of the
+  order the passes ran in, and a new desire is a new term here rather than
+  another sweep to reconcile with the rest.
 
   `bend?` says whether a name is one of the bend points a long edge is
-  threaded through rather than a real node, and `aim` answers the x such a
-  bend would sit at if its edge ran perfectly straight -- see the
-  straightening pass at the end. `group-of` answers a node's group, so a
-  group can be stacked over itself and boxed with one rect.``
-  [ordered up down widths gap &opt bend? aim group-of]
+  threaded through rather than a real node; `aim` answers the x such a bend
+  would sit at if its edge ran perfectly straight; `group-of` answers a
+  node's group; `inset` is how far outside its members the renderer draws a
+  group's box, so the layout can clear the rectangle that actually appears.``
+  [ordered up down widths gap &opt bend? aim group-of inset]
   (default bend? (fn [_] false))
   (default aim (fn [_ _] nil))
-  (def x @{})
-  # A first pass: pack each layer left to right, so everything has a value.
-  #
-  # CENTRED ON ZERO, not packed from it. Packing every layer flush left made
-  # the widest layer set the left edge and left the narrow ones stranded
-  # under its first few nodes -- an eighteen-node top row over a one-node
-  # bottom row came out as a diagonal smear rather than a tree. Centring
-  # each layer before the pull passes start gives them a common axis to be
-  # pulled away from.
+  (default inset 0)
   (def indexes (sort (keys ordered)))
+  (def x @{})
+
+  # Start centred on zero rather than packed from the left: packing made the
+  # widest layer set the left edge and left the narrow ones stranded under
+  # its first few nodes, so an eighteen-node row over a one-node row came out
+  # as a diagonal smear rather than a tree.
   (each index indexes
     (var span (- gap))
     (each name (ordered index) (+= span (+ (widths name) gap)))
     (var cursor (/ span -2))
     (each name (ordered index)
-      (def half (/ (widths name) 2))
-      (put x name (+ cursor half))
+      (put x name (+ cursor (/ (widths name) 2)))
       (set cursor (+ cursor (widths name) gap))))
 
   (defn centre-on [names]
     (def known (filter |(x $) names))
-    (if (empty? known)
-      nil
+    (unless (empty? known)
       (/ (sum (map |(x $) known)) (length known))))
 
-  (defn compact [index pick]
-    (def names (ordered index))
-    # Desired positions from the adjacent layer.
-    (def wanted (map (fn [name]
-                       (or (centre-on (if (= pick :down) (up name) (down name)))
-                           (x name)))
-                     names))
-    (each [i name] (pairs names) (put x name (wanted i)))
-
-    # SEPARATE LEFT TO RIGHT, ONCE. Each node is pushed right just far enough
-    # to clear its left neighbour, which makes the layer non-overlapping in a
-    # single pass and cannot reintroduce an overlap behind itself.
-    #
-    # The obvious second sweep right-to-left is NOT here, and that was a bug
-    # while it was: enforcing the same constraint from the other end pushes
-    # nodes back left into the neighbours the first sweep had just cleared,
-    # so a dense layer came out overlapping despite both passes "succeeding".
-    # The rightward bias it was meant to cancel is undone by re-centring
-    # below instead, which cannot violate the constraint because it moves the
-    # whole layer at once.
-    (var edge-x nil)
-    (each name names
-      (def half (/ (widths name) 2))
-      (when (and edge-x (< (- (x name) half) edge-x))
-        (put x name (+ edge-x half)))
-      (set edge-x (+ (x name) half gap)))
-    # Re-centre the layer on where it WANTED to be. Shifting every node by
-    # the same amount preserves both the order and the separation just
-    # established, and it is what stops a run of pull-then-separate rounds
-    # from marching the whole picture rightward.
-    (def drift (- (/ (sum wanted) (max 1 (length wanted)))
-                  (/ (sum (map |(x $) names)) (max 1 (length names)))))
-    (each name names (put x name (+ (x name) drift))))
-
-  # STACK EACH GROUP OVER ITSELF.
-  #
-  # `cohere` put a group at the same place in the running ORDER of every
-  # layer it appears on, which is as far as ordering can get it: the layers
-  # differ in what else they hold, so the same ordinal slot is still a
-  # different x. A group's members then sit above one another only roughly,
-  # and the one box drawn around them stretches sideways to reach them all --
-  # swallowing whatever sits in the gap.
-  #
-  # A GROUP'S FOOTPRINT IS RESERVED ON EVERY RANK IT SPANS. Aligning members
-  # into one column is not enough on its own: a group two wide on one rank
-  # and one wide on the next still covers the full width of the wider rank,
-  # and a stranger on the narrow rank falls into the corner of the box. That
-  # is exactly how `src.term` kept swallowing `src_stamp`.
-  #
-  # So the pass works out the group's x-range over all its members, then
-  # clears that range on every layer between its topmost and lowest member:
-  # anything ungrouped sitting inside gets pushed to whichever side it is
-  # nearer. The layer grows rather than the box telling a lie.
-  #
-  # This is not slack-only, and cannot be -- no amount of shuffling within
-  # the existing gaps moves a node out of a range it is sitting in the middle
-  # of.
-  #
-  # IT RUNS BETWEEN THE PULL ROUNDS, not after them. Run once at the end it
-  # left every node it moved wherever the eviction dropped it, with nothing
-  # to draw it back toward its neighbours: `src/parser` ended up 317 units
-  # from `src/scan`, the only node it connects to, and its edge crossed the
-  # picture to get there. Alternating the two lets a layer settle again after
-  # each adjustment, so the claim is honoured AND the nodes go back to
-  # sitting over their work.
-  (defn regroup []
+  # Where each group sits and which layers it covers, as the rectangle the
+  # renderer will draw: the members' extent plus the inset. Recomputed each
+  # round, because the members move.
+  (defn claims-by-layer []
+    (def span @{})
     (when group-of
-      # Where each group is, and which layers it spans.
-      (def span @{})
       (eachp [index row] ordered
         (each name row
           (when-let [key (group-of name)]
             (def half (/ (widths name) 2))
             (unless (span key)
-              (put span key @{:x0 math/inf :x1 (- math/inf)
+              (put span key @{:x0 math/inf :x1 (- math/inf) :widest 0
                               :top math/inf :low (- math/inf)}))
             (def s (span key))
             (put s :x0 (min (s :x0) (- (x name) half)))
             (put s :x1 (max (s :x1) (+ (x name) half)))
+            (put s :widest (max (s :widest) (widths name)))
             (put s :top (min (s :top) index))
-            (put s :low (max (s :low) index)))))
+            (put s :low (max (s :low) index))))))
+    (def out @{})
+    (each index indexes
+      (def here @[])
+      (eachp [key s] span
+        (when (and (<= (s :top) index) (<= index (s :low)))
+          (array/push here [key (- (s :x0) inset) (+ (s :x1) inset)])))
+      (put out index here))
+    [span out])
 
-      (each index indexes
-        (def names (ordered index))
-        # Every group whose vertical extent covers this layer claims its
-        # x-range here, whether or not it has a member on this row.
-        (def claims @[])
-        (eachp [key s] span
-          (when (and (<= (s :top) index) (<= index (s :low)))
-            (array/push claims [key (s :x0) (s :x1)])))
-        (unless (empty? claims)
-          # Which side of the group each node sits on IN THE ORDER. A node
-          # ordered before every member belongs out the left; one ordered
-          # after them belongs out the right. Evicting against that is what
-          # makes the separation below cascade: it can only push right, so a
-          # node sent left past its predecessors gets shoved back to the far
-          # end of the layer to restore the order -- which is how
-          # `src/watchdog` ended up last on its rank, right of `web/term`,
-          # with its edge to `src/term/host` crossing the whole `web` box.
-          (def slot @{})
-          (eachp [i name] names (put slot name i))
+  # One round: work out what everything wants, then let `settle` place it.
+  (defn round [pick]
+    (def [span claims] (claims-by-layer))
+    # A group's column, so its members on every rank want the same x.
+    #
+    # THE RIGHTMOST MEMBER SETS IT, not the average of the members' extent.
+    # The average is the midpoint between two members that have drifted
+    # apart, and each is pinned there -- which converges only if BOTH can
+    # move. One of them usually cannot: it has a node hard against it on the
+    # side it would have to travel. `web/app` was blocked by `tools/replay`
+    # and `web/term` was pulled only halfway to meet it, so the two settled
+    # 103 units apart, the box stretched to span them, and `tools/replay`
+    # fell inside it -- a stable wrong answer rather than a failure to
+    # converge.
+    #
+    # Taking the rightmost member's position asks the ones that CAN move to
+    # come to the one that cannot. A group whose members are all free ends up
+    # in the same place either way; a group with one pinned member closes up
+    # around it instead of straddling.
+    (def column @{})
+    (eachp [key s] span
+      (put column key (/ (+ (s :x0) (s :x1)) 2)))
+
+    (each index (if (= pick :down) indexes (reverse indexes))
+      (def names (ordered index))
+      (def here (get claims index []))
+      (def want @{})
+      (each name names
+        (def half (/ (widths name) 2))
+        # 1. A bend wants the straight line between its edge's two ends; a
+        #    real node wants the middle of its neighbours in the layer the
+        #    sweep is coming from. Either way, failing that, where it is.
+        (var target
+          (or (if (bend? name)
+                (aim name x)
+                (centre-on (if (= pick :down) (up name) (down name))))
+              (x name)))
+        # 2. A group's member wants its group's column, so the box closes
+        #    around the members rather than stretching across the picture.
+        (when-let [key (and group-of (group-of name))]
+          (set target (column key)))
+        (put want name target))
+
+      # 3. STAYING OUT OF A BOX IS A BOUND, NOT A WISH. A wish is an average,
+      #    and a block of nodes pushed into contact places itself at the
+      #    average of what its members wanted -- so a node that wished itself
+      #    clear of a box got that wish averaged away by the neighbours it
+      #    merged with, and the box swallowed it anyway. As a bound it moves
+      #    the whole block instead.
+      #
+      #    Which side it goes is the ORDER's to say: a node ordered before
+      #    the group goes left of it, one ordered after goes right. Deciding
+      #    by which half of the box the node happens to sit in ignores the
+      #    order, and putting the order back then drags it across the group --
+      #    which is how `src/watchdog` ended up on the far side of `web` from
+      #    the node it points at.
+      (def low @{})
+      (def high @{})
+      (eachp [i name] names
+        (unless (and group-of (group-of name))
+          (def half (/ (widths name) 2))
+          (each [key x0 x1] here
+            (def mates (seq [[j m] :pairs names
+                             :when (= key (and group-of (group-of m)))] j))
+            (def before? (if (empty? mates)
+                           (< (want name) (/ (+ x0 x1) 2))
+                           (< i (min ;mates))))
+            (if before?
+              (put high name (min (get high name math/inf) (- x0 half gap)))
+              (put low name (max (get low name (- math/inf)) (+ x1 half gap)))))))
+
+      # A BOX TAKES UP THE ROOM A BOX TAKES UP. `settle` is told each member
+      # is `inset` wider on both sides than the node itself, because that is
+      # the rectangle the renderer draws, and the extra is what leaves
+      # somewhere for a node ordered between two groups to stand.
+      #
+      # Without it the boxes are packed as though they were their bare
+      # members, and two can end up 29 units apart with a 65-unit node
+      # ordered between them: `tools/replay`, floored right of `src.term` and
+      # ceilinged left of `web`, the two bounds flatly contradicting each
+      # other. No eviction can solve that, because the room was never made.
+      #
+      # The member is then re-centred inside its widened slot, so the padding
+      # buys space around the group without moving the group.
+      # A MEMBER STANDS FOR ITS WHOLE BOX. A group two members wide on the
+      # rank below is that wide here too, because the rectangle spans both --
+      # so the one member on this rank has to take up the room the box takes
+      # up, or its neighbours pack against the NODE and end up inside the
+      # BOX. `src/stamp` sat right against `src/term/pty`, which was the only
+      # `src.term` member on its rank, and was swallowed by the part of the
+      # box that reached over from the two members on the rank beneath.
+      #
+      # Sharing the span among the members present means two members on a
+      # rank still occupy it exactly once between them.
+      (def members-here @{})
+      (when group-of
+        (each n names
+          (when-let [key (group-of n)]
+            (put members-here key (+ 1 (get members-here key 0))))))
+      (defn padded [name]
+        (if-let [key (and group-of (group-of name))]
+          (let [s (get span key)
+                whole (if s (+ (- (s :x1) (s :x0)) (* 2 inset)) (widths name))
+                share (/ whole (max 1 (get members-here key 1)))]
+            (max (+ (widths name) (* 2 inset)) share))
+          (widths name)))
+      (defn seat [lo hi]
+        (settle names (fn [n] (want n)) padded gap
+                (fn [n] (and group-of (group-of n) true))
+                lo hi))
+      (def first-pass (seat (fn [n] (low n)) (fn [n] (high n))))
+
+      # THE BOUNDS ARE RE-DERIVED FROM WHERE THE MEMBERS ACTUALLY LANDED.
+      # They were computed from the claim as it stood BEFORE this layer was
+      # seated, and seating moves the members -- so the box slides out from
+      # under the node that was just cleared of it, and the eviction misses
+      # by however far the members shifted. Measuring the box again from the
+      # placed members and re-seating closes that gap.
+      #
+      # IT IS THE WHOLE BOX, over every rank, not just the members on this
+      # one. A group two members wide on the rank below is that wide here
+      # too, because the rectangle spans both -- so measuring only the
+      # member on this layer left `src/stamp` and `src/watchdog` clear of
+      # `src/term/pty` and still 37 units inside the box that reaches over
+      # them from the rank beneath.
+      (when group-of
+        (def edge @{})
+        (eachp [name at] first-pass
+          (when-let [key (group-of name)]
+            (def half (/ (widths name) 2))
+            (unless (edge key) (put edge key @{:x0 math/inf :x1 (- math/inf)}))
+            (def e (edge key))
+            (put e :x0 (min (e :x0) (- at half)))
+            (put e :x1 (max (e :x1) (+ at half)))))
+        # The re-derived box only TIGHTENS the bounds computed before seating;
+        # it never replaces them. The bound from `here` covers the group over
+        # every rank it spans, and this one sees only the members on this
+        # layer -- so replacing would drop the width a group two-wide on the
+        # rank below contributes, and `src/stamp` and `src/watchdog` would
+        # clear `src/term/pty` while still sitting inside the box that
+        # reaches over them from beneath.
+        (eachp [key e] edge
           (eachp [i name] names
             (unless (group-of name)
               (def half (/ (widths name) 2))
-              (each [key x0 x1] claims
-                # Overlapping the claim at all is enough to be inside the
-                # box once the renderer insets it.
-                (when (and (< (- (x name) half) x1) (> (+ (x name) half) x0))
-                  # The order decides the side. A node with no member on this
-                  # layer to compare against falls back to where its own edges
-                  # pull it, which is the only other thing that knows.
-                  (def mates (filter |(= key (group-of $)) names))
-                  (def left?
-                    (if (empty? mates)
-                      (let [near (array ;(up name) ;(down name))]
-                        (< (if (empty? near)
-                             (x name)
-                             (/ (sum (map |(or (x $) (x name)) near)) (length near)))
-                           (/ (+ x0 x1) 2)))
-                      (< i (min ;(map |(slot $) mates)))))
-                  (put x name
-                       (if left?
-                         (- x0 half gap)      # ordered before the group
-                         (+ x1 half gap)))))))) # ordered after it
+              (def x0 (- (e :x0) inset))
+              (def x1 (+ (e :x1) inset))
+              (def mates (seq [[j m] :pairs names :when (= key (group-of m))] j))
+              (if (and (not (empty? mates)) (< i (min ;mates)))
+                (put high name (min (get high name math/inf) (- x0 half gap)))
+                (put low name (max (get low name (- math/inf)) (+ x1 half gap))))))))
 
-        # Re-separate the layer, treating a claimed range as occupied.
-        #
-        # The separation has to know about the claims or it undoes the
-        # eviction on the spot: packing left to right walks a node straight
-        # back into the gap the previous step just cleared it out of, and the
-        # box swallows it again.
-        #
-        # IN THE LAYER'S OWN ORDER, not sorted by x. Sorting by x lets a
-        # group's column silently rewrite the ordering the crossing sweep
-        # decided: `src.term` took a column left of `src/parser` even though
-        # the order put `src/parser` first, so separation had to shove
-        # `src/parser` right, past the whole group, to keep them apart -- and
-        # its one edge then crossed the group to reach `src/scan`. Walking
-        # the order instead means a member that would have to jump a
-        # neighbour to reach its column simply does not get there.
-        (var edge-x nil)
-        (each name names
-          (def half (/ (widths name) 2))
-          (when (and edge-x (< (- (x name) half) edge-x))
-            (put x name (+ edge-x half)))
-          (unless (group-of name)
-            (each [_ x0 x1] claims
-              (when (and (< (- (x name) half) x1) (> (+ (x name) half) x0))
-                (put x name (+ x1 half gap)))))
-          (set edge-x (+ (x name) half gap))))
+      # Both bounds together can be unsatisfiable -- a node ordered between
+      # two groups that have closed up around it. The floor wins, because a
+      # box holding a node it does not group is the defect that has to be
+      # impossible; the crowding it causes is caught by the separation
+      # `settle` does anyway.
+      (eachp [name lo] low
+        (when (and (get high name) (> lo (get high name)))
+          (put high name nil)))
 
-      # Members converge on their group's centre, so the footprint tightens
-      # rather than drifting wider every pass.
-      (eachp [key s] span
-        (def mid (/ (+ (s :x0) (s :x1)) 2))
-        (each index indexes
-          (def here (filter |(= key (group-of $)) (ordered index)))
-          (when (= 1 (length here))
-            (put x (first here) mid))))
+      (def placed (if group-of
+                    (seat (fn [n] (low n)) (fn [n] (high n)))
+                    first-pass))
+      (eachp [name at] placed (put x name at))))
 
-      # CLOSE THE SLACK THE EVICTION OPENED, right to left.
-      #
-      # A claim is as wide as the group is over ALL its ranks, so on a rank
-      # holding one member it is wider than that member needs: everything
-      # after it gets pushed clear of the whole two-rank width and then
-      # stays there, because the separation above only ever pushes right.
-      # `src/stamp` landed 63 units beyond where it had to, `src/watchdog`
-      # inherited the shove and ended up last on its rank -- right of
-      # `web/term`, with its edge to `src/term/host` crossing the `web` box
-      # to get back.
-      #
-      # So every ungrouped node slides back left as far as its left
-      # neighbour and the claims allow. It cannot reorder the layer (it stops
-      # at the neighbour) and it cannot re-enter a box (it stops at the
-      # claim); it only gives back room nothing is using.
-      (each index indexes
-        (def names (ordered index))
-        (def claims @[])
-        (eachp [_ s] span
-          (when (and (<= (s :top) index) (<= index (s :low)))
-            (array/push claims [(s :x0) (s :x1)])))
-        (var limit nil)   # the left edge of the node after this one
-        (each name (reverse names)
-          (def half (/ (widths name) 2))
-          (unless (group-of name)
-            (var want (if limit (- limit gap half) (x name)))
-            (set want (min want (x name)))   # only ever move left
-            # Not back into a box, and not past whatever precedes it.
-            (each [x0 x1] claims
-              (when (and (< (- want half) x1) (> (+ want half) x0))
-                (set want (min want (- x0 half gap)))))
-            (def i (find-index |(= $ name) names))
-            (when (> i 0)
-              (def l (names (- i 1)))
-              (set want (max want (+ (x l) (/ (widths l) 2) gap half))))
-            (put x name want))
-          (set limit (- (x name) (/ (widths name) 2)))))))
-
-  (for pass 0 4
-    (each index (slice indexes 1) (compact index :down))
-    (each index (reverse (slice indexes 0 -2)) (compact index :up)))
-
-  # A FINAL SEPARATION, over every layer, pulling nothing.
+  # Down and up, a few times: a layer can only be seated against a layer that
+  # has already been seated, so the two directions have to alternate.
   #
-  # The rounds above alternate pull-then-separate, and a layer's last touch
-  # is not always the separating half: the down sweep skips layer 0 and the
-  # up sweep skips the last one, so a middle layer can end a round having
-  # been pulled toward a neighbour and re-centred without being swept again.
-  # That is where the overlaps came from -- two of them, on the one layer
-  # whose ordering made it land that way, which is exactly the kind of bug
-  # that renders fine on a small graph and not on a real one. This pass
-  # costs nothing and makes non-overlap a property of the OUTPUT rather than
-  # of the iteration order.
-  (each index indexes
-    (var edge-x nil)
-    (each name (ordered index)
-      (def half (/ (widths name) 2))
-      (when (and edge-x (< (- (x name) half) edge-x))
-        (put x name (+ edge-x half)))
-      (set edge-x (+ (x name) half gap))))
-
-  # STRAIGHTEN THE CHAINS, INTO SLACK ONLY.
-  #
-  # A long edge reads as one line or it reads as a zigzag, and the zigzag is
-  # what put it through the nodes it was meant to route around: a bend pushed
-  # off its line by whatever sat left of it on that layer sends the segment
-  # below it back across the layer diagonally.
-  #
-  # Priority placement -- pinning the bend and making real nodes give way --
-  # was tried and is not here: it dragged whole layers apart to satisfy one
-  # edge and grew the picture by 60% to straighten a handful. This does the
-  # cheap half instead. Each bend moves toward the line between its edge's
-  # ends, but only as far as the gap to its neighbours already allows, so the
-  # layer's order and separation are untouched and the picture cannot grow.
-  # A bend with room straightens; one hemmed in stays where it is.
-  #
-  # Swept a few times, and down then up, because a chain settles a layer at a
-  # time: one pass moves each bend toward its neighbours, the next carries
-  # that along the chain.
-  (for pass 0 6
-  (each index (if (even? pass) indexes (reverse indexes))
-    (def names (ordered index))
-    (eachp [i name] names
-      (when (bend? name)
-        (def half (/ (widths name) 2))
-        (def left (if (> i 0)
-                   (let [l (names (- i 1))] (+ (x l) (/ (widths l) 2) gap half))
-                   (- math/inf)))
-        (def right (if (< i (- (length names) 1))
-                     (let [r (names (+ i 1))] (- (x r) (/ (widths r) 2) gap half))
-                     math/inf))
-        # Where the edge would like this bend: on the straight line between
-        # its own two ends. Averaging the neighbouring LINKS instead does
-        # nothing useful -- they are bent too, so the average preserves the
-        # kink rather than pulling it out.
-        (when-let [target (aim name x)]
-          (put x name (max left (min right target))))))))
-
-  # THE CLAIM GOES LAST. Every pass above moves nodes -- the final separation
-  # and the chain straightening both do -- so applying it any earlier just
-  # gets it undone by whatever runs next. Re-applied a few times because each
-  # round of eviction shifts the group's own footprint a little.
-  (for pass 0 4 (regroup))
-
+  # RE-CENTRED AFTER EACH ROUND, or the picture walks. A block that cannot
+  # have what it wants is placed at the nearest position that works, and
+  # `settle` resolves ties by pushing right -- so every round nudged the
+  # whole drawing a little further that way and the next round measured from
+  # there. The `web` group marched right by about a hundred units per round
+  # and never converged. Shifting every layer by the same amount cannot
+  # change a single relative position, so this costs the layout nothing and
+  # makes it settle.
+  (for pass 0 5
+    (round :down)
+    (round :up)
+    (def all (values x))
+    (unless (empty? all)
+      (def drift (/ (+ (min ;all) (max ;all)) 2))
+      (eachp [name at] x (put x name (- at drift)))))
   x)
 
 #
@@ -860,7 +936,12 @@
                       # Only real nodes belong to a group; a bend is passing
                       # through and must not be pulled into somebody's box.
                       (when-let [of (opts :group-of)]
-                        (fn [name] (when (string? name) (of name))))))
+                        (fn [name] (when (string? name) (of name))))
+                      # How far outside its members the renderer draws the
+                      # box. An option rather than an import: this file
+                      # deliberately knows nothing about SVG, so the seam
+                      # passes it down (see src/layout.janet).
+                      (tuning :group-inset)))
 
       (def points @{})
       (each name names
