@@ -573,6 +573,13 @@ function makePanel(root, options = {}) {
   }
 
   grab(bar, (dx, dy, from) => place(from.left + dx, from.top + dy));
+  grab(grip, (dx, dy, from) => {
+    const w = Math.max(options.minWidth || 240, from.w + dx);
+    const h = Math.max(options.minHeight || 120, from.h + dy);
+    root.style.width = w + 'px';
+    root.style.height = h + 'px';
+    if (options.onResize) options.onResize(w, h);
+  });
 
   const panel = {
     root, bar, body, grip,
