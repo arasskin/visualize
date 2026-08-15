@@ -79,6 +79,81 @@
         (break)))
     out))
 
+# -- the debugging equipment ---------------------------------------------------
+# The hang hunt's tools, kept where the next investigator -- human or model
+# -- will find them: at the repl, named in the connection banner. Each one
+# had to be improvised once; none should need improvising twice.
+
+(import ./harness)
+(import ./stamp)
+
+(def- here (os/realpath (string (dyn :current-file) "/../..")))
+
+(defn stats
+  ``Print both sides' op timings: the server's asks (turn-wait vs talk --
+  the split that separates "queued behind a wedged exchange" from "the
+  wedged exchange itself") and the supervisor's handle table, plus its
+  queue depths. Numbers survive since each process started.``
+  []
+  (def all (harness/stats))
+  (print "server asks (op: count, worst turn-wait, worst talk):")
+  (eachp [op entry] (all "server-asks")
+    (printf "  %-12s %6d  %6.3fs  %6.3fs" op (entry :count)
+            (entry :worst-turn) (entry :worst-talk))
+    (each slow (entry :slow)
+      (printf "      slow: turn %.2fs talk %.2fs" (slow :turn) (slow :talk))))
+  (def sup (all "supervisor"))
+  (if-not sup
+    (print "supervisor: unreachable (or predates the stats op)")
+    (do
+      (printf "supervisor (stamp %s, up %.0fs, unsent %d, chunks %d):"
+              (get sup "stamp" "?") (get sup "uptime" 0)
+              (get sup "unsent" 0) (get sup "chunks" 0))
+      (eachp [op entry] (get sup "ops" {})
+        (printf "  %-12s %6d  %6.3fs worst" op (get entry "count" 0)
+                (get entry "worst" 0))
+        (each slow (get entry "slow" [])
+          (printf "      slow: %.2fs" (get slow "took" 0))))))
+  nil)
+
+(defn dump
+  ``Write the live session's whole backlog -- the recording of everything
+  the program drew -- to `path`, and say how to replay it. This is the
+  capture half of the forensic loop that convicted the wrap and
+  alternate-screen bugs; (dev/replay) is the other half.``
+  [&opt path]
+  (default path (string "/tmp/visualize-dump-" (os/time) ".bin"))
+  (def now (harness/poll 0))
+  (spit path (get now "text" ""))
+  (printf "%d bytes -> %s (recorded at %dx%d)"
+          (length (get now "text" "")) path (get now "rows" 24) (get now "cols" 80))
+  (printf "replay: (dev/replay %v) or: node %s/tools/replay.mjs %s --rows %d --cols %d"
+          path here path (get now "rows" 24) (get now "cols" 80))
+  path)
+
+(defn replay
+  ``Run a capture through the emulator headlessly and report suspects --
+  escape-like text on the final screen, the signature of a torn stream or
+  a parser gap. Geometry defaults to the live session's, since a recording
+  replayed at the wrong size scatters absolute cursor positions.``
+  [path &opt rows cols]
+  (def now (harness/poll 0))
+  (default rows (get now "rows" 24))
+  (default cols (get now "cols" 80))
+  # Spawned with a pipe rather than executed: the child's stdout is the
+  # PROCESS's stdout -- the server's log -- while the repl reader is on the
+  # other end of a socket. Read and re-print, so the verdict lands where
+  # the question was asked.
+  (def proc (os/spawn ["node" (string here "/tools/replay.mjs") path
+                       "--rows" (string rows) "--cols" (string cols)]
+                      :p {:out :pipe :err :pipe}))
+  (def said (:read (proc :out) :all))
+  (def complained (:read (proc :err) :all))
+  (os/proc-wait proc)
+  (when said (prin said))
+  (when (and complained (pos? (length complained))) (prin complained))
+  nil)
+
 # -- hot reload ---------------------------------------------------------------
 
 (defn reload
@@ -199,7 +274,10 @@
   (defer (:close conn)
     (try
       (do
-        (:write conn "the server's own image. (quit) or ctrl-d leaves; the server stays.\n")
+        (:write conn (string "the server's own image. (quit) or ctrl-d leaves; the server stays.\n"
+                             "equipment: (dev/stats) op timings both sides · (dev/dump) capture the session\n"
+                             "           (dev/replay path) run a capture through the emulator · (dev/reload name)\n"
+                             "           (dev/attach n) open a crashed/parked request · dev/crashed dev/parked\n"))
         (repl (socket-chunks conn out name) (make-onsignal conn out cenv 1) cenv)
         (flush-to conn out))
       # The client vanished mid-write; there is nobody left to tell.

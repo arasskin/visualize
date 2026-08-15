@@ -10,6 +10,7 @@
 // Run from ./test/run alongside the Janet suite.
 
 import { makeTerminal, keyToBytes } from '../web/term.js';
+import { replay } from '../tools/replay.mjs';
 
 let passed = 0;
 const failed = [];
@@ -492,6 +493,21 @@ function domScreen() {
   check('a write after the burst paints again', renders, 2);
 
   globalThis.requestAnimationFrame = realRAF;
+}
+
+{
+  // THE REPLAY TOOL, which turns a captured byte stream into a deterministic
+  // rendering verdict. A clean stream parses with no suspects; the same
+  // stream with an ESC torn out -- what a backlog trim does mid-sequence --
+  // leaves escape-like text on screen, and the tool names the row.
+  const frame = '\x1b[H\x1b[2Jhello\r\n\x1b[31mred line\x1b[0m\r\nworld';
+  const clean = replay(frame, 6, 20);
+  check('a clean capture parses with no suspects', clean.suspects.length, 0);
+  check('and the frame is what was drawn',
+        clean.screen.slice(0, 3), ['hello', 'red line', 'world']);
+  const torn = replay(frame.replace('\x1b[31m', '[31m'), 6, 20);
+  ok('a torn escape is reported as a suspect row',
+     torn.suspects.length > 0 && torn.suspects[0].line.includes('[31m'));
 }
 
 if (failed.length === 0) {

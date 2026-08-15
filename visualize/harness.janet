@@ -352,6 +352,27 @@
 # -- the wire ----------------------------------------------------------------
 # The protocol, both sides.
 
+# Every op's timing, kept always: count, worst, and the last few slow calls.
+# The cost is a table update per request; the payoff, when something stalls,
+# is that the first bug report arrives with its measurements attached --
+# during the hang hunt this exact table had to be bolted on with TEMP
+# eprintfs, twice. Parked waits are their own row ("since+wait"): a park
+# holding twenty seconds is the feature working, and averaging it into
+# "since" would bury the row that matters.
+(def- op-stats @{})
+(def- born-clock (os/clock :monotonic))
+
+(defn- note-op [op took]
+  (def entry (or (get op-stats op)
+                 (let [fresh @{:count 0 :worst 0 :slow @[]}]
+                   (put op-stats op fresh)
+                   fresh)))
+  (put entry :count (inc (entry :count)))
+  (when (> took (entry :worst)) (put entry :worst took))
+  (when (> took 0.5)
+    (array/push (entry :slow) {:took took :at (os/time)})
+    (when (> (length (entry :slow)) 8) (array/remove (entry :slow) 0))))
+
 (defn handle
   ``Answer one decoded request. Returns [reply done?].
 
@@ -362,7 +383,8 @@
   (def op (string (get message "op" "")))
   (defn number-at [key fallback]
     (math/floor (or (get message key) fallback)))
-  (cond
+  (def started (os/clock :monotonic))
+  (def out (cond
     (= op "start")
     [(session-start (map string (get message "argv" []))
             (string (get message "root" "."))
@@ -497,7 +519,21 @@
     # -- because a file changed -- just closes the socket and says nothing.
     (= op "shutdown") [(do (session-stop) {"ok" true}) true]
 
+    # The timing table above, plus the queue depths that tell "our pipeline
+    # stalled" from "the program stopped reading". (dev/stats) at the repl
+    # prints this beside the server's own ask timings.
+    (= op "stats")
+    [{"ops" op-stats
+      "unsent" (length unsent)
+      "chunks" (+ base (length backlog))
+      "stamp" stamp/born
+      "uptime" (- (os/clock :monotonic) born-clock)}
+     false]
+
     [{"error" (string "unknown op '" op "'")} false]))
+  (note-op (if (and (= op "since") (pos? (number-at "wait" 0))) "since+wait" op)
+           (- (os/clock :monotonic) started))
+  out)
 
 (defn supervise
   ``Answer requests on `path` until a shutdown arrives.
@@ -799,9 +835,31 @@
   # A dead pinned connection gets ONE retry on a fresh one -- the supervisor
   # may simply have restarted between requests -- and a failure after that
   # answers nil like any other.
+  # The server-side halves of every exchange's timing: how long the turn
+  # was waited for, how long the supervisor took to answer. The SPLIT is
+  # the diagnostic -- during the hang hunt, "turn-wait=10.00 talk=0.00"
+  # against "turn-wait=0.00 talk=10.00" was what separated "queued behind
+  # a wedged exchange" from "the wedged exchange itself".
+  (def ask-stats @{})
+  (defn- note-ask [op turn talk]
+    (def entry (or (get ask-stats op)
+                   (let [fresh @{:count 0 :worst-turn 0 :worst-talk 0 :slow @[]}]
+                     (put ask-stats op fresh)
+                     fresh)))
+    (put entry :count (inc (entry :count)))
+    (when (> turn (entry :worst-turn)) (put entry :worst-turn turn))
+    (when (> talk (entry :worst-talk)) (put entry :worst-talk talk))
+    (when (> (+ turn talk) 0.5)
+      (array/push (entry :slow) {:turn turn :talk talk :at (os/time)})
+      (when (> (length (entry :slow)) 8) (array/remove (entry :slow) 0))))
+
   (defn ask [message &opt start?]
+    (def asked (os/clock :monotonic))
     (take-turn)
-    (defer (give-turn)
+    (def turned (os/clock :monotonic))
+    (defer (do (give-turn)
+               (note-ask (string (get message "op" "?"))
+                         (- turned asked) (- (os/clock :monotonic) turned)))
       (when (nil? pinned)
         (set pinned (if start? (ensure) (connect))))
       (when pinned
@@ -819,7 +877,11 @@
   # `start` is the only op that may bring a supervisor into being. Everything
   # else talks to one that is already there -- polling a terminal nobody
   # started should answer "not running", not silently spawn a process.
-  {:start
+  {# This side's ask timings, and the supervisor's own table over the wire.
+   :stats (fn [_] ask-stats)
+   :remote-stats (fn [_] (ask {"op" "stats"}))
+
+   :start
    (fn [_ run-argv root &opt rows cols]
      (default rows 24)
      (default cols 100)
@@ -1023,6 +1085,14 @@
   "The whole answer to one `/harness/poll`, in a single round trip."
   [at &opt generation wait]
   (:poll default-client at generation wait))
+
+(defn stats
+  ``Both sides' op timings: this process's asks (turn-wait/talk split per
+  op) and the supervisor's own handle table, fetched over the wire. The
+  repl prints this via (dev/stats).``
+  []
+  {"server-asks" (:stats default-client)
+   "supervisor" (:remote-stats default-client)})
 
 (defn shutdown
   "End the supervisor, killing the agent with it. Called on ctrl-c only."

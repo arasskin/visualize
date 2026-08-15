@@ -160,10 +160,15 @@
   (harness/stop))
 
 (check/test "poll reports which code the supervisor runs"
-  # The handshake's supervisor half: a fresh supervisor was born from the
+  # The handshake's supervisor half: a FRESH supervisor was born from the
   # sources on disk, so its stamp matches ours. A long-lived one after an
   # edit would not -- which is the page's cue to say "supervisor outdated"
-  # instead of letting fixes be debugged that were never running.
+  # instead of letting fixes be debugged that were never running. Fresh is
+  # forced first: a supervisor surviving from an earlier (crashed) suite
+  # run is exactly such a stale process, and this test once failed by
+  # catching one -- the feature working, but not what is asserted here.
+  (harness/shutdown)
+  (ev/sleep 0.3)
   (harness/start ["/bin/sh" "-c" "sleep 3"] (os/cwd) 24 80)
   (def reply (harness/poll 0))
   (check/is= stamp/born (reply "stamp"))
@@ -186,6 +191,22 @@
   (def quick (- (os/clock :monotonic) t1))
   (check/ok (> loud 0.04) "a plain input against a silent program holds the echo wait")
   (check/ok (< quick 0.03) "a quiet one returns without it")
+  (harness/stop))
+
+(check/test "op timings are kept on both sides of the wire"
+  # The stats the hang hunt had to bolt on twice, now standing equipment:
+  # the server's asks with their turn/talk split, and the supervisor's own
+  # handle table, fetched over the wire for (dev/stats) to print.
+  (harness/start ["/bin/sh" "-c" "sleep 3"] (os/cwd) 24 80)
+  (harness/poll 0)
+  (def all (harness/stats))
+  (def asks (all "server-asks"))
+  (check/ok (pos? (get-in asks ["since" :count] 0))
+            "the server counted its since asks")
+  (def sup (all "supervisor"))
+  (check/ok (pos? (get-in sup ["ops" "since" "count"] 0))
+            "the supervisor counted handling them")
+  (check/ok (get sup "stamp") "and the stats reply carries the stamp")
   (harness/stop))
 
 (check/test "starting again replaces the session and bumps the generation"
