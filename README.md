@@ -263,7 +263,8 @@ edit. **Regenerate** is how you say the source changed.
 visualize           run it (builds the runtime first if needed)
 build               compile vendor/janet -> bin/janet, once
 vendor/janet/       the Janet runtime, amalgamated: three files, no deps
-src/core.janet      entry point: the server's two endpoints
+src/core.janet      the core: event loop, HTTP, repl, harness, faults
+src/graph.janet     the dependency-graph app -- the first thing built on it
 src/scan.janet      walk the tree, read every file on all cores, build the graph
 src/parser.janet    what a language spec is, and how one is run
 src/parsers.janet   find the specs in src/parsers/ at runtime
