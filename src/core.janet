@@ -56,6 +56,7 @@
 # The first app built on this core. See the note at the top of graph.janet:
 # it is a consumer, not a component -- delete it and the server still runs.
 (import ./graph)
+(import ./watch)
 (import ./stamp)
 (import ./watchdog)
 
@@ -156,6 +157,12 @@
   (def web-dir (string here "/web"))
   (def config-path (string root "/" graph/config-name))
   (def specs (graph/load-specs (string here "/src/parsers")))
+  # THE SOURCE GENERATION. Bumped whenever the watcher sees the tree change;
+  # the page waits on it and redraws, which is what replaced the Regenerate
+  # button. A number rather than a flag so a page that missed one edit still
+  # knows it is behind.
+  (var source-generation 0)
+
   # Faults go to this project's state directory from here on, so a crash
   # that takes the server down is still readable afterwards.
   (faults/logging-to root)
@@ -391,6 +398,23 @@
                  (poll-answer (fn [at gen wait] (:poll repl-client at gen wait))
                               (request :body))))
 
+      # THE WATCH: park until the source changes, so an edit on disk redraws
+      # the page without anyone pressing anything. Parked rather than
+      # polled for the same reason the panes are -- see the note on `wait`
+      # in term/host.janet -- with a bounded hold so a proxy or a sleeping
+      # laptop cannot leave the request hanging forever.
+      (and (= method "POST") (= path "/watch"))
+      (guarded (fn []
+                 (def sent (try (json/decode (request :body)) ([_] {})))
+                 (def seen (math/floor (or (get sent "generation") 0)))
+                 (def deadline (+ (os/clock :monotonic) 25))
+                 (while (and (= seen source-generation)
+                             (< (os/clock :monotonic) deadline))
+                   (ev/sleep 0.1))
+                 ["200 OK" "application/json"
+                  (json/encode {"generation" source-generation
+                                "changed" (not= seen source-generation)})]))
+
       # WHICH TREE THIS RUN SERVES. The harness tools need the state
       # directory, and an agent's working directory is not a reliable
       # guide -- it may have cd'd anywhere. Cheap, and it means `vz` never
@@ -511,6 +535,16 @@
   # The loop's own witness: a thread that names event-loop stalls on stderr,
   # from the one vantage point a stall cannot silence.
   (watchdog/start "server")
+
+  # WATCH THE SOURCE. An edit anywhere under the root drops the scan cache
+  # and bumps the generation; the page is parked on /watch and redraws. This
+  # is what the Regenerate button used to do by hand, and the reason it is
+  # gone: a tool for seeing a codebase should not need to be told the
+  # codebase changed.
+  (watch/watching root specs
+                  (fn []
+                    (graph/forget-scan)
+                    (++ source-generation)))
   # Off the server, not off the constant: they differ whenever the first
   # choice was taken, and printing the wrong one sends you to somebody else's
   # page.

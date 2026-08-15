@@ -306,6 +306,7 @@ src/json.janet      just enough JSON for the browser protocol
 src/dev.janet       the repl the running server hosts, and its equipment
 src/faults.janet    what has gone wrong lately, where an agent can read it
 src/state.janet     the facts on disk, in .visualize/, for anything to read
+src/watch.janet     notices the source changed, so nobody presses Regenerate
 src/watchdog.janet  a thread that names event-loop stalls from outside them
 src/stamp.janet     which code each process is running, for the handshake
 vz                  the tools the harness comes with (on its PATH)

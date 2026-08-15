@@ -15,6 +15,7 @@ import { makeTerminal, keyToBytes } from './term.js';
 
 const pane = document.getElementById('graph');
 const zoomLabel = document.getElementById('zoom');
+let zoomFade = null;
 const MIN = 0.1, MAX = 10;
 // `touched` tracks whether the user has moved the view themselves; an automatic
 // refit must never discard a view they chose.
@@ -25,6 +26,11 @@ function paint() {
   if (!svg) return;
   svg.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
   zoomLabel.textContent = Math.round(scale * 100) + '%';
+  // Visible while it is changing, gone a moment later: the number matters
+  // during a zoom and is clutter once the view has settled.
+  zoomLabel.classList.add('active');
+  clearTimeout(zoomFade);
+  zoomFade = setTimeout(() => zoomLabel.classList.remove('active'), 900);
 }
 
 // Zoom about a fixed point: the graph coordinate under the cursor has to land
@@ -91,10 +97,8 @@ for (const done of ['pointerup', 'pointercancel']) {
   });
 }
 
-document.getElementById('fit').onclick = fit;
 // Drops the cached scan, so the next draw re-reads the sources. The one action
 // that is about the SOURCE changing rather than the config.
-document.getElementById('regen').onclick = () => send('regenerate', -1);
 
 document.addEventListener('keydown', (e) => {
   // The editor owns the keyboard while it has focus -- typing `(group ...)`
@@ -225,6 +229,40 @@ window.addEventListener('resize', () => { if (!touched) fit(); });
 // Not a text editor -- a list of lines with buttons. Every button is an edit to
 // the config file on disk, and the server answers with the graph that file now
 // produces.
+
+// -- the watcher ------------------------------------------------------------
+// The source changed on disk, so the graph should change with it. This is
+// what the Regenerate button used to be, minus the part where a person had
+// to remember they had edited something.
+//
+// A PARKED REQUEST, not a timer: /watch holds until the tree moves or its
+// deadline passes, so an idle project costs one open request rather than a
+// poll every second, and an edit shows up as fast as the walk notices it.
+// The chain re-parks itself; a failure backs off rather than hammering a
+// server that may be restarting.
+let sourceGeneration = 0;
+
+async function watchSource() {
+  for (;;) {
+    try {
+      const r = await fetch(`/watch?k=${encodeURIComponent(window.TOKEN)}`, {
+        method: 'POST',
+        body: JSON.stringify({ generation: sourceGeneration }),
+        signal: AbortSignal.timeout(35000),
+      });
+      const out = await r.json();
+      const first = sourceGeneration === 0;
+      sourceGeneration = out.generation;
+      // `first` is the page learning where the counter started, not an edit.
+      if (out.changed && !first) {
+        status.textContent = 'source changed, redrawing...';
+        await send('run', -1, true);
+      }
+    } catch (e) {
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+}
 
 const status = document.getElementById('status');
 const panel = document.getElementById('config');
@@ -417,7 +455,7 @@ function move(at, to) {
 // One shape for every button: what to do, and which line to do it to. The
 // server edits the file, re-runs it, and returns both the new lines and the new
 // graph -- so the page never has to guess what the file now says.
-async function send(action, index) {
+async function send(action, index, keepView) {
   if (busy) return;
   busy = true;
   draw();
@@ -453,8 +491,13 @@ async function send(action, index) {
         pane.appendChild(edgeLabel);
         wireEdges();
         // A different set of files is a different shape, so start it framed
-        // rather than under the previous view's pan.
-        fit();
+        // rather than under the previous view's pan -- EXCEPT when the
+        // watcher redrew after an edit on disk AND the view is one someone
+        // chose. Nobody asked for that redraw, and yanking the view away
+        // from what they were looking at is the cost of a feature meant to
+        // be invisible. `touched` already means exactly this: it is what
+        // stops an automatic refit from discarding a chosen view.
+        if (keepView && touched) paint(); else fit();
       }
       const count = Object.keys(faults).length;
       const ms = Math.round(performance.now() - t0);
@@ -589,6 +632,9 @@ draw();
 // Open the panel unasked when the file has something wrong in it -- an error
 // you cannot see is worse than one you did not ask about.
 if (Object.keys(faults).length) requestAnimationFrame(() => bar.click());
+
+// And from here on the graph keeps up with the files by itself.
+watchSource();
 
 // -- the terminal panes ------------------------------------------------------
 // A pty on the server, an emulator here, and a poll loop between them. Polled

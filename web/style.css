@@ -117,16 +117,6 @@
 
 body { margin: 0; font: 14px/1.5 var(--font-ui); }
 
-/* nowrap keeps the header one row tall, which the graph pane's `top` offset
-   below assumes; the controls scroll sideways on a narrow window rather than
-   wrapping and pushing the graph down. */
-header {
-  display: flex; gap: 1rem; align-items: center;
-  flex-wrap: nowrap; white-space: nowrap; overflow-x: auto;
-  height: 3.25rem; padding: .75rem 1rem;
-  border-bottom: 1px solid var(--line);
-}
-
 button {
   font: inherit; padding: .4rem .9rem;
   border: 1px solid var(--line-strong); background: var(--wash);
@@ -135,13 +125,28 @@ button {
 button:hover:not(:disabled) { background: var(--wash-strong); }
 button:disabled { opacity: .5; cursor: progress; }
 
+/* Status floats over the graph rather than occupying a bar of its own: the
+   zoom level and "drawing..." are worth a glance and never worth a row of
+   permanent furniture. It fades out when there is nothing to say, and it
+   never takes the pointer -- the graph underneath stays draggable. */
+#hud {
+  position: fixed; left: 1rem; bottom: .75rem; z-index: 5;
+  display: flex; gap: .75rem; pointer-events: none;
+  font: 12px/1.4 var(--font-ui); color: var(--ink);
+}
+#hud:empty { display: none; }
 #status { opacity: .7; }
-#zoom { font-variant-numeric: tabular-nums; opacity: .7; min-width: 3.5em; }
+#zoom {
+  font-variant-numeric: tabular-nums; opacity: 0; min-width: 3.5em;
+  transition: opacity .4s ease .6s;
+}
+#zoom.active { opacity: .7; transition-delay: 0s; }
 
 /* The viewport is fixed to what is left of the window and clips; panning
    moves the graph inside it, so the page itself never scrolls. */
+/* Full window now that there is no bar above it. */
 #graph {
-  position: absolute; inset: 3.25rem 0 0 0; overflow: hidden;
+  position: absolute; inset: 0; overflow: hidden;
   cursor: grab; background: var(--canvas);
 }
 #graph.panning { cursor: grabbing; }

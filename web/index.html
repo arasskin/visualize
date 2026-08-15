@@ -2,13 +2,12 @@
 <meta charset="utf-8">
 <title>{{TITLE}}</title>
 <link rel="stylesheet" href="/style.css">
-<header>
-  <button id="regen" title="re-read the sources and rebuild">Regenerate</button>
-  <button id="fit" title="fit to window (0)">Fit</button>
-  <span id="zoom"></span>
-  <span id="status"></span>
-</header>
+<!-- No top bar. Regenerate is gone because a watcher notices edits on its
+     own; Fit is the `0` key; and what is left -- the zoom level and what the
+     server is doing -- is status, not furniture, so it floats over the graph
+     and fades when there is nothing to say. -->
 <div id="graph">{{GRAPH}}<div id="edgelabel"></div></div>
+<div id="hud"><span id="zoom"></span><span id="status"></span></div>
 
 <div id="config" class="panel shut">
   <div id="bar" class="bar" title="click to open, drag to move">
