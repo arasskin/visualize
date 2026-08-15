@@ -7,16 +7,31 @@
 # they happen to still be looking at it. So a tool whose whole purpose is
 # making a codebase visible was hiding its own failures.
 #
-# A ring in memory, not a file. These are for the session that is happening
-# now -- the agent asks "what just broke?", gets the last few faults with
-# their stacks, and fixes one. Anything worth keeping past a restart belongs
-# in a commit message, and this project has plenty of those.
+# A RING IN MEMORY AND A LOG ON DISK, and the disk half is the one that
+# matters. The ring answers the hot question -- "what just broke?" -- without
+# touching the filesystem on an error path. The log outlives the process, so
+# a crash that took the server with it is still readable afterwards, an agent
+# can Read the file without this program running at all, and the next run
+# starts knowing what the last one hit.
 #
 # Recording must never fail the request that reported it: a fault here is
 # already a bad moment, and an error in the error path is how a server ends
-# up with no error path at all.
+# up with no error path at all. Every disk write is therefore wrapped -- a
+# full disk costs the log, not the server.
+
+(import ./state)
 
 (def- capacity 64)
+
+# Where the log goes. Set by core at startup; until then faults are kept in
+# memory only, which is the right behaviour for the tests and for the moment
+# before a root is known.
+(var- root nil)
+
+(defn logging-to
+  "Write faults under this project's state directory from now on."
+  [project-root]
+  (set root project-root))
 
 (def faults
   "The ring, oldest first. Each entry {:at :kind :where :what :trace :count}."
@@ -41,13 +56,23 @@
     (do (put last-entry :count (inc (last-entry :count)))
         (put last-entry :at (os/time)))
     (do
-      (array/push faults @{:at (os/time)
-                           :kind kind
-                           :where (string where)
-                           :what (string what)
-                           :trace trace
-                           :count 1})
-      (when (> (length faults) capacity) (array/remove faults 0))))
+      (def entry @{:at (os/time)
+                   :kind kind
+                   :where (string where)
+                   :what (string what)
+                   :trace trace
+                   :count 1})
+      (array/push faults entry)
+      (when (> (length faults) capacity) (array/remove faults 0))
+      # To disk as well, so this outlives the process that hit it. Wrapped
+      # because the error path must not raise: see the note at the top.
+      (when root
+        (try
+          (state/append-line root "faults.jsonl"
+                             {"at" (entry :at) "kind" (string kind)
+                              "where" (string where) "what" (string what)
+                              "trace" (or trace "")})
+          ([_] nil)))))
   nil)
 
 (defn recent

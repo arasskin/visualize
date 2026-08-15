@@ -56,6 +56,7 @@
 (import ./pane-host)
 (import ./dev)
 (import ./faults)
+(import ./state)
 (import ./stamp)
 (import ./watchdog)
 
@@ -143,10 +144,30 @@
 # graph, every time. It is fast, but it is still pointless to redo per edit
 # when only the post-processing changes. Regenerate is how you say the SOURCE
 # changed and this is stale.
+#
+# AND IT IS WRITTEN DOWN. The scan is the most valuable fact this program
+# holds -- every file, every dependency, every line count -- and it used to
+# live in a var, visible only to code inside this process. On disk it is
+# readable by a page, a script, an agent, or the next run, which is what
+# lets a view of this project be something that reads a file rather than
+# something that has to be built into the server. See src/state.janet.
 (var- cached nil)
 
 (defn- graph-for [root specs]
-  (unless cached (set cached (scan/scan root specs)))
+  (unless cached
+    (set cached (scan/scan root specs))
+    (try
+      (state/write root "scan.json"
+                   # The whole scan, not a chosen subset: a consumer this
+                   # file has never heard of is the entire point.
+                   {"at" (os/time)
+                    "root" root
+                    "nodes" (get cached :nodes [])
+                    "edges" (get cached :edges [])
+                    "sizes" (get cached :sizes {})
+                    "ours" (get cached :ours {})
+                    "error" (get cached :error)})
+      ([_] nil)))
   cached)
 
 (defn- render-svg
@@ -281,6 +302,10 @@
   (def web-dir (string here "/web"))
   (def config-path (string root "/" config-name))
   (def specs (parsers/load (string here "/src/parsers")))
+  # Faults go to this project's state directory from here on, so a crash
+  # that takes the server down is still readable afterwards.
+  (faults/logging-to root)
+
   (def token (make-token))
   # When this run began. Faults are counted from here, so the page's number
   # means "since the server started" rather than "ever".

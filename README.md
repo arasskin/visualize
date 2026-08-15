@@ -150,6 +150,26 @@ through afterwards.
 It reads this run's url and token from a dev-mode file beside the sockets, and
 posts to the same endpoints the page uses.
 
+### What it knows, on disk
+
+A project gets a `.visualize/` directory holding what the program knows about
+it: `scan.json` (every file, dependency, and line count) and `faults.jsonl`
+(what has gone wrong, one JSON object per line).
+
+```bash
+cat .visualize/scan.json | python3 -m json.tool | head
+tail -3 .visualize/faults.jsonl
+```
+
+This is the substrate the rest of the tool is meant to sit on. A view of a
+project -- the graph this ships with, or one an app writes for itself -- is
+then something that reads a file, rather than something that has to be built
+into the server and reached through an endpoint. It also means the facts
+outlive the process: a crash that takes the server down leaves its own
+explanation behind.
+
+Add `.visualize/` to `.gitignore`; it is a cache and a log, not source.
+
 ### When the server itself breaks
 
 Server errors used to go only to stderr -- invisible to an agent working in a
@@ -263,6 +283,7 @@ src/http.janet      just enough HTTP for one browser on localhost
 src/json.janet      just enough JSON for the browser protocol
 src/dev.janet       the repl the running server hosts, and its equipment
 src/faults.janet    what has gone wrong lately, where an agent can read it
+src/state.janet     the facts on disk, in .visualize/, for anything to read
 src/watchdog.janet  a thread that names event-loop stalls from outside them
 src/stamp.janet     which code each process is running, for the handshake
 pane                type into a pane from a shell, so agent work is visible

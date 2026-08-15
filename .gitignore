@@ -6,3 +6,6 @@ bin/
 # Written into whatever directory is being scanned. One lands here whenever
 # visualize is pointed at its own repo.
 visualize.conf
+
+# Per-project state: the scan cache and the fault log.
+.visualize/
