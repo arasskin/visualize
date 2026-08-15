@@ -524,92 +524,6 @@ async function send(action, index, keepView) {
 // the same furniture with different contents. A second copy of this logic
 // would be a second place for the drag-versus-click rule to drift.
 
-// -- snapping ----------------------------------------------------------------
-// Tabs stick together along their vertical walls, so a row of them reads as
-// one strip of folder tabs rather than three things that happen to be near
-// each other. Stuck tabs travel together when dragged sideways; a vertical
-// slide is how you break one out, which is the same motion as pulling a
-// folder up out of a drawer.
-//
-// THE BOND IS THE GEOMETRY, not a stored relationship. Two tabs are stuck
-// when their tops line up and their walls touch -- recomputed on every drag
-// rather than remembered, so there is no bookkeeping to get out of step with
-// where things actually are. Closing a panel, resizing it, or dropping it
-// somewhere else all update the answer for free.
-
-const SNAP = 14;          // how close a wall has to come to catch
-
-// WHAT BREAKS THE BOND IS A TUG, not a direction. The rule used to be a
-// distance downward plus a slope steeper than sideways, which asked the
-// wrong question twice: it made "out of the row" mean "downward", so a tab
-// could not be pulled out to the side at all, and it turned an intention
-// into arithmetic about angles that nobody performs while dragging.
-//
-// A tab comes free when you YANK it -- when the pointer accelerates hard
-// enough, whichever way it goes. Carry the strip anywhere you like at any
-// speed and it stays together; snatch one tab off it and it lets go. That
-// is one number, one comparison, and it matches what hands already do with
-// things that are stuck together.
-// Measured across a spread of gestures rather than guessed, because the
-// distribution is tighter than it looks: an unhurried carry peaks around
-// 0.05 px/ms^2 between samples, but a FAST one -- a long distance covered
-// in few samples -- reaches 0.14 to 0.16, a firm tug 0.25, a snatch 0.50.
-// So the usable gap is narrow and sits high: 0.18 clears the fastest
-// carries measured (0.16) and catches a firm tug (0.25) rather than
-// demanding a snatch. Below the carries -- 0.10 was -- and a row cannot be
-// moved at all; well above the tugs and only violence works.
-const BREAK_ACCEL = 0.18; // px/ms^2, sampled between pointer moves
-
-const panels = [];        // every panel, in creation order
-
-// A tab's own box: the BAR's, not the panel's, since an open panel is a
-// folder hanging below a tab that keeps its own width.
-function tabBox(panel) {
-  const b = panel.bar.getBoundingClientRect();
-  return { left: b.left, right: b.right, top: b.top, bottom: b.bottom, w: b.width };
-}
-
-// Everything stuck to `panel`, walking both ways along the row so the middle
-// of a strip drags the whole strip rather than tearing it in half.
-function stuckTo(panel) {
-  const group = new Set([panel]);
-  let grew = true;
-  while (grew) {
-    grew = false;
-    for (const other of panels) {
-      if (group.has(other) || other.root.classList.contains('hidden')) continue;
-      const a = tabBox(other);
-      for (const member of group) {
-        const b = tabBox(member);
-        const aligned = Math.abs(a.top - b.top) < 2;
-        const touching = Math.abs(a.left - b.right) < 2 || Math.abs(a.right - b.left) < 2;
-        if (aligned && touching) { group.add(other); grew = true; break; }
-      }
-    }
-  }
-  group.delete(panel);
-  return [...group];
-}
-
-// Where `panel` would land if it snapped: the nearest wall within reach,
-// or null. Only ever snaps a tab to a tab, and only sideways -- a tab that
-// wants to sit somewhere else vertically is a tab being taken out of a row.
-function snapFor(panel, left, top) {
-  const self = tabBox(panel);
-  let best = null;
-  for (const other of panels) {
-    if (other === panel || other.root.classList.contains('hidden')) continue;
-    const box = tabBox(other);
-    // Same row, or close enough to be joining it.
-    if (Math.abs(top - box.top) > SNAP) continue;
-    for (const [x, why] of [[box.right, 'after'], [box.left - self.w, 'before']]) {
-      const gap = Math.abs(left - x);
-      if (gap < SNAP && (!best || gap < best.gap)) best = { x, y: box.top, gap, why };
-    }
-  }
-  return best;
-}
-
 function makePanel(root, options = {}) {
   const bar = root.querySelector('.bar');
   const body = root.querySelector('.panel-body');
@@ -631,13 +545,6 @@ function makePanel(root, options = {}) {
       const from = { x: e.clientX, y: e.clientY, w: box.width, h: box.height,
                      left: box.left, top: box.top, at: performance.now() };
       let moved = false;
-      // A FRESH GESTURE STARTS FRESH. `onGrab` clears whatever the last one
-      // left behind -- which matters because a drag too small to count as
-      // movement never reaches `drop`, so anything reset only there would
-      // still be set when the next drag began. That is how a stuck pair
-      // stopped being able to break apart: the second drag reused the
-      // first's rider list and its already-broken flag.
-      if (options.onGrab) options.onGrab();
       handle.setPointerCapture(e.pointerId);
       const move = (m) => {
         const dx = m.clientX - from.x, dy = m.clientY - from.y;
@@ -650,7 +557,6 @@ function makePanel(root, options = {}) {
         handle.removeEventListener('pointerup', drop);
         handle.removeEventListener('pointercancel', drop);
         handle.dragged = moved;
-        if (moved && options.onDrop) options.onDrop();
       };
       handle.addEventListener('pointermove', move);
       handle.addEventListener('pointerup', drop);
@@ -666,74 +572,7 @@ function makePanel(root, options = {}) {
     root.style.top = Math.min(Math.max(top, 0), innerHeight - edge) + 'px';
   }
 
-  // Dragging a tab: the group comes along sideways, and a vertical slide
-  // past BREAK pulls this one out of the row on its own.
-  let travelling = null;   // the tabs stuck to this one when the drag began
-  let broken = false;      // has this drag pulled it out of its row?
-  let last = null;         // previous sample, for measuring the tug
-
-  grab(bar, (dx, dy, from) => {
-    const now = performance.now();
-    if (travelling === null) {
-      travelling = stuckTo(panel).map((other) => {
-        const box = other.root.getBoundingClientRect();
-        return { panel: other, left: box.left, top: box.top };
-      });
-      broken = false;
-      // FROM REST, not from here. The slop gate above swallows the first
-      // few pixels of every gesture, so the first sample this handler sees
-      // may already be a jump -- and seeding from it would measure that
-      // jump as the starting speed and see no acceleration at all. The
-      // gesture began at the grab, motionless, and that is the baseline.
-      last = { t: from.at, dx: 0, dy: 0, speed: 0 };
-    }
-    // Speed between samples, then the change in speed between them: a
-    // steady drag of any pace has an acceleration near zero, and a snatch
-    // spikes it. Guarded against a zero interval, which a burst of events
-    // in one millisecond will otherwise turn into infinity.
-    const gap = Math.max(now - last.t, 1);
-    const speed = Math.hypot(dx - last.dx, dy - last.dy) / gap;
-    const accel = Math.abs(speed - last.speed) / gap;
-    last = { t: now, dx, dy, speed };
-    // Once broken it stays broken for the rest of the drag, so easing off
-    // after the yank does not silently re-attach the others to the pointer.
-    if (!broken && accel > BREAK_ACCEL) {
-      broken = true;
-      travelling = [];
-    }
-    place(from.left + dx, from.top + dy);
-    for (const rider of travelling) rider.panel.place(rider.left + dx, rider.top + dy);
-  });
-  grab(grip, (dx, dy, from) => {
-    const w = Math.max(options.minWidth || 240, from.w + dx);
-    const h = Math.max(options.minHeight || 120, from.h + dy);
-    root.style.width = w + 'px';
-    root.style.height = h + 'px';
-    if (options.onResize) options.onResize(w, h);
-  });
-
-  // Landing: if a wall is within reach, sit flush against it. Done on drop
-  // rather than continuously, so the tab follows the pointer honestly while
-  // moving and only commits when let go.
-  options.onGrab = () => {
-    travelling = null;
-    broken = false;
-    last = null;
-  };
-
-  options.onDrop = () => {
-    // A TAB THAT WAS YANKED STAYS WHERE IT LANDS. Snapping otherwise
-    // undoes the gesture: pull one free, let go while it is still within
-    // reach of the row it came from, and it springs back -- so the tug
-    // appears to do nothing at all, which is worse than it being hard.
-    // An ordinary drag still snaps, which is how a tab joins a row.
-    if (!broken) {
-      const box = root.getBoundingClientRect();
-      const target = snapFor(panel, box.left, box.top);
-      if (target) place(target.x, target.y);
-    }
-    travelling = null;
-  };
+  grab(bar, (dx, dy, from) => place(from.left + dx, from.top + dy));
 
   const panel = {
     root, bar, body, grip,
@@ -742,7 +581,6 @@ function makePanel(root, options = {}) {
     open() { if (panel.shut) bar.click(); },
     toggle() { bar.click(); },
   };
-  panels.push(panel);
 
   bar.addEventListener('click', () => {
     // A drag that ended on the bar is not a click asking to collapse it.
