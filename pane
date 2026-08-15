@@ -2,7 +2,7 @@
 #
 # Type into a terminal pane of a running visualize, and read what it says.
 #
-#     ./pane repl '(dev/reload "dot")'    evaluate in the live image
+#     ./pane repl '(dev/reload "layout")' evaluate in the live image
 #     ./pane repl                         just read what the pane shows
 #     ./pane harness 'hello'              type at the agent
 #     ./pane repl --raw $'\003'           send bytes exactly as given

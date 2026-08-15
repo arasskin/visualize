@@ -10,8 +10,8 @@ import { makeTerminal, keyToBytes } from './term.js';
 // -- the viewport ------------------------------------------------------------
 // One transform on the <svg> element does the whole job. Not an iframe: the
 // graph has to stay in this document for a redraw to swap it, and a same-origin
-// frame would only add a postMessage hop. graphviz output is vector, so it
-// stays sharp at any scale.
+// frame would only add a postMessage hop. The graph is SVG, so it stays
+// sharp at any scale.
 
 const pane = document.getElementById('graph');
 const zoomLabel = document.getElementById('zoom');
@@ -48,11 +48,14 @@ function zoomAt(factor, cx, cy) {
 function fit() {
   const svg = pane.querySelector('svg');
   if (!svg) return;
-  // Measure the element's own untransformed size, NOT getBBox(): graphviz
-  // sizes the root svg in POINTS (width="2276pt"), so the box it actually
-  // occupies is the pt->px conversion of that, ~4/3 larger than the user units
-  // getBBox reports. Centring against the bbox would offset the graph by that
-  // ratio. baseVal.value is already in px.
+  // Measure the element's own untransformed size, NOT getBBox(). This was
+  // written when graphviz sized the root svg in POINTS (width="2276pt"), so
+  // the box it occupied was the pt->px conversion of that, ~4/3 larger than
+  // the user units getBBox reports, and centring against the bbox offset the
+  // graph by that ratio. src/layout/svg.janet writes px and a matching
+  // viewBox, so the two now agree -- but baseVal.value is still the right
+  // question to ask, because it is the size the element OCCUPIES, which is
+  // what the fit is against, whatever the units in the attribute.
   const w = svg.width.baseVal.value;
   const h = svg.height.baseVal.value;
   if (!w || !h) return;
@@ -116,21 +119,31 @@ document.addEventListener('keydown', (e) => {
 function fitSoon() { requestAnimationFrame(() => requestAnimationFrame(fit)); }
 
 // -- hovering a dependency ---------------------------------------------------
-// Which file does this line come from, and where does it go? graphviz answers
-// that in each edge's <title>, but only as a native tooltip on a 1px target.
-// This makes the target fat and the answer visible.
+// Which file does this line come from, and where does it go? The renderer
+// answers that in each edge's <title>, but a <title> is only a native tooltip
+// on a 1px target. This makes the target fat and the answer visible.
 
 // The MANGLED node name back to a readable one. Not derivable: the name is the
 // path with separators replaced by underscores, so OttoClip_Cart could be
 // OttoClip/Cart.swift or OttoClip_Cart.swift and nothing in the name says
-// which. The node's own label does say, though -- graphviz wraps it across
-// <text> runs, so join the runs and drop a trailing line count.
+// which. The node's own label does say, though -- it is wrapped a path segment
+// per line, so join the lines and drop a trailing line count.
+//
+// LINES ARE <tspan>s, one per row, inside a single <text>. graphviz used to
+// emit a separate <text> per row and this read those; src/layout/svg.janet
+// emits tspans, because they can share the <text>'s font and fill and be
+// positioned by x/y alone. Falling back to the <text> itself keeps a node
+// whose label never wrapped -- there is no tspan to find on a one-line label
+// in some renderings -- from coming back empty.
 function moduleNames(svg) {
   const byNode = new Map();
   for (const node of svg.querySelectorAll('g.node')) {
     const key = node.querySelector('title');
     if (!key) continue;
-    const runs = [...node.querySelectorAll('text')].map(t => t.textContent.trim());
+    const text = node.querySelector('text');
+    const spans = text ? [...text.querySelectorAll('tspan')] : [];
+    const runs = (spans.length ? spans : text ? [text] : [])
+      .map(t => t.textContent.trim());
     // The show-lines view appends a count as its own run. Only a run that is
     // ALL digits goes -- a file could legitimately end in a number.
     if (runs.length > 1 && /^\d+$/.test(runs[runs.length - 1])) runs.pop();
@@ -197,7 +210,7 @@ function wireEdges() {
   for (const group of svg.querySelectorAll('g.edge')) {
     const line = group.querySelector('path');
     if (!line || group.querySelector('.hit')) continue;
-    // Take graphviz's <title> for ourselves and REMOVE it -- see showEdge.
+    // Take the <title> for ourselves and REMOVE it -- see showEdge.
     const title = group.querySelector('title');
     if (title) {
       group.dataset.edge = title.textContent.trim();

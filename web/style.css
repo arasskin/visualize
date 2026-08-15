@@ -13,9 +13,10 @@
      poke at, not a settings dialog. */
   --font-config: "Comic Sans MS", "Chalkboard SE", cursive;
 
-  /* graphviz draws node labels in dark ink and has no idea what the page is
-     doing, so a dark canvas needs the SVG inverted too -- see the dark block
-     at the end of the theme. */
+  /* Node ink and group colours are baked into the SVG by src/layout/svg.janet,
+     which computes them from the palette and cannot know the page's theme --
+     so a dark canvas inverts the SVG instead. See the dark block at the end
+     of the theme. */
   --canvas: #fbfbfa;
   --ink: #222;
 
@@ -106,10 +107,11 @@
     --term-bright-white:   #e8e8e4;
   }
 
-  /* graphviz's ink is dark and baked into the SVG, so the SVG itself flips:
-     invert turns the ink light, hue-rotate turns the colours (including the
-     CSS-applied --lit) back to roughly themselves. Slightly under 1 so pure
-     black lands on soft white rather than glare. */
+  /* The label ink is dark and baked into the SVG -- src/color.janet picks it
+     for contrast against a pale page -- so the SVG itself flips: invert turns
+     the ink light, hue-rotate turns the colours (including the CSS-applied
+     --lit) back to roughly themselves. Slightly under 1 so pure black lands
+     on soft white rather than glare. */
   #graph svg { filter: invert(.92) hue-rotate(180deg); }
 }
 
@@ -154,12 +156,8 @@ button:disabled { opacity: .5; cursor: progress; }
   display: block; transform-origin: 0 0; will-change: transform;
   max-width: none;
 }
-/* graphviz paints an opaque white page rectangle as its first polygon; hide
-   it so the graph floats on the pane instead of sitting on a white card. */
-#graph svg > g > polygon:first-of-type { fill: none; }
-
 /* -- hovering a dependency ------------------------------------------------
-   graphviz gives every edge a <title>, so the browser shows a native tooltip
+   Every edge carries a <title>, so the browser shows a native tooltip
    -- in theory. In practice the edge is a 1px hairline: a target you cannot
    land on is a target you do not have. So each edge gets a fat transparent
    twin to catch the pointer, and hovering either lights the real path. */
@@ -397,8 +395,8 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 }
 .row.bad input { border-color: var(--bad); background: var(--bad-wash); }
 
-/* Anything belonging to no single line -- graphviz missing, a failed request
-   -- still needs somewhere to go. */
+/* Anything belonging to no single line -- an unknown layout name, a failed
+   request -- still needs somewhere to go. */
 #problems {
   padding: .3rem .5rem 0; color: var(--bad); white-space: pre-wrap;
 }

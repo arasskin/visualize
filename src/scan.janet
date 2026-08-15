@@ -170,17 +170,21 @@
     joined))
 
 (defn safe-name
-  ``A path or module specifier as a legal bare DOT identifier.
+  ``A path or module specifier as a flat node name.
 
-  Everything that is not a letter, digit or underscore becomes an underscore.
-  A bare DOT identifier admits only those, and a real directory called
-  `demo-api` produced `demo-api_worker` -- which graphviz rejects with a
-  syntax error pointing at the hyphen. Import specifiers are worse still:
-  `github.com/lib/pq`, `./store`, `@scope/pkg`.
+  Everything that is not a letter, digit or underscore becomes an underscore,
+  so `github.com/lib/pq`, `./store` and `@scope/pkg` all become names with no
+  separator in them.
 
-  Quoting the names in the output would work too, but every prefix test
-  downstream compares against these strings and would then have to know about
-  the quotes.``
+  THIS OUTLIVED ITS ORIGINAL REASON and is kept for a better one. It existed
+  because a bare DOT identifier admits only those characters -- a directory
+  called `demo-api` produced `demo-api_worker`, which graphviz rejected with a
+  syntax error pointing at the hyphen. v has no such restriction: a bare word
+  there is anything that is not a delimiter, so `demo-api_worker` would parse
+  fine. What keeps the flattening is the CONFIG language: every prefix test
+  downstream (see src/select.janet) compares against these strings, and `~.a.b`
+  expands to `a_b` because that is the shape a node name has. Changing it now
+  would be changing the config language, not the output format.``
   [text]
   (string
     (peg/replace-all ~(if-not (+ (range "AZ") (range "az") (range "09") "_") 1)
@@ -210,7 +214,10 @@
 (defn node-label
   ``A file's label, wrapped a segment per line.
 
-  The literal `\n` is graphviz's own line break inside a quoted label, and the
+  A REAL NEWLINE, where this used to emit the two characters `\` and `n` --
+  graphviz's own line break inside a quoted label. v strings decode their
+  escapes when they parse, so a label arrives at the renderer carrying actual
+  newlines and the renderer splits on them (see layout/svg.janet). The
   separator stays on the line above so a wrapped path still reads as a path.``
   [rel]
   (def without-ext
@@ -219,7 +226,7 @@
         (string/slice rel 0 dot)
         rel)
       rel))
-  (string/join (string/split "/" without-ext) "/\\n"))
+  (string/join (string/split "/" without-ext) "/\n"))
 
 (defn build
   ``Turn parsed files into a graph: nodes, edges, and each file's size.

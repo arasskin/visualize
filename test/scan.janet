@@ -113,10 +113,14 @@ const fs = require('fs')
   (t/ok (not (index-of "nope" (got :imports))))
   (t/ok (not (index-of "T" (got :imports))) "the binding is not the module"))
 
-(t/test "node names are legal bare DOT identifiers"
-  # A real directory called `demo-api` produced `demo-api_worker`, and
-  # graphviz rejected the whole graph with a syntax error at the hyphen.
-  # Import specifiers are worse: `github.com/lib/pq`, `./store`, `@scope/pkg`.
+(t/test "node names are flat, with no separator left in them"
+  # This began as a DOT constraint -- a real directory called `demo-api`
+  # produced `demo-api_worker`, and graphviz rejected the whole graph with a
+  # syntax error at the hyphen. v would take that name unquoted, so the
+  # syntax reason is gone; what keeps the flattening is the CONFIG language,
+  # where `~.a.b` expands to the prefix `a_b` and every (hide)/(group) test
+  # compares against these strings. Import specifiers are the hard cases:
+  # `github.com/lib/pq`, `./store`, `@scope/pkg`.
   (t/is= "demo_api_worker" (scan/node-name "demo-api/worker.js"))
   (t/is= "OttoClip_CartWebView" (scan/node-name "OttoClip/CartWebView.swift"))
   (t/is= "github_com_lib_pq" (scan/safe-name "github.com/lib/pq"))
@@ -127,7 +131,7 @@ const fs = require('fs')
               (scan/safe-name "@scope/pkg")]
     (t/ok (peg/match ~(* (some (+ (range "AZ") (range "az") (range "09") "_")) -1)
                      name)
-          (string name " must be a bare DOT identifier"))))
+          (string name " must be a flat name the config can prefix-match"))))
 
 (t/test "a relative import resolves to the file it names"
   # Flattened as written, `../visualize/color` becomes the node `___visualize_color`

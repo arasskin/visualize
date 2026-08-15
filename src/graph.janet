@@ -15,7 +15,7 @@
 
 (import ./scan)
 (import ./parsers)
-(import ./dot)
+(import ./select)
 (import ./layout)
 (import ./config)
 (import ./json)
@@ -119,7 +119,7 @@
   ``Draw the graph the config asks for. Returns [ok svg-or-error].
 
   The scan is the whole graph; the narrowing, hiding, grouping and colouring
-  are all applied to it on the way to graphviz.``
+  are all applied to it on the way to the layout.``
   [root specs state]
   (def graph (graph-for root specs))
   (if (graph :error)
@@ -128,26 +128,39 @@
       # Narrow before hiding: (show-only ~) then (hide ~.Tests) reads the way
       # it is written, and hiding something already filtered out is a no-op
       # rather than an error.
-      (def trimmed (dot/drop-nodes (dot/keep graph (state :only)) (state :hidden)))
+      (def trimmed (select/drop-nodes (select/keep graph (state :only)) (state :hidden)))
       # Only the nodes still on the graph get a say in the ramp: ranking
       # against hidden files would spend the range on colours nothing wears.
       (def weights
-        (when (state :sized-coloring)
-          (def here @{})
-          (each node (trimmed :nodes)
-            (when-let [size (get (graph :sizes) (node :name))]
-              (put here (node :name) size)))
-          (dot/ramp-of here)))
-      (layout/draw trimmed {:layout (state :layout)
-                            :groups (state :groups)
-                            :sized (state :sized)
-                            :filled (state :filled)
-                            :font (state :font)
-                            :weights weights
-                            # graphviz runs as a subprocess and wants to be
-                            # started in the project, not wherever the
-                            # server happens to be.
-                            :cwd root}))))
+        (if (state :sized-coloring)
+          (let [here @{}]
+            (each node (trimmed :nodes)
+              (when-let [size (get (graph :sizes) (node :name))]
+                (put here (node :name) size)))
+            (select/ramp-of here))
+          # The default shading, by how entangled a node is. Computed here
+          # rather than inside a renderer: it is a fact about the graph, and
+          # both layouts want the same one.
+          (select/weights-for trimmed)))
+      # The label carries the line count when (show-lines) asked for it. Done
+      # on the graph rather than in a renderer, so both layouts get it and
+      # the v text that goes between them already says what the box reads.
+      (def labelled
+        (if (state :sized)
+          (merge trimmed
+                 {:nodes (map (fn [node]
+                                (if-let [size (get (graph :sizes) (node :name))]
+                                  (merge node {:label (string (node :label) "\n"
+                                                              (select/thousands size))})
+                                  node))
+                              (trimmed :nodes))})
+          trimmed))
+      (layout/draw labelled {:layout (state :layout)
+                             :groups (state :groups)
+                             :sized (state :sized)
+                             :filled (state :filled)
+                             :font (state :font)
+                             :weights weights}))))
 
 
 (defn page
@@ -168,7 +181,7 @@
     (set out (string/replace (string "{{" key "}}") value out)))
   # The SVG goes in last, and with a function rather than a literal:
   # string/replace treats `%` sequences in its replacement specially, and
-  # graphviz output is full of them (`%3C` in URLs, percent widths). A
+  # SVG is full of them (percent widths, escaped characters in a label). A
   # function replacement is taken verbatim.
   (string/replace "{{GRAPH}}" (fn [&] svg) out))
 
@@ -224,7 +237,7 @@
     (if (draws action) (render-svg root specs state) [true ""]))
   {"lines" lines
    "problems" problems
-   # A render failure belongs to no single line -- graphviz being missing is
+   # A render failure belongs to no single line -- an unknown layout name is
    # not any one form's fault -- so it stays separate from the per-line
    # messages.
    "error" (if ok "" result)

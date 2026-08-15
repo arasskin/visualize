@@ -55,8 +55,8 @@
     # default; the config names it because which agent you want is a property
     # of the project, not of the tool.
     :harness nil
-    # Which layout draws the graph. Nil means graphviz, which is what a
-    # config that says nothing has always got.
+    # Which layout draws the graph. Nil means layered, the one that shows
+    # direction -- which is what a dependency graph is for.
     :layout nil})
 
 (defn- reflow
@@ -161,11 +161,14 @@
   (defn layout [name]
     ``Which layout draws the graph.
 
-    `(layout graphviz)` is the default -- a real layered layout, and the
-    reason `dot` is on the requirements list. `(layout force)` needs
-    nothing installed: nodes repel, edges pull, and the picture settles.
-    It shows relatedness rather than direction of dependency, so it reads
-    better for a tangle than for a hierarchy.``
+    `(layout layered)` is the default: nodes sit on ranks so every arrow
+    points the same way down the page, and a cycle shows as an edge running
+    back up it. `(layout force)` instead lets nodes repel and edges pull
+    until the picture settles -- it shows relatedness rather than direction,
+    so it reads better for a tangle than for a hierarchy.
+
+    Neither needs anything installed. This used to name `graphviz` and that
+    is gone; a config still saying it gets told the layouts that exist.``
     (put state :layout (as name))
     nil)
 
@@ -196,7 +199,7 @@
   (install env "harness" harness
            "(harness cmd & args) -- what to run in the terminal window, e.g. (harness claude) or (harness pi).")
   (install env "layout" layout
-           "(layout name) -- graphviz (default, needs dot) or force (needs nothing).")
+           "(layout name) -- layered (default, shows direction) or force (shows relatedness).")
 
   # `~` alone, for a config that quotes it or reaches it through a helper.
   # The bare `(show-only ~)` form never gets this far -- src/tilde.janet turns

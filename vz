@@ -68,8 +68,8 @@ if pattern:
     edges = [e for e in edges if e[0] in names or e[1] in names]
 print(f"{len(nodes)} files, {len(edges)} edges"
       + (f"  (matching {pattern!r})" if pattern else ""))
-# An edge is [imported, importer] -- the arrow graphviz draws, pointing at
-# whoever depends on it. Read the other way round for "what does this need".
+# An edge is [imported, importer] -- the arrow points at whoever depends on
+# it, which is the direction the graph draws. Read the other way round for "what does this need".
 for node in sorted(nodes, key=lambda n: -sizes.get(n["name"], 0))[:40]:
     name = node["name"]
     needs = sorted(a for a, b in edges if b == name)

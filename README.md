@@ -20,16 +20,14 @@ program.
 
 ## Requirements
 
-A C compiler, and graphviz's `dot` on PATH:
+A C compiler.
 
-```bash
-brew install graphviz
-```
-
-That is the whole list. **The Janet runtime is in this repository**, as the
-official amalgamated source in `vendor/janet/` — so a clone builds offline,
-with no package manager, no lockfile, and no `node_modules`, and builds the
-same runtime a year from now.
+That is the whole list — there is nothing to install. **The Janet runtime is
+in this repository**, as the official amalgamated source in `vendor/janet/` —
+so a clone builds offline, with no package manager, no lockfile, and no
+`node_modules`, and builds the same runtime a year from now. The layout is
+ours too: `dot` used to be on this list, and both layouts now ship in
+`src/layout/`.
 
 ```bash
 ./build           # compile bin/janet when it is missing or stale
@@ -66,7 +64,7 @@ pane.
 (show-lines-coloring)      ; ...and shade by size instead of by edges
 (font "Helvetica")         ; draw it in something else
 (harness claude)           ; what the terminal window runs -- or (harness pi)
-(layout force)             ; draw it without graphviz -- or (layout graphviz)
+(layout force)             ; relatedness instead of direction -- or (layout layered)
 ```
 
 `~` **is the project**, the way a shell expands `~` to a home directory:
@@ -105,6 +103,137 @@ radius of a typo there should be a wrong-looking graph.
 A form cannot span lines — a line is the unit that gets parsed and the unit an
 error attaches to. One bad line is reported under itself and the rest still
 runs.
+
+## v, the graph language
+
+The config says what you want to see. **v** is what the graph *is* — the text
+the scan renders to and the layouts read back. A v file is a list of facts,
+each one an **entity, an attribute, and a value**:
+
+```lisp
+(~.term color "#ff4d6d")
+(src_color label "src/\ncolor" ours size 187)
+(SwiftUI label "SwiftUI")
+(src_term_host label "src/term/\nhost" ours size 669 ~.term)
+(src_color->src_graph from src_color to src_graph)
+```
+
+A form is `(e a1 a2 a3 v3 …)`: the first atom names the **entity**, and
+everything after it is an **attribute** that either stands alone or takes the
+atom after it. So one line is a handful of rows sharing an entity —
+`(src_color label "…" ours size 187)` is four:
+
+```
+src_color  is     true
+src_color  label  "src/\ncolor"
+src_color  ours   true
+src_color  size   187
+```
+
+`v/facts` is the seam: it turns text into rows, and `v/parse` builds a graph
+out of rows. Code that wants the *facts* rather than the picture stops at the
+first one.
+
+**A closed schema is what makes that readable.** `(A ours size 187)` would be
+ambiguous on its own — `size` could be the value of `ours` as easily as an
+attribute of its own — so `v/attributes` declares every attribute the language
+has and whether it takes a value. The parser never guesses. It also means
+`label` and `:label` are the same word: the colon used to be the only way to
+tell an attribute from a value, and with a schema it's just spelling.
+
+**Everything is an entity**, including the things that used to be forms. A
+group is an entity with a `color`; an edge is an entity with `from` and `to`;
+and a node joins a group by *naming* it — a bare word that isn't a declared
+attribute is a reference to another entity. That last inference is decidable
+precisely because the schema is closed.
+
+**It was nested s-expressions first, and that was a mistake.** The obvious lisp
+move is to make a group a form that *contains* its members. It reads well and
+it asserts a hierarchy the data doesn't have: membership here is many-to-many
+and crosses layers freely. The parens claimed a containment the renderer
+already knew was a lie — and the tree got flattened on read anyway, so it was a
+shape no consumer ever read as a shape. Naming a group instead, a node in two
+groups is expressible instead of unsayable, and a group whose members land on
+four different ranks says exactly what it means.
+
+**This replaced graphviz and DOT**, and the reasoning was the same for both.
+DOT is a language for describing *drawings*: ports, splines, rankdir,
+peripheries, a hundred attributes that exist because graphviz can draw a
+hundred things. This tool draws one thing. Everything past that was surface to
+keep generating correctly and never read back — and a foreign syntax in a tree
+written in a lisp, which meant quoting rules, identifier sanitising, and a
+parser nobody would write because the text only ever went one way: out, to a
+subprocess.
+
+**It round-trips**, which is the difference between a language and a
+serialiser. `v/render` writes a graph; `v/parse` reads it back to the same
+graph, and `src/layout.janet` puts that round trip on the *only* path to a
+picture. So the language cannot rot the way a debug-only format does, and
+`vz shot` is showing you exactly what the renderer saw.
+
+**The PEG is the spec** (`grammar`, in `src/v.janet`) — there is no second
+description of the syntax to drift from it. A bare word is anything that is
+not a delimiter, so `~.Otto`, `#ff4d6d` and `demo-api` all parse unescaped;
+strings are double-quoted and decode their escapes, which is the only place a
+space or a newline appears.
+
+### Two layouts
+
+```lisp
+(layout layered)   ; the default
+(layout force)
+```
+
+**layered** is Sugiyama, the algorithm `dot` ran, in about four hundred lines
+(`src/layout/layered.janet`): rank every node onto a layer so edges point one
+way, order each layer to cut crossings, place each node so parents sit over
+their children, route the edges that span more than one layer around what is
+in between. Cycles are broken by provisionally reversing the edges that close
+them, so a dependency loop draws as an arrow running back up the page rather
+than being silently rewritten.
+
+Three things in there are what closed the gap with `dot`, each one measured
+against `dot`'s own output on this repository's graph:
+
+- **A long edge is threaded through real bend points**, one per layer it
+  crosses, and those bends are placed *before* ordering — so they take part in
+  crossing reduction and get a column of their own. Inventing them afterwards
+  by interpolating along the straight line, which is what this did first, puts
+  the bends exactly where the line already was: 26 of 42 edges ran through a
+  node that had nothing to do with them.
+- **A node with no parent sinks to just above its children.** Longest-path
+  ranking is correct and reads badly — it stranded seventeen of thirty-three
+  nodes in the top row, and that row set the width of the whole picture.
+- **A node with no edges at all goes on a shelf above the graph.** It stays on
+  the graph, because "nothing you are looking at uses this" is a fact worth
+  drawing; it just does not get to widen the rank that is doing the work, and
+  it is read on the way in rather than found underneath afterwards.
+- **A group is one box, and the layout makes that box true.** A group says
+  nothing about layers — a group whose members land on four ranks is still one
+  group — so it gets one rect with its name on it once. Drawing a band per
+  layer, which is what this did first, was a workaround for the box being
+  *wrong* rather than for groups being layer-shaped: a single rect around
+  scattered members swallows whatever sits between them, and a group split
+  across two ranks then looked like two groups. So the layout keeps a group
+  over itself across layers and reserves its full width on every rank it
+  spans, evicting anything ungrouped that would land inside. The layer grows
+  rather than the box telling a lie.
+
+Sizes are fitted to what `dot` produced for the same labels rather than
+guessed. That sounds cosmetic and is not: `place-x` separates nodes by their
+drawn width, so an ellipse 78% too wide made *the layout* that much too wide.
+Together these took the picture from 2163×668 to 1190×745, against `dot`'s
+1140×629, and cut edge crossings from 44 to 19.
+
+What it deliberately does not do is what made graphviz big: no spline routing,
+no port constraints, no orthogonal edges. A dependency graph needs none of
+them.
+
+**force** lets nodes repel and edges pull until the picture settles. It shows
+relatedness rather than direction, so it reads better for a tangle than for a
+hierarchy — and it draws no group boxes, because a force layout has no reason
+to keep a group contiguous and a box around scattered members would claim a
+structure the picture does not have.
 
 ## The harness window
 
@@ -158,7 +287,7 @@ An agent working on this tool -- or you, from a second shell -- can type
 into a pane instead of opening a private connection to the image:
 
 ```bash
-./pane repl '(dev/reload "dot")'   # evaluate in the live image
+./pane repl '(dev/reload "layout")' # evaluate in the live image
 ./pane harness 'what changed?'     # type at the agent
 ./pane repl                        # just read what the pane shows
 ```
@@ -299,10 +428,12 @@ src/term/host.janet      the live session behind one pane -- pty, pump
                         server keeps it running
 src/term/client.janet    the client the HTTP routes talk through -- one per
                         pane -- and the wire protocol both ends agree on
-src/dot.janet       prefix matching, filtering, and the DOT that comes out
+src/select.janet    prefix matching and the filtering the config applies
+src/v.janet         the graph language: a PEG, a reader and a writer
 src/layout.janet    which layout draws the graph -- the seam between them
-src/layout/force.janet   nodes repel, edges pull; needs nothing installed
-src/layout/svg.janet     positions to a picture, in graphviz's SVG shape
+src/layout/layered.janet ranks, orders, places and routes -- the default
+src/layout/force.janet   nodes repel, edges pull; for a tangle, not a tree
+src/layout/svg.janet     positions to a picture, and the size of a label
 src/color.janet     the palette, the ramp, and WCAG-checked label ink
 src/config.janet    the sandbox the config runs in
 src/tilde.janet     rewriting ~ and #rrggbb past Janet's reader
@@ -319,7 +450,7 @@ pane                type into a pane from a shell, so agent work is visible
 tools/replay.mjs    run a captured session through the emulator, headlessly
 web/term.js         a terminal emulator, in the ~25 sequences agents emit
 web/                the page: vanilla HTML, CSS and JS, no build step
-test/               401 assertions, no framework
+test/               463 assertions, no framework
 bin/janet           the compiled runtime (gitignored build artifact)
 ```
 
@@ -330,8 +461,10 @@ the `:root` block at the top; the rest of the file refers to those and nothing
 else, so a new theme is a new `:root` block rather than a hunt through the
 rules. Edit and reload — there is no build step to run.
 
-The graph pane stays pale in both colour schemes on purpose: graphviz draws
-node labels in dark ink and has no idea what the page is doing.
+The graph pane stays pale in both colour schemes on purpose: label ink and
+group colours are computed for contrast against a pale page (`src/color.janet`)
+and baked into the SVG, which cannot know the page's theme. The dark theme
+inverts the whole SVG rather than trying to re-colour it.
 
 ## Tests
 
@@ -339,7 +472,7 @@ node labels in dark ink and has no idea what the page is doing.
 ./test/run
 ```
 
-277 assertions (plus 40 for the terminal emulator, under node), no test
+463 assertions (plus 82 for the terminal emulator, under node), no test
 framework — the harness is 70 lines in
 `test/harness.janet`, because a dependency is a dependency. It runs against
 the **vendored** runtime, not whatever `janet` is on PATH: a green run against

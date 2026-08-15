@@ -1,12 +1,20 @@
 # A force-directed layout, in about as few lines as a graph needs.
 #
-# WHY THIS EXISTS ALONGSIDE GRAPHVIZ. Not because it draws better -- it does
-# not, for a dependency graph -- but because it draws AT ALL with nothing
-# installed, and because writing it is what forces the seam: a layout is a
-# function from a graph to positions, and once that is true the choice of
-# layout is a config line rather than an assumption baked through the
-# renderer. The hierarchical layout that should eventually replace graphviz
-# slots into the same seam.
+# WHY THIS EXISTS ALONGSIDE THE LAYERED ONE. Not because it draws a
+# dependency graph better -- it does not, and `layered` is the default for
+# that reason. It earned its place twice over anyway:
+#
+# It FORCED THE SEAM. Writing a second layout is what turned "a layout" into
+# a function from a graph to positions, and once that was true the choice
+# became a config line rather than an assumption baked through the renderer.
+# The layered layout that later replaced graphviz slotted into the seam this
+# one opened, which is why that swap touched no route and no page.
+#
+# And it answers a different question. Layers show DIRECTION -- what depends
+# on what, in order. A force layout shows RELATEDNESS: what clusters with
+# what, whatever the arrows do. For a tangle with no honest hierarchy, that
+# is the more truthful picture, and it is the one place cycles and
+# disconnected pieces cost nothing at all.
 #
 # THE MODEL is the usual one and there is no cleverness in it: nodes repel
 # each other like charges, edges pull like springs, everything is dragged
