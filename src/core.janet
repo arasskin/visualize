@@ -48,8 +48,8 @@
 
 (import ./http)
 (import ./json)
-(import ./pane-client)
-(import ./pane-host)
+(import ./term/client :as term)
+(import ./term/host :as term-host)
 (import ./dev)
 (import ./faults)
 (import ./state)
@@ -133,13 +133,13 @@
 (defn main [& args]
   # ONE PROGRAM, TWO ROLES. Run plainly, this is the web server. Run with
   # --supervise it is the process that owns the terminal, spawned by the
-  # server's own client half and outliving it -- see src/pane-host.janet
+  # server's own client half and outliving it -- see src/term/host.janet
   # for why the pty cannot live here. Orchestrating both roles from this one
   # entry point means there is exactly one program to install, one to spawn,
   # and one place that knows how the pieces fit.
   (when (= (get args 1) "--supervise")
     (def path (or (get args 2) (error "usage: visualize --supervise <socket-path>")))
-    (pane-host/host path)
+    (term-host/host path)
     (os/exit 0))
 
   # The dev flags were consumed at load (they had to be -- see the top of
@@ -162,7 +162,7 @@
   (def page-born (os/time))
 
   # The terminal lives in another process, so that this one can be restarted
-  # without killing the agent -- see src/pane-client.janet. Told where to find
+  # without killing the agent -- see src/term/client.janet. Told where to find
   # it and how to start one, both of which only this function knows.
   #
   # ONE CLIENT PER PANE, BUILT THE SAME WAY. The two panes differ in their
@@ -175,13 +175,13 @@
   # we look on and the address we tell a new host to bind have to be the same
   # string, and two calls is two chances for that to stop being true.
   (defn pane-for [socket]
-    (pane-client/make-client socket
+    (term/make-client socket
                              [(string here "/bin/janet")
                               (string here "/src/core.janet")
                               "--supervise" socket]))
 
   (def agent-socket (socket-for root))
-  (def agent-client (pane-client/register "harness" (pane-for agent-socket)))
+  (def agent-client (term/register "harness" (pane-for agent-socket)))
 
   # The repl window's pty, behind a SECOND host. What it runs is ./repl,
   # which is nc against this server's own repl socket: the page gets a
@@ -191,7 +191,7 @@
   (def replterm-socket (socket-for root ".replterm.sock"))
   (def repl-client
     (when dev?
-      (pane-client/register "repl" (pane-for replterm-socket))))
+      (term/register "repl" (pane-for replterm-socket))))
   # Where this run's dev repl listens. Named after the port, so it is only
   # knowable once the server has bound one -- set below, read per request.
   (var repl-socket nil)
@@ -457,7 +457,7 @@
   # writes the lines, core hands them over, dev prints whatever it is given.
   (when dev?
     (dev/serve repl-socket this-env "visualize"
-               (string pane-client/equipment
+               (string term/equipment
                        "faults:   (faults/print-recent) what has gone wrong lately\n")))
 
   # CTRL-C TAKES THE AGENT WITH IT, and this is the only thing that does.

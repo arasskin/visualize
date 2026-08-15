@@ -7,13 +7,13 @@
 # that the child gets a REAL terminal, that typing reaches it, that the size
 # can be changed, and that the thing dies when told to.
 
-(import ../src/pty)
+(import ../src/term/pty)
 (import ./harness :as t)
 
 (defn- capture
   ``Run a shell command on a pty and return everything it printed.
 
-  The pump BLOCKS, so it gets its own thread -- see the note in src/pty.janet.
+  The pump BLOCKS, so it gets its own thread -- see the note in src/term/pty.janet.
   Reading from the main thread instead is what starved the scheduler in
   development, and the symptom was a server that stopped answering while the
   terminal was busy.``

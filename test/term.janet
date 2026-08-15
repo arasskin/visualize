@@ -12,8 +12,8 @@
 # are spawning, framing and reconnection, and all three live on the wire
 # between the two processes.
 
-(import ../src/pane-client)
-(import ../src/pane-host)
+(import ../src/term/client :as term)
+(import ../src/term/host :as term-host)
 (import ../src/stamp)
 (import ./harness :as check)
 
@@ -26,7 +26,7 @@
 # these tests said (poll ...) while core's repl pane said (:poll
 # client ...) -- two spellings of one operation. There is one spelling now.
 (def client
-  (pane-client/make-client
+  (term/make-client
     socket [(string root "/bin/janet") (string root "/src/core.janet")
             "--supervise" socket]))
 
@@ -212,7 +212,7 @@
              (try (:write conn "{\"partial\": tr") ([_] nil))
              (ev/sleep 0.2)
              (try (:close conn) ([_] nil)))))
-  (def broken (pane-client/make-client dead ["/bin/sh" "-c" "true"]))
+  (def broken (term/make-client dead ["/bin/sh" "-c" "true"]))
   (def answer (:state broken))
   (check/ok (not (answer :running))
             "a half-line reply is a failure, not a value")
@@ -291,7 +291,7 @@
   (start ["/bin/sh" "-c" "echo SURVIVOR; sleep 5"] (os/cwd) 24 80)
   (wait-for |(string/find "SURVIVOR" $))
   (def restarted
-    (pane-client/make-client
+    (term/make-client
       socket [(string root "/bin/janet") (string root "/src/core.janet")
               "--supervise" socket]))
   (def now (:state restarted))
@@ -430,15 +430,15 @@
   # Pure half of the fix: a read() splits the stream wherever it likes, so
   # the scanner must find a query that arrives half in one chunk and half in
   # the next -- and find it exactly once.
-  (check/is= [1 ""] (pane-host/da1-queries "" "\e[c"))
-  (check/is= [1 ""] (pane-host/da1-queries "" "before \e[0c after"))
-  (check/is= [2 ""] (pane-host/da1-queries "" "\e[c\e[c"))
-  (check/is= [0 "\e["] (pane-host/da1-queries "" "output ends \e["))
-  (check/is= [1 ""] (pane-host/da1-queries "\e[" "c and more"))
-  (check/is= [0 "\e[0"] (pane-host/da1-queries "\e[" "0"))
-  (check/is= [1 ""] (pane-host/da1-queries "\e[0" "c"))
-  (check/is= [0 ""] (pane-host/da1-queries "" "\e[0m is a colour, not a query"))
-  (check/is= [0 ""] (pane-host/da1-queries "\e[" "2J is a clear, not a query")))
+  (check/is= [1 ""] (term-host/da1-queries "" "\e[c"))
+  (check/is= [1 ""] (term-host/da1-queries "" "before \e[0c after"))
+  (check/is= [2 ""] (term-host/da1-queries "" "\e[c\e[c"))
+  (check/is= [0 "\e["] (term-host/da1-queries "" "output ends \e["))
+  (check/is= [1 ""] (term-host/da1-queries "\e[" "c and more"))
+  (check/is= [0 "\e[0"] (term-host/da1-queries "\e[" "0"))
+  (check/is= [1 ""] (term-host/da1-queries "\e[0" "c"))
+  (check/is= [0 ""] (term-host/da1-queries "" "\e[0m is a colour, not a query"))
+  (check/is= [0 ""] (term-host/da1-queries "\e[" "2J is a clear, not a query")))
 
 (check/test "a DA1 query is answered, page or no page"
   # THE STARTUP FREEZE. claude sends ESC [ c and waits for the terminal to

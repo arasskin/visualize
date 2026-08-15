@@ -3,7 +3,7 @@
 # THIS FILE IS THE SERVER PROCESS. It speaks to a pane host over a unix
 # socket, one line of JSON each way, and knows how to start one that outlives
 # it. The session it talks about -- the pty, the pump thread, the backlog --
-# is owned by ./pane-host.janet in another process entirely. ("Supervisor"
+# is owned by ./host.janet in another process entirely. ("Supervisor"
 # survives in prose throughout this file and its neighbours: it is still the
 # right English word for a process that owns and outlives a session, and
 # --supervise is still the flag that starts one. Only the files changed
@@ -26,7 +26,7 @@
 # The HTTP routes in src/core.janet only ever see the API at the bottom:
 # configure, start, stop, send, resize, redraw, state, since, poll, shutdown.
 
-(import ./json)
+(import ../json)
 
 # -- the client --------------------------------------------------------------
 
@@ -452,15 +452,15 @@
 # dev.janet is about the repl -- a socket, an evaluator, a debugger, hot
 # reload, none of it terminal-specific. The repl reaches these the way it
 # reaches everything else: it evaluates in an env whose proto is the server's
-# own, so `(pane-client/stats)` needs no import and dev.janet stays liftable
+# own, so `(term/stats)` needs no import and dev.janet stays liftable
 # into a program that has no terminal at all.
 
-(def- here (os/realpath (string (dyn :current-file) "/../..")))
+(def- here (os/realpath (string (dyn :current-file) "/../../..")))
 
 # The panes this server made, by name, so the repl can ask about one without
 # the caller having to hold its client. Registered by core as it builds them;
 # a plain table because a person at a prompt should be able to see what is
-# there with (keys pane-client/panes).
+# there with (keys term/panes).
 (def panes @{})
 
 (defn register
@@ -519,7 +519,7 @@
   (def rows (get now "rows" 24))
   (def cols (get now "cols" 80))
   (printf "%d bytes -> %s (recorded at %dx%d)" (length text) path rows cols)
-  (printf "replay: (pane-client/replay nil %v) or: node %s/tools/replay.mjs %s --rows %d --cols %d"
+  (printf "replay: (term/replay nil %v) or: node %s/tools/replay.mjs %s --rows %d --cols %d"
           path here path rows cols)
   path)
 
@@ -552,6 +552,6 @@
 (def equipment
   ``The banner lines describing the above, handed to dev/serve by core.janet
   so the repl advertises the terminal's tools without knowing what they are.``
-  (string "panes:    (pane-client/stats \"harness\") op timings both sides\n"
-          "          (pane-client/dump \"harness\") capture it · (pane-client/replay\n"
-          "          \"harness\" path) re-render a capture · pane-client/panes\n"))
+  (string "panes:    (term/stats \"harness\") op timings both sides\n"
+          "          (term/dump \"harness\") capture it · (term/replay\n"
+          "          \"harness\" path) re-render a capture · term/panes\n"))
