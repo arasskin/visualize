@@ -420,3 +420,12 @@
     (for i 0 (- (length sorted) 1)
       (t/ok (>= (- (sorted (+ i 1)) (sorted i)) 69)
             "neighbours on a row stay a node apart"))))
+
+# NOT TESTED HERE: the pass that gives back the slack a group's claim opens
+# (see `place-x`). Its effect is real and measured -- on this repository's own
+# graph it moved `src/watchdog` from 275 units away from `src/term/host` to 94,
+# and took the edges crossing the `web` box from two to none -- but every
+# minimal graph tried here lays out the same with the pass on or off, so a test
+# built on one would assert nothing. It needs a group genuinely narrower on one
+# rank than another AND enough of a tail after it for the shove to accumulate,
+# which so far only the real graph produces.

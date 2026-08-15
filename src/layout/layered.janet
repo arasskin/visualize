@@ -462,30 +462,39 @@
           (when (and (<= (s :top) index) (<= index (s :low)))
             (array/push claims [key (s :x0) (s :x1)])))
         (unless (empty? claims)
-          (each name names
+          # Which side of the group each node sits on IN THE ORDER. A node
+          # ordered before every member belongs out the left; one ordered
+          # after them belongs out the right. Evicting against that is what
+          # makes the separation below cascade: it can only push right, so a
+          # node sent left past its predecessors gets shoved back to the far
+          # end of the layer to restore the order -- which is how
+          # `src/watchdog` ended up last on its rank, right of `web/term`,
+          # with its edge to `src/term/host` crossing the whole `web` box.
+          (def slot @{})
+          (eachp [i name] names (put slot name i))
+          (eachp [i name] names
             (unless (group-of name)
               (def half (/ (widths name) 2))
-              (each [_ x0 x1] claims
+              (each [key x0 x1] claims
                 # Overlapping the claim at all is enough to be inside the
                 # box once the renderer insets it.
                 (when (and (< (- (x name) half) x1) (> (+ (x name) half) x0))
-                  # OUT THE SIDE ITS EDGES POINT. Evicting by which half of
-                  # the box the node happens to sit in ignores the only thing
-                  # that says where it belongs -- and sent `src/parser` out
-                  # the right side of `src.term` when the one node it
-                  # connects to, `src/scan`, was away to the left. Its edge
-                  # then crossed the group to get there. The neighbours it is
-                  # joined to decide; only a node with none falls back to
-                  # whichever side is nearer.
-                  (def near (array ;(up name) ;(down name)))
-                  (def pull (if (empty? near)
+                  # The order decides the side. A node with no member on this
+                  # layer to compare against falls back to where its own edges
+                  # pull it, which is the only other thing that knows.
+                  (def mates (filter |(= key (group-of $)) names))
+                  (def left?
+                    (if (empty? mates)
+                      (let [near (array ;(up name) ;(down name))]
+                        (< (if (empty? near)
                              (x name)
-                             (/ (sum (map |(or (x $) (x name)) near))
-                                (length near))))
+                             (/ (sum (map |(or (x $) (x name)) near)) (length near)))
+                           (/ (+ x0 x1) 2)))
+                      (< i (min ;(map |(slot $) mates)))))
                   (put x name
-                       (if (< pull (/ (+ x0 x1) 2))
-                         (- x0 half gap)      # its work is to the left
-                         (+ x1 half gap)))))))) # its work is to the right
+                       (if left?
+                         (- x0 half gap)      # ordered before the group
+                         (+ x1 half gap)))))))) # ordered after it
 
         # Re-separate the layer, treating a claimed range as occupied.
         #
@@ -520,7 +529,45 @@
         (each index indexes
           (def here (filter |(= key (group-of $)) (ordered index)))
           (when (= 1 (length here))
-            (put x (first here) mid))))))
+            (put x (first here) mid))))
+
+      # CLOSE THE SLACK THE EVICTION OPENED, right to left.
+      #
+      # A claim is as wide as the group is over ALL its ranks, so on a rank
+      # holding one member it is wider than that member needs: everything
+      # after it gets pushed clear of the whole two-rank width and then
+      # stays there, because the separation above only ever pushes right.
+      # `src/stamp` landed 63 units beyond where it had to, `src/watchdog`
+      # inherited the shove and ended up last on its rank -- right of
+      # `web/term`, with its edge to `src/term/host` crossing the `web` box
+      # to get back.
+      #
+      # So every ungrouped node slides back left as far as its left
+      # neighbour and the claims allow. It cannot reorder the layer (it stops
+      # at the neighbour) and it cannot re-enter a box (it stops at the
+      # claim); it only gives back room nothing is using.
+      (each index indexes
+        (def names (ordered index))
+        (def claims @[])
+        (eachp [_ s] span
+          (when (and (<= (s :top) index) (<= index (s :low)))
+            (array/push claims [(s :x0) (s :x1)])))
+        (var limit nil)   # the left edge of the node after this one
+        (each name (reverse names)
+          (def half (/ (widths name) 2))
+          (unless (group-of name)
+            (var want (if limit (- limit gap half) (x name)))
+            (set want (min want (x name)))   # only ever move left
+            # Not back into a box, and not past whatever precedes it.
+            (each [x0 x1] claims
+              (when (and (< (- want half) x1) (> (+ want half) x0))
+                (set want (min want (- x0 half gap)))))
+            (def i (find-index |(= $ name) names))
+            (when (> i 0)
+              (def l (names (- i 1)))
+              (set want (max want (+ (x l) (/ (widths l) 2) gap half))))
+            (put x name want))
+          (set limit (- (x name) (/ (widths name) 2)))))))
 
   (for pass 0 4
     (each index (slice indexes 1) (compact index :down))
