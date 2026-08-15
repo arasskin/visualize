@@ -286,7 +286,17 @@
                                      (put environment "PATH"
                                           (string tools-dir ":"
                                                   (or (environment "PATH") "")))
-                                     (put environment "VISUALIZE_ROOT" directory))
+                                     (put environment "VISUALIZE_ROOT" directory)
+                                     # ANNOUNCED, because an agent cannot
+                                     # use what it does not know exists. In
+                                     # the environment rather than written
+                                     # into the session: the backlog is the
+                                     # program's output and a note from us
+                                     # is not that -- it would count as
+                                     # chunks the page must render, which a
+                                     # test caught within the minute.
+                                     (put environment "VISUALIZE_TOOLS"
+                                          "vz: scan|faults|eval|pane|state|where"))
                                    environment))
                     ([e] {:error (string e)})))
       (ev/give reply opened)
@@ -298,14 +308,6 @@
     :nt (ev/thread-chan 2))
 
   (def opened (ev/take ready))
-  # ANNOUNCE THE TOOLS INTO THE SESSION ITSELF. An agent cannot use what it
-  # does not know exists, and the one channel every harness reads is its own
-  # terminal. Written to the BACKLOG rather than the pty: it is a note from
-  # the program to whoever is reading, not input for the program to run.
-  (unless (opened :error)
-    (array/push backlog
-                (string "\e[2m-- visualize: `vz` is on PATH."
-                        " scan | faults | eval | pane | state | where --\e[0m\r\n")))
   (if (opened :error)
     (do (set session nil)
         (set output nil)
