@@ -1,4 +1,4 @@
-# The detached session -- a pty, a pump thread, and the backlog a page reads --
+# The supervisor -- a pty, a pump thread, and the backlog a page reads --
 # exercised across the socket that separates it from the server.
 #
 # Driven with /bin/sh rather than a real agent, for the same reasons the pty
@@ -13,7 +13,7 @@
 # between the two processes.
 
 (import ../src/harness)
-(import ../src/detached-session :as session)
+(import ../src/supervisor)
 (import ../src/stamp)
 (import ./harness :as check)
 
@@ -384,15 +384,15 @@
   # Pure half of the fix: a read() splits the stream wherever it likes, so
   # the scanner must find a query that arrives half in one chunk and half in
   # the next -- and find it exactly once.
-  (check/is= [1 ""] (session/da1-queries "" "\e[c"))
-  (check/is= [1 ""] (session/da1-queries "" "before \e[0c after"))
-  (check/is= [2 ""] (session/da1-queries "" "\e[c\e[c"))
-  (check/is= [0 "\e["] (session/da1-queries "" "output ends \e["))
-  (check/is= [1 ""] (session/da1-queries "\e[" "c and more"))
-  (check/is= [0 "\e[0"] (session/da1-queries "\e[" "0"))
-  (check/is= [1 ""] (session/da1-queries "\e[0" "c"))
-  (check/is= [0 ""] (session/da1-queries "" "\e[0m is a colour, not a query"))
-  (check/is= [0 ""] (session/da1-queries "\e[" "2J is a clear, not a query")))
+  (check/is= [1 ""] (supervisor/da1-queries "" "\e[c"))
+  (check/is= [1 ""] (supervisor/da1-queries "" "before \e[0c after"))
+  (check/is= [2 ""] (supervisor/da1-queries "" "\e[c\e[c"))
+  (check/is= [0 "\e["] (supervisor/da1-queries "" "output ends \e["))
+  (check/is= [1 ""] (supervisor/da1-queries "\e[" "c and more"))
+  (check/is= [0 "\e[0"] (supervisor/da1-queries "\e[" "0"))
+  (check/is= [1 ""] (supervisor/da1-queries "\e[0" "c"))
+  (check/is= [0 ""] (supervisor/da1-queries "" "\e[0m is a colour, not a query"))
+  (check/is= [0 ""] (supervisor/da1-queries "\e[" "2J is a clear, not a query")))
 
 (check/test "a DA1 query is answered, page or no page"
   # THE STARTUP FREEZE. claude sends ESC [ c and waits for the terminal to

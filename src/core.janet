@@ -53,7 +53,7 @@
 (import ./parsers)
 (import ./json)
 (import ./harness)
-(import ./detached-session :as session)
+(import ./supervisor)
 (import ./dev)
 (import ./stamp)
 (import ./watchdog)
@@ -261,13 +261,13 @@
 (defn main [& args]
   # ONE PROGRAM, TWO ROLES. Run plainly, this is the web server. Run with
   # --supervise it is the process that owns the terminal, spawned by the
-  # server's own client half and outliving it -- see src/detached-session.janet
+  # server's own client half and outliving it -- see src/supervisor.janet
   # for why the pty cannot live here. Orchestrating both roles from this one
   # entry point means there is exactly one program to install, one to spawn,
   # and one place that knows how the pieces fit.
   (when (= (get args 1) "--supervise")
     (def path (or (get args 2) (error "usage: visualize --supervise <socket-path>")))
-    (session/supervise path)
+    (supervisor/supervise path)
     (os/exit 0))
 
   # The dev flags were consumed at load (they had to be -- see the top of
@@ -401,7 +401,7 @@
       # path for a reload and the live path for a running session. SSE would
       # need a second mechanism for input and a way to resume a dropped
       # stream, which is this endpoint again with more parts.
-      (and (= method "POST") (= path "/harness/start"))
+      (and (= method "POST") (= path "/pane/harness/start"))
       (guarded (fn []
                  (def sent (json/decode (request :body)))
                  (def rows (math/floor (or (get sent "rows") 24)))
@@ -409,10 +409,10 @@
                  ["200 OK" "application/json"
                   (json/encode (harness/start (harness-argv) root rows cols))]))
 
-      (and (= method "POST") (= path "/harness/stop"))
+      (and (= method "POST") (= path "/pane/harness/stop"))
       (guarded (fn [] ["200 OK" "application/json" (json/encode (harness/stop))]))
 
-      (and (= method "POST") (= path "/harness/input"))
+      (and (= method "POST") (= path "/pane/harness/input"))
       (guarded (fn []
                  (def sent (json/decode (request :body)))
                  # `at` turns this into "type, and tell me what came back" --
@@ -424,19 +424,19 @@
                  ["200 OK" "application/json"
                   (json/encode (or echo {"ok" true}))]))
 
-      (and (= method "POST") (= path "/harness/redraw"))
+      (and (= method "POST") (= path "/pane/harness/redraw"))
       (guarded (fn []
                  (harness/redraw)
                  ["200 OK" "application/json" (json/encode {"ok" true})]))
 
-      (and (= method "POST") (= path "/harness/resize"))
+      (and (= method "POST") (= path "/pane/harness/resize"))
       (guarded (fn []
                  (def sent (json/decode (request :body)))
                  (harness/resize (math/floor (or (get sent "rows") 24))
                                  (math/floor (or (get sent "cols") 100)))
                  ["200 OK" "application/json" (json/encode {"ok" true})]))
 
-      (and (= method "POST") (= path "/harness/poll"))
+      (and (= method "POST") (= path "/pane/harness/poll"))
       (guarded (fn [] (poll-answer harness/poll (request :body))))
 
       # -- the repl window --------------------------------------------------
@@ -446,7 +446,7 @@
       # knows it is a repl rather than an agent. Guarded by `dev?` first, so
       # without dev mode these fall through to the 404 like any other
       # unserved path.
-      (and dev? (= method "POST") (= path "/repl/start"))
+      (and dev? (= method "POST") (= path "/pane/repl/start"))
       (guarded (fn []
                  (def sent (json/decode (request :body)))
                  ["200 OK" "application/json"
@@ -457,11 +457,11 @@
                             (math/floor (or (get sent "rows") 24))
                             (math/floor (or (get sent "cols") 100))))]))
 
-      (and dev? (= method "POST") (= path "/repl/stop"))
+      (and dev? (= method "POST") (= path "/pane/repl/stop"))
       (guarded (fn [] ["200 OK" "application/json"
                        (json/encode (:stop repl-client))]))
 
-      (and dev? (= method "POST") (= path "/repl/input"))
+      (and dev? (= method "POST") (= path "/pane/repl/input"))
       (guarded (fn []
                  (def sent (json/decode (request :body)))
                  (def echo (:send repl-client
@@ -472,12 +472,12 @@
                  ["200 OK" "application/json"
                   (json/encode (or echo {"ok" true}))]))
 
-      (and dev? (= method "POST") (= path "/repl/redraw"))
+      (and dev? (= method "POST") (= path "/pane/repl/redraw"))
       (guarded (fn []
                  (:redraw repl-client)
                  ["200 OK" "application/json" (json/encode {"ok" true})]))
 
-      (and dev? (= method "POST") (= path "/repl/resize"))
+      (and dev? (= method "POST") (= path "/pane/repl/resize"))
       (guarded (fn []
                  (def sent (json/decode (request :body)))
                  (:resize repl-client
@@ -485,7 +485,7 @@
                           (math/floor (or (get sent "cols") 100)))
                  ["200 OK" "application/json" (json/encode {"ok" true})]))
 
-      (and dev? (= method "POST") (= path "/repl/poll"))
+      (and dev? (= method "POST") (= path "/pane/repl/poll"))
       (guarded (fn []
                  (poll-answer (fn [at gen wait] (:poll repl-client at gen wait))
                               (request :body))))

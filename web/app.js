@@ -598,9 +598,16 @@ if (Object.keys(faults).length) requestAnimationFrame(() => bar.click());
 // input and a way to resume when it drops.
 //
 // Written once and instantiated twice: the agent harness and the dev repl are
-// the same pane speaking to different endpoint prefixes -- /harness/* drives
-// the supervisor's agent pty, /repl/* a pty running ./repl against this
-// server's own image. Nothing in here knows which one it is.
+// the same pane speaking to different endpoint prefixes -- /pane/harness/*
+// drives the supervisor's agent pty, /pane/repl/* a pty running ./repl
+// against this server's own image. Nothing in here knows which one it is.
+//
+// THE /pane/ PREFIX EARNS ITS KEYSTROKES. "repl" names three things in this
+// project -- the Janet repl the server hosts on a unix socket, the ./repl
+// script that attaches a terminal to it, and this browser pane that runs
+// that script in a pty -- so a route called /repl/poll read like it polled
+// the Janet image rather than a terminal window. /pane/repl/poll cannot be
+// misread: whatever else is going on, this is a pane talking.
 
 function makeTerminalPane(root, prefix) {
   const stateLine = root.querySelector('.state');
@@ -689,7 +696,7 @@ function makeTerminalPane(root, prefix) {
     // poll chain -- guarded by pollInFlight -- then waits on it forever: no
     // polls, no error, a cursor still blinking because the blink is CSS. An
     // aborted request rejects like any failure and lands in the retry path.
-    const response = await fetch(`/${prefix}/${path}?k=${encodeURIComponent(window.TOKEN)}`, {
+    const response = await fetch(`/pane/${prefix}/${path}?k=${encodeURIComponent(window.TOKEN)}`, {
       method: 'POST',
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),

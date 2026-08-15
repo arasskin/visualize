@@ -3,7 +3,7 @@
 # THIS FILE IS THE SERVER PROCESS. It speaks to a supervisor over a unix
 # socket, one line of JSON each way, and knows how to start one that outlives
 # it. The session it talks about -- the pty, the pump thread, the backlog --
-# is owned by ./detached-session.janet in another process entirely.
+# is owned by ./supervisor.janet in another process entirely.
 #
 # THE WIRE IS THE CONTRACT, and it is the ONLY thing shared: this file does
 # not import that one and cannot call into it. The op names and reply shapes

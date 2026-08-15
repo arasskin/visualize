@@ -1,8 +1,8 @@
-# The detached session: owning a live pty, and answering for it over a socket.
+# The supervisor: owning a live pty, and answering for it over a socket.
 #
-# DETACHED IS THE WHOLE POINT, and it is why this is a file of its own. The
-# session runs in a process the server does not own -- `visualize
-# --supervise` starts it and it outlives every server that talks to it. A pty's master fd belongs to the process that
+# THIS FILE IS A WHOLE PROCESS. `visualize --supervise` starts it and it
+# outlives every server that talks to it -- which is the point, and the
+# reason the session cannot simply live in the server. A pty's master fd belongs to the process that
 # called forkpty and cannot be passed to a later one, so "restart the server,
 # keep the agent" is only possible if the server never holds the fd. Nothing
 # here ever runs in the server; the client that speaks to it lives in
