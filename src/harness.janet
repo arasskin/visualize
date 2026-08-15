@@ -490,6 +490,96 @@
   {"server-asks" (:stats default-client)
    "supervisor" (:remote-stats default-client)})
 
+# -- the debugging equipment ---------------------------------------------------
+# The hang hunt's tools, kept where the next investigator -- human or model --
+# will find them: at the repl, named in its connection banner (see
+# `equipment` below, which core.janet hands to dev/serve).
+#
+# THESE LIVE HERE, NOT IN dev.janet, because their subject is the session and
+# dev.janet is about the repl -- a socket, an evaluator, a debugger, hot
+# reload, none of it terminal-specific. The repl reaches these the way it
+# reaches everything else: it evaluates in an env whose proto is the server's
+# own, so `(harness/stats)` needs no import and dev.janet stays liftable into
+# a program that has no terminal at all.
+
+(def- here (os/realpath (string (dyn :current-file) "/../..")))
+
+(defn print-stats
+  ``Print both sides' op timings: the server's asks (turn-wait vs talk -- the
+  split that separates "queued behind a wedged exchange" from "the wedged
+  exchange itself") and the supervisor's handle table, plus its queue depths.
+  Numbers survive since each process started.``
+  []
+  (def all (stats))
+  (print "server asks (op: count, worst turn-wait, worst talk):")
+  (eachp [op entry] (all "server-asks")
+    (printf "  %-12s %6d  %6.3fs  %6.3fs" op (entry :count)
+            (entry :worst-turn) (entry :worst-talk))
+    (each slow (entry :slow)
+      (printf "      slow: turn %.2fs talk %.2fs" (slow :turn) (slow :talk))))
+  (def sup (all "supervisor"))
+  (if-not sup
+    (print "supervisor: unreachable (or predates the stats op)")
+    (do
+      (printf "supervisor (stamp %s, up %.0fs, unsent %d, chunks %d):"
+              (get sup "stamp" "?") (get sup "uptime" 0)
+              (get sup "unsent" 0) (get sup "chunks" 0))
+      (eachp [op entry] (get sup "ops" {})
+        (printf "  %-12s %6d  %6.3fs worst" op (get entry "count" 0)
+                (get entry "worst" 0))
+        (each slow (get entry "slow" [])
+          (printf "      slow: %.2fs" (get slow "took" 0))))))
+  nil)
+
+(defn dump
+  ``Write the live session's whole backlog -- the recording of everything the
+  program drew -- to `path`, and say how to replay it. This is the capture
+  half of the forensic loop that convicted the wrap and alternate-screen
+  bugs; `replay` is the other half.``
+  [&opt path]
+  (default path (string "/tmp/visualize-dump-" (os/time) ".bin"))
+  (def now (poll 0))
+  (def text (get now "text" ""))
+  (spit path text)
+  (def rows (get now "rows" 24))
+  (def cols (get now "cols" 80))
+  (printf "%d bytes -> %s (recorded at %dx%d)" (length text) path rows cols)
+  (printf "replay: (harness/replay %v) or: node %s/tools/replay.mjs %s --rows %d --cols %d"
+          path here path rows cols)
+  path)
+
+(defn replay
+  ``Run a capture through the emulator headlessly and report suspects --
+  escape-like text on the final screen, the signature of a torn stream or a
+  parser gap. Geometry defaults to the live session's, since a recording
+  replayed at the wrong size scatters absolute cursor positions.``
+  [path &opt rows cols]
+  # `state`, not `poll`: the geometry is two integers, and poll would drag
+  # the entire backlog over the socket to deliver them.
+  (unless (and rows cols)
+    (def now (state))
+    (default rows (get now :rows 24))
+    (default cols (get now :cols 80)))
+  # Spawned with a pipe rather than executed: the child's stdout is the
+  # PROCESS's stdout -- the server's log -- while the repl reader is on the
+  # other end of a socket. Read and re-print, so the verdict lands where the
+  # question was asked.
+  (def proc (os/spawn ["node" (string here "/tools/replay.mjs") path
+                       "--rows" (string rows) "--cols" (string cols)]
+                      :p {:out :pipe :err :pipe}))
+  (def said (:read (proc :out) :all))
+  (def complained (:read (proc :err) :all))
+  (os/proc-wait proc)
+  (when said (prin said))
+  (when (and complained (pos? (length complained))) (prin complained))
+  nil)
+
+(def equipment
+  ``The banner lines describing the above, handed to dev/serve by core.janet
+  so the repl advertises the terminal's tools without knowing what they are.``
+  (string "session:  (harness/print-stats) op timings both sides\n"
+          "          (harness/dump) capture it · (harness/replay path) re-render a capture\n"))
+
 (defn shutdown
   "End the supervisor, killing the agent with it. Called on ctrl-c only."
   []

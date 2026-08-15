@@ -6,7 +6,7 @@
 #     ./repl <socket>     a specific one
 #
 # Every dev-mode server hosts a repl on a unix socket, named for the project
-# and the port the server bound -- see visualize/dev.janet, and the startup
+# and the port the server bound -- see src/dev.janet, and the startup
 # banner, which prints the path. With no argument this connects to the newest
 # socket, which is the right one whenever a single server is running; with
 # more than one up, pass the path you mean. The repl window in the page uses

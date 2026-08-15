@@ -551,7 +551,11 @@
   # taken name on purpose. The port is the one thing the walk just made
   # unique, which is why this waits until after the bind.
   (when dev? (set repl-socket (socket-for root (string ".repl." bound ".sock"))))
-  (when dev? (dev/serve repl-socket this-env))
+  # The repl advertises the session tools without importing them: harness
+  # writes the lines, core hands them over, dev prints whatever it is given.
+  # The repl advertises the session tools without importing them: harness
+  # writes the lines, core hands them over, dev prints whatever it is given.
+  (when dev? (dev/serve repl-socket this-env "visualize" harness/equipment))
 
   # CTRL-C TAKES THE AGENT WITH IT, and this is the only thing that does.
   #
