@@ -219,7 +219,7 @@
   supervisor's, and the newest server wins it.
 
   `banner` is extra lines for the greeting -- the caller's chance to
-  advertise its own tools (see `harness/equipment`) without this module
+  advertise its own tools (see `pane-client/equipment`) without this module
   having to know they exist.``
   [path env &opt name banner]
   (default name "visualize")

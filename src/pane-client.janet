@@ -1,4 +1,4 @@
-# The harness: talking to whoever owns a live session.
+# The pane client: talking to the host that owns a pane's live session.
 #
 # THIS FILE IS THE SERVER PROCESS. It speaks to a pane host over a unix
 # socket, one line of JSON each way, and knows how to start one that outlives
@@ -6,8 +6,16 @@
 # is owned by ./pane-host.janet in another process entirely. ("Supervisor"
 # survives in prose throughout this file and its neighbours: it is still the
 # right English word for a process that owns and outlives a session, and
-# --supervise is still the flag that starts one. Only the file changed its
-# name, to say which pane's session it hosts.)
+# --supervise is still the flag that starts one. Only the files changed
+# names, to say which side of the wire each one is.)
+#
+# ONE CLIENT PER PANE, AND NO DEFAULT. This module used to expose both
+# `make-client` and a module-level singleton with wrappers -- so core drove
+# the agent pane through (harness/poll ...) and the repl pane through
+# (:poll repl-client ...), the same operation written two ways, and adding
+# a third pane meant choosing which. Clients are values now; core makes one
+# per pane and hands it to the routes. `register` names them for the repl,
+# which is the one caller that cannot hold a client of its own.
 #
 # THE WIRE IS THE CONTRACT, and it is the ONLY thing shared: this file does
 # not import that one and cannot call into it. The op names and reply shapes
@@ -424,75 +432,6 @@
        (set parked-conn nil))
      nil)})
 
-# -- the default client -------------------------------------------------------
-# The agent harness's supervisor, which every module-level function below
-# drives. One implicit handle rather than one threaded through every HTTP
-# route, because the routes predate `make-client` and there is nothing for
-# them to choose between: the server has exactly one agent terminal.
-
-(var- default-client nil)
-
-(defn configure
-  ``Where the agent's supervisor is, and how to start one if it is not
-  running. Replaces the default client whole, so a connection pinned to the
-  OLD socket can never answer for the new one.``
-  [path argv]
-  (set default-client (make-client path argv)))
-
-(defn start
-  "Start `argv` on the supervisor's pty, replacing any session running."
-  [argv root &opt rows cols]
-  (:start default-client argv root rows cols))
-
-(defn stop
-  "Stop the harness, leaving the supervisor up for the next start."
-  []
-  (:stop default-client))
-
-(defn send
-  ``Type at the harness.
-
-  With `at`, the reply carries the ECHO -- everything the program printed in
-  response, in the same round trip; without it, nil. `quiet` skips the echo
-  wait entirely -- for mouse reports, whose answer arrives on the parked
-  poll. See :send in `make-client`.``
-  [text &opt at quiet]
-  (:send default-client text at quiet))
-
-(defn resize
-  "Tell the harness its window changed size."
-  [rows cols]
-  (:resize default-client rows cols))
-
-(defn redraw
-  ``Ask the program to repaint its screen -- what a reattaching page needs,
-  since a byte-history replay cannot reconstruct a trimmed or resized frame.``
-  []
-  (:redraw default-client))
-
-(defn state
-  "What the page needs to know about the session, without its output."
-  []
-  (:state default-client))
-
-(defn since
-  "Everything the harness has printed since chunk `at`. Returns [text next]."
-  [at]
-  (:since default-client at))
-
-(defn poll
-  "The whole answer to one `/harness/poll`, in a single round trip."
-  [at &opt generation wait]
-  (:poll default-client at generation wait))
-
-(defn stats
-  ``Both sides' op timings: this process's asks (turn-wait/talk split per
-  op) and the supervisor's own handle table, fetched over the wire. The
-  repl prints this via (dev/stats).``
-  []
-  {"server-asks" (:stats default-client)
-   "supervisor" (:remote-stats default-client)})
-
 # -- the debugging equipment ---------------------------------------------------
 # The hang hunt's tools, kept where the next investigator -- human or model --
 # will find them: at the repl, named in its connection banner (see
@@ -502,32 +441,53 @@
 # dev.janet is about the repl -- a socket, an evaluator, a debugger, hot
 # reload, none of it terminal-specific. The repl reaches these the way it
 # reaches everything else: it evaluates in an env whose proto is the server's
-# own, so `(harness/stats)` needs no import and dev.janet stays liftable into
-# a program that has no terminal at all.
+# own, so `(pane-client/stats)` needs no import and dev.janet stays liftable
+# into a program that has no terminal at all.
 
 (def- here (os/realpath (string (dyn :current-file) "/../..")))
 
-(defn print-stats
-  ``Print both sides' op timings: the server's asks (turn-wait vs talk -- the
-  split that separates "queued behind a wedged exchange" from "the wedged
-  exchange itself") and the supervisor's handle table, plus its queue depths.
-  Numbers survive since each process started.``
-  []
-  (def all (stats))
+# The panes this server made, by name, so the repl can ask about one without
+# the caller having to hold its client. Registered by core as it builds them;
+# a plain table because a person at a prompt should be able to see what is
+# there with (keys pane-client/panes).
+(def panes @{})
+
+(defn register
+  ``Give a client a name the repl can use: (stats "harness"), (dump "repl").
+  Returns the client, so a caller can register and bind in one expression.``
+  [name client]
+  (put panes name client)
+  client)
+
+(defn- named
+  "The client called `name`, or the only one when there is just one."
+  [name]
+  (or (get panes name)
+      (if (and (nil? name) (= 1 (length panes)))
+        (first (values panes))
+        (errorf "no pane named %v -- try one of %j" name (keys panes)))))
+
+(defn stats
+  ``Print both sides' op timings for one pane: the server's asks (turn-wait
+  vs talk -- the split that separates "queued behind a wedged exchange" from
+  "the wedged exchange itself") and the host's handle table, plus its queue
+  depths. Numbers survive since each process started.``
+  [&opt name]
+  (def client (named name))
   (print "server asks (op: count, worst turn-wait, worst talk):")
-  (eachp [op entry] (all "server-asks")
+  (eachp [op entry] (:stats client)
     (printf "  %-12s %6d  %6.3fs  %6.3fs" op (entry :count)
             (entry :worst-turn) (entry :worst-talk))
     (each slow (entry :slow)
       (printf "      slow: turn %.2fs talk %.2fs" (slow :turn) (slow :talk))))
-  (def sup (all "supervisor"))
-  (if-not sup
-    (print "supervisor: unreachable (or predates the stats op)")
+  (def host (:remote-stats client))
+  (if-not host
+    (print "pane host: unreachable (or predates the stats op)")
     (do
-      (printf "supervisor (stamp %s, up %.0fs, unsent %d, chunks %d):"
-              (get sup "stamp" "?") (get sup "uptime" 0)
-              (get sup "unsent" 0) (get sup "chunks" 0))
-      (eachp [op entry] (get sup "ops" {})
+      (printf "pane host (stamp %s, up %.0fs, unsent %d, chunks %d):"
+              (get host "stamp" "?") (get host "uptime" 0)
+              (get host "unsent" 0) (get host "chunks" 0))
+      (eachp [op entry] (get host "ops" {})
         (printf "  %-12s %6d  %6.3fs worst" op (get entry "count" 0)
                 (get entry "worst" 0))
         (each slow (get entry "slow" [])
@@ -535,32 +495,33 @@
   nil)
 
 (defn dump
-  ``Write the live session's whole backlog -- the recording of everything the
-  program drew -- to `path`, and say how to replay it. This is the capture
-  half of the forensic loop that convicted the wrap and alternate-screen
-  bugs; `replay` is the other half.``
-  [&opt path]
+  ``Write one pane's whole backlog -- the recording of everything the program
+  drew -- to `path`, and say how to replay it. This is the capture half of
+  the forensic loop that convicted the wrap and alternate-screen bugs;
+  `replay` is the other half.``
+  [&opt name path]
+  (def client (named name))
   (default path (string "/tmp/visualize-dump-" (os/time) ".bin"))
-  (def now (poll 0))
+  (def now (:poll client 0))
   (def text (get now "text" ""))
   (spit path text)
   (def rows (get now "rows" 24))
   (def cols (get now "cols" 80))
   (printf "%d bytes -> %s (recorded at %dx%d)" (length text) path rows cols)
-  (printf "replay: (harness/replay %v) or: node %s/tools/replay.mjs %s --rows %d --cols %d"
+  (printf "replay: (pane-client/replay nil %v) or: node %s/tools/replay.mjs %s --rows %d --cols %d"
           path here path rows cols)
   path)
 
 (defn replay
   ``Run a capture through the emulator headlessly and report suspects --
   escape-like text on the final screen, the signature of a torn stream or a
-  parser gap. Geometry defaults to the live session's, since a recording
+  parser gap. Geometry defaults to the named pane's, since a recording
   replayed at the wrong size scatters absolute cursor positions.``
-  [path &opt rows cols]
+  [name path &opt rows cols]
   # `state`, not `poll`: the geometry is two integers, and poll would drag
   # the entire backlog over the socket to deliver them.
   (unless (and rows cols)
-    (def now (state))
+    (def now (:state (named name)))
     (default rows (get now :rows 24))
     (default cols (get now :cols 80)))
   # Spawned with a pipe rather than executed: the child's stdout is the
@@ -580,10 +541,6 @@
 (def equipment
   ``The banner lines describing the above, handed to dev/serve by core.janet
   so the repl advertises the terminal's tools without knowing what they are.``
-  (string "session:  (harness/print-stats) op timings both sides\n"
-          "          (harness/dump) capture it · (harness/replay path) re-render a capture\n"))
-
-(defn shutdown
-  "End the supervisor, killing the agent with it. Called on ctrl-c only."
-  []
-  (:shutdown default-client))
+  (string "panes:    (pane-client/stats \"harness\") op timings both sides\n"
+          "          (pane-client/dump \"harness\") capture it · (pane-client/replay\n"
+          "          \"harness\" path) re-render a capture · pane-client/panes\n"))

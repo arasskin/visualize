@@ -18,7 +18,7 @@
 # called forkpty and cannot be passed to a later one, so "restart the server,
 # keep the agent" is only possible if the server never holds the fd. Nothing
 # here ever runs in the server; the client that speaks to it lives in
-# ./harness.janet, and speaks to it ONLY over the wire -- that file does not
+# ./pane-client.janet, and speaks to it ONLY over the wire -- that file does not
 # import this one. The single in-process caller is src/core.janet's
 # `--supervise` branch, which calls `host` below: this process's entry point.
 #
@@ -31,7 +31,7 @@
 # here and in the client's API together, and add a test that crosses both.
 #
 # The client API the HTTP routes actually call -- configure, start, stop,
-# send, resize, redraw, state, since, poll, shutdown -- is in ./harness.janet.
+# send, resize, redraw, state, since, poll, shutdown -- is in ./pane-client.janet.
 # The names here carry a `session-` prefix so the two vocabularies cannot
 # collide when both files are open.
 
@@ -364,7 +364,7 @@
 # it means having filesystem access to the path, which is the boundary.
 
 # -- the wire ----------------------------------------------------------------
-# This side of the protocol. The other side is in ./harness.janet.
+# This side of the protocol. The other side is in ./pane-client.janet.
 
 # Every op's timing, kept always: count, worst, and the last few slow calls.
 # The cost is a table update per request; the payoff, when something stalls,

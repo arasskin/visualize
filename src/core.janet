@@ -52,7 +52,7 @@
 (import ./http)
 (import ./parsers)
 (import ./json)
-(import ./harness)
+(import ./pane-client)
 (import ./pane-host)
 (import ./dev)
 (import ./stamp)
@@ -283,31 +283,36 @@
   (def token (make-token))
 
   # The terminal lives in another process, so that this one can be restarted
-  # without killing the agent -- see src/harness.janet. Told where to find it
-  # and how to start one, both of which only this function knows.
+  # without killing the agent -- see src/pane-client.janet. Told where to find
+  # it and how to start one, both of which only this function knows.
   #
-  # The path is computed ONCE and passed twice: the address we look on and the
-  # address we tell a new supervisor to bind have to be the same string, and
-  # two calls is two chances for that to stop being true.
-  (def socket (socket-for root))
-  (harness/configure socket
-                     [(string here "/bin/janet") (string here "/src/core.janet")
-                      "--supervise" socket])
+  # ONE CLIENT PER PANE, BUILT THE SAME WAY. The two panes differ in their
+  # socket and in what their pty runs; everything else -- the backlog, the
+  # reattach dance, the framing, the connection discipline -- is the same
+  # code twice, which is the point. Registered by name so the repl's
+  # equipment can ask about either without holding a client.
+  #
+  # The socket path is computed ONCE and passed twice per pane: the address
+  # we look on and the address we tell a new host to bind have to be the same
+  # string, and two calls is two chances for that to stop being true.
+  (defn pane-for [socket]
+    (pane-client/make-client socket
+                             [(string here "/bin/janet")
+                              (string here "/src/core.janet")
+                              "--supervise" socket]))
 
-  # The repl window's pty, behind a SECOND supervisor -- the same machinery as
-  # the agent's, second instance, so the backlog, the reattach dance and the
-  # framing are all the code the harness already paid for. What it runs is
-  # ./repl, which is nc against this server's own repl socket: the page gets a
-  # cooked-mode terminal into the live image, exactly what a person at a shell
-  # gets. Keyed to the root like the agent's supervisor, and shared the same
-  # way; dev-only, because the socket it would connect to only exists in dev
-  # mode.
+  (def agent-socket (socket-for root))
+  (def agent-client (pane-client/register "harness" (pane-for agent-socket)))
+
+  # The repl window's pty, behind a SECOND host. What it runs is ./repl,
+  # which is nc against this server's own repl socket: the page gets a
+  # cooked-mode terminal into the live image, exactly what a person at a
+  # shell gets. Dev-only, because the socket it would connect to only exists
+  # in dev mode.
   (def replterm-socket (socket-for root ".replterm.sock"))
   (def repl-client
     (when dev?
-      (harness/make-client replterm-socket
-                           [(string here "/bin/janet") (string here "/src/core.janet")
-                            "--supervise" replterm-socket])))
+      (pane-client/register "repl" (pane-for replterm-socket))))
   # Where this run's dev repl listens. Named after the port, so it is only
   # knowable once the server has bound one -- set below, read per request.
   (var repl-socket nil)
@@ -407,17 +412,18 @@
                  (def rows (math/floor (or (get sent "rows") 24)))
                  (def cols (math/floor (or (get sent "cols") 100)))
                  ["200 OK" "application/json"
-                  (json/encode (harness/start (harness-argv) root rows cols))]))
+                  (json/encode (:start agent-client (harness-argv) root rows cols))]))
 
       (and (= method "POST") (= path "/pane/harness/stop"))
-      (guarded (fn [] ["200 OK" "application/json" (json/encode (harness/stop))]))
+      (guarded (fn [] ["200 OK" "application/json"
+                       (json/encode (:stop agent-client))]))
 
       (and (= method "POST") (= path "/pane/harness/input"))
       (guarded (fn []
                  (def sent (json/decode (request :body)))
                  # `at` turns this into "type, and tell me what came back" --
                  # one round trip for a keystroke and its echo. See `send`.
-                 (def echo (harness/send (string (get sent "text" ""))
+                 (def echo (:send agent-client (string (get sent "text" ""))
                                          (when-let [a (get sent "at")]
                                            (math/floor a))
                                          (truthy? (get sent "quiet"))))
@@ -426,18 +432,19 @@
 
       (and (= method "POST") (= path "/pane/harness/redraw"))
       (guarded (fn []
-                 (harness/redraw)
+                 (:redraw agent-client)
                  ["200 OK" "application/json" (json/encode {"ok" true})]))
 
       (and (= method "POST") (= path "/pane/harness/resize"))
       (guarded (fn []
                  (def sent (json/decode (request :body)))
-                 (harness/resize (math/floor (or (get sent "rows") 24))
-                                 (math/floor (or (get sent "cols") 100)))
+                 (:resize agent-client (math/floor (or (get sent "rows") 24))
+                           (math/floor (or (get sent "cols") 100)))
                  ["200 OK" "application/json" (json/encode {"ok" true})]))
 
       (and (= method "POST") (= path "/pane/harness/poll"))
-      (guarded (fn [] (poll-answer harness/poll (request :body))))
+      (guarded (fn [] (poll-answer (fn [at gen wait] (:poll agent-client at gen wait))
+                                   (request :body))))
 
       # -- the repl window --------------------------------------------------
       # The harness endpoints again, one per one, against the second
@@ -551,7 +558,7 @@
   # writes the lines, core hands them over, dev prints whatever it is given.
   # The repl advertises the session tools without importing them: harness
   # writes the lines, core hands them over, dev prints whatever it is given.
-  (when dev? (dev/serve repl-socket this-env "visualize" harness/equipment))
+  (when dev? (dev/serve repl-socket this-env "visualize" pane-client/equipment))
 
   # CTRL-C TAKES THE AGENT WITH IT, and this is the only thing that does.
   #
@@ -568,7 +575,7 @@
   (os/sigaction :int (fn []
                        (print)
                        (print "visualize: stopping the harness")
-                       (try (harness/shutdown) ([_] nil))
+                       (try (:shutdown agent-client) ([_] nil))
                        # The repl window's supervisor goes the same way: its
                        # nc is talking to a socket about to be removed, so
                        # there is nothing there worth outliving us.

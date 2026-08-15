@@ -217,8 +217,9 @@ src/pty.janet       a pseudo-terminal, via libc's forkpty through the FFI
 src/pane-host.janet  the live session behind one pane -- pty, pump thread,
                     backlog -- in a process of its own (`visualize
                     --supervise`), so restarting the server keeps it running
-src/harness.janet   the client the HTTP routes talk through, and the wire
-                    protocol both sides of that socket agree on
+src/pane-client.janet
+                    the client the HTTP routes talk through -- one per pane --
+                    and the wire protocol both sides of that socket agree on
 src/dot.janet       prefix matching, filtering, and the DOT that comes out
 src/color.janet     the palette, the ramp, and WCAG-checked label ink
 src/config.janet    the sandbox the config runs in
