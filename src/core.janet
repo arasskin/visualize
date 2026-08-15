@@ -139,6 +139,10 @@
   # and one place that knows how the pieces fit.
   (when (= (get args 1) "--supervise")
     (def path (or (get args 2) (error "usage: visualize --supervise <socket-path>")))
+    # The tools live beside this file's checkout, and the host puts them on
+    # the harness's PATH -- see ./vz. Computed here rather than read from
+    # `here` below, which this branch runs before.
+    (term-host/tools-at (os/realpath (string (dyn :current-file) "/../..")))
     (term-host/host path)
     (os/exit 0))
 
@@ -386,6 +390,14 @@
       (guarded (fn []
                  (poll-answer (fn [at gen wait] (:poll repl-client at gen wait))
                               (request :body))))
+
+      # WHICH TREE THIS RUN SERVES. The harness tools need the state
+      # directory, and an agent's working directory is not a reliable
+      # guide -- it may have cd'd anywhere. Cheap, and it means `vz` never
+      # guesses.
+      (and (= method "GET") (= path "/root"))
+      (guarded (fn [] ["200 OK" "application/json"
+                       (json/encode {"root" root "stamp" stamp/born})]))
 
       # WHAT HAS GONE WRONG LATELY, for the page's state line and for an
       # agent asking the tool about itself. Guarded like the terminal

@@ -130,6 +130,26 @@ The session survives a page reload — the browser attaches to a backlog of
 output rather than to the pty — and collapsing the panel leaves the agent
 running.
 
+### What the harness can reach
+
+The terminal pane holds the intelligence -- claude, pi, whatever the config
+names -- and `vz` is on its PATH, so it can reach what *this* program knows
+rather than only the tools it brought:
+
+```bash
+vz scan [pattern]     files, sizes, what each one needs
+vz faults [n]         what has gone wrong, with stacks
+vz eval '(expr)'      evaluate in the running server's image
+vz pane repl 'text'   type into a pane
+vz state [name]       the facts on disk
+vz where              url, root, state directory
+```
+
+Every one of these reads a state file or posts to an endpoint -- there is no
+privileged channel, and anything `vz` does could be done by hand. A session
+opens with a one-line note saying they exist, because an agent cannot use
+what it does not know about.
+
 ### Driving a pane from outside the page
 
 An agent working on this tool -- or you, from a second shell -- can type
@@ -288,6 +308,7 @@ src/faults.janet    what has gone wrong lately, where an agent can read it
 src/state.janet     the facts on disk, in .visualize/, for anything to read
 src/watchdog.janet  a thread that names event-loop stalls from outside them
 src/stamp.janet     which code each process is running, for the handshake
+vz                  the tools the harness comes with (on its PATH)
 pane                type into a pane from a shell, so agent work is visible
 tools/replay.mjs    run a captured session through the emulator, headlessly
 web/term.js         a terminal emulator, in the ~25 sequences agents emit

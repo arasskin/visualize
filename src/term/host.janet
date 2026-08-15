@@ -115,6 +115,16 @@
 # buffer the write returns short and the loss is one probe answer, not a
 # frozen event loop.)
 
+# Where this checkout lives, so the harness's PATH can include its tools.
+# Passed in rather than computed: the host runs from an argv the server
+# built, and the server is the one that knows where it was installed.
+(var- install-dir nil)
+
+(defn tools-at
+  "Put `dir` on the harness's PATH when a session starts."
+  [dir]
+  (set install-dir dir))
+
 (var- draining false)
 (defn- drain
   ``Move whatever the pump thread has produced into the backlog.
@@ -249,13 +259,14 @@
   # Generous, but the capacity is no longer what keeps the pump running --
   # `keep-draining` is. This is only headroom for a burst that lands between
   # two ticks of that loop, so the producer never even approaches the wall.
+  (def tools-dir install-dir)
   (def channel (ev/thread-chan 8192))
   (def ready (ev/thread-chan 2))
   # The pty is opened ON THE THREAD, not here, because the thread is where it
   # will be read: an ffi-signature cannot cross a thread boundary, so the
   # session must be created on the side that uses it.
   (ev/thread
-    (fn [[reply out command directory lines columns]]
+    (fn [[reply out command directory lines columns tools-dir]]
       # The give happens WHATEVER pty/open does. A forkpty or exec that fails
       # under resource pressure used to throw before the give, and the start
       # op then blocked forever in ev/take -- wedging the supervisor for every
@@ -263,6 +274,19 @@
       (def opened (try (pty/open command lines columns
                                  (let [environment (os/environ)]
                                    (put environment "PWD" directory)
+                                   # THE HARNESS'S TOOLS, ON ITS PATH. The
+                                   # intelligence in this pty is somebody
+                                   # else's program, so the only interface
+                                   # it reliably has is a command line: `vz`
+                                   # is how it reaches what THIS program
+                                   # knows -- the scan, the faults, the live
+                                   # image -- rather than arriving with only
+                                   # the tools it brought. See ./vz.
+                                   (when tools-dir
+                                     (put environment "PATH"
+                                          (string tools-dir ":"
+                                                  (or (environment "PATH") "")))
+                                     (put environment "VISUALIZE_ROOT" directory))
                                    environment))
                     ([e] {:error (string e)})))
       (ev/give reply opened)
@@ -270,10 +294,18 @@
         (pty/pump opened (fn [chunk] (ev/give out chunk)))
         (ev/give out :eof))
       :done)
-    [ready channel argv root rows cols]
+    [ready channel argv root rows cols tools-dir]
     :nt (ev/thread-chan 2))
 
   (def opened (ev/take ready))
+  # ANNOUNCE THE TOOLS INTO THE SESSION ITSELF. An agent cannot use what it
+  # does not know exists, and the one channel every harness reads is its own
+  # terminal. Written to the BACKLOG rather than the pty: it is a note from
+  # the program to whoever is reading, not input for the program to run.
+  (unless (opened :error)
+    (array/push backlog
+                (string "\e[2m-- visualize: `vz` is on PATH."
+                        " scan | faults | eval | pane | state | where --\e[0m\r\n")))
   (if (opened :error)
     (do (set session nil)
         (set output nil)
