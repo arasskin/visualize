@@ -550,10 +550,15 @@ const SNAP = 14;          // how close a wall has to come to catch
 // speed and it stays together; snatch one tab off it and it lets go. That
 // is one number, one comparison, and it matches what hands already do with
 // things that are stuck together.
-// Measured rather than guessed: a smooth carry of any speed peaks around
-// 0.05 px/ms^2 between samples, a snatch lands near 0.36. Sitting at 0.15
-// leaves a wide margin either side of the only line that matters.
-const BREAK_ACCEL = 0.15; // px/ms^2, sampled between pointer moves
+// Measured across a spread of gestures rather than guessed, because the
+// distribution is tighter than it looks: an unhurried carry peaks around
+// 0.05 px/ms^2 between samples, but a FAST one -- a long distance covered
+// in few samples -- reaches 0.14 to 0.16, a firm tug 0.25, a snatch 0.50.
+// So the usable gap is narrow and sits high: 0.18 clears the fastest
+// carries measured (0.16) and catches a firm tug (0.25) rather than
+// demanding a snatch. Below the carries -- 0.10 was -- and a row cannot be
+// moved at all; well above the tugs and only violence works.
+const BREAK_ACCEL = 0.18; // px/ms^2, sampled between pointer moves
 
 const panels = [];        // every panel, in creation order
 
