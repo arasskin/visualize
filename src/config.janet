@@ -54,7 +54,10 @@
     # What to run in the harness window, as argv. Nil means the built-in
     # default; the config names it because which agent you want is a property
     # of the project, not of the tool.
-    :harness nil})
+    :harness nil
+    # Which layout draws the graph. Nil means graphviz, which is what a
+    # config that says nothing has always got.
+    :layout nil})
 
 (defn- reflow
   ``Give every automatic group a hue no other group is using.
@@ -155,6 +158,17 @@
     (put state :sized true) (put state :sized-coloring true) nil)
   (defn font [name] (put state :font (as name)) nil)
 
+  (defn layout [name]
+    ``Which layout draws the graph.
+
+    `(layout graphviz)` is the default -- a real layered layout, and the
+    reason `dot` is on the requirements list. `(layout force)` needs
+    nothing installed: nodes repel, edges pull, and the picture settles.
+    It shows relatedness rather than direction of dependency, so it reads
+    better for a tangle than for a hierarchy.``
+    (put state :layout (as name))
+    nil)
+
   (defn harness [name & args]
     ``What to run in the harness window.
 
@@ -181,6 +195,8 @@
            "(font name) -- draw the graph in a different typeface.")
   (install env "harness" harness
            "(harness cmd & args) -- what to run in the terminal window, e.g. (harness claude) or (harness pi).")
+  (install env "layout" layout
+           "(layout name) -- graphviz (default, needs dot) or force (needs nothing).")
 
   # `~` alone, for a config that quotes it or reaches it through a helper.
   # The bare `(show-only ~)` form never gets this far -- src/tilde.janet turns

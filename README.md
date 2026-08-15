@@ -66,6 +66,7 @@ pane.
 (show-lines-coloring)      ; ...and shade by size instead of by edges
 (font "Helvetica")         ; draw it in something else
 (harness claude)           ; what the terminal window runs -- or (harness pi)
+(layout force)             ; draw it without graphviz -- or (layout graphviz)
 ```
 
 `~` **is the project**, the way a shell expands `~` to a home directory:
@@ -298,6 +299,9 @@ src/term/host.janet      the live session behind one pane -- pty, pump
 src/term/client.janet    the client the HTTP routes talk through -- one per
                         pane -- and the wire protocol both ends agree on
 src/dot.janet       prefix matching, filtering, and the DOT that comes out
+src/layout.janet    which layout draws the graph -- the seam between them
+src/layout/force.janet   nodes repel, edges pull; needs nothing installed
+src/layout/svg.janet     positions to a picture, in graphviz's SVG shape
 src/color.janet     the palette, the ramp, and WCAG-checked label ink
 src/config.janet    the sandbox the config runs in
 src/tilde.janet     rewriting ~ and #rrggbb past Janet's reader

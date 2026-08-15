@@ -16,6 +16,7 @@
 (import ./scan)
 (import ./parsers)
 (import ./dot)
+(import ./layout)
 (import ./config)
 (import ./json)
 (import ./state)
@@ -137,12 +138,16 @@
             (when-let [size (get (graph :sizes) (node :name))]
               (put here (node :name) size)))
           (dot/ramp-of here)))
-      (dot/to-svg (dot/render trimmed {:groups (state :groups)
-                                       :sized (state :sized)
-                                       :filled (state :filled)
-                                       :font (state :font)
-                                       :weights weights})
-                  root))))
+      (layout/draw trimmed {:layout (state :layout)
+                            :groups (state :groups)
+                            :sized (state :sized)
+                            :filled (state :filled)
+                            :font (state :font)
+                            :weights weights
+                            # graphviz runs as a subprocess and wants to be
+                            # started in the project, not wherever the
+                            # server happens to be.
+                            :cwd root}))))
 
 
 (defn page
