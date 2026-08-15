@@ -218,13 +218,34 @@ button:disabled { opacity: .5; cursor: progress; }
 }
 .panel.shut { width: auto !important; height: auto !important; }
 .panel.shut .panel-body, .panel.shut .grip { display: none; }
-.panel.shut .bar { border-bottom: 0; }
+
+/* A MANILLA FOLDER, not a growing box. Opening a panel used to stretch its
+   title bar along with everything else, so the same title occupied a
+   different width depending on a state you were about to change -- and the
+   eye lost the thing it had just clicked. The bar now keeps the width it
+   has when shut, and only the body below it opens out. What was a button
+   stays exactly where it was and becomes the folder's tab.
+
+   The panel itself is therefore transparent and borderless: the two pieces
+   below draw their own edges, or the bar's tab would sit inside a box its
+   own width. */
+.panel {
+  border: 0; background: none;
+  align-items: flex-start;  /* the bar keeps its content width... */
+}
+.panel > .panel-body, .panel > .grip { align-self: stretch; }  /* ...the body does not */
 
 .bar {
   display: flex; align-items: center; gap: .3rem; flex: none;
   padding: .4rem var(--gutter); cursor: grab; user-select: none;
-  border-bottom: 1px solid var(--line);
+  background: Canvas;
+  border: 1px solid var(--line-strong);
+  /* Sits ON the body's top edge and erases the line between them, the way a
+     tab merges into its folder rather than being a box stacked on one. */
+  border-bottom-color: Canvas;
+  margin-bottom: -1px; position: relative; z-index: 1;
 }
+.panel.shut .bar { border-bottom: 1px solid var(--line-strong); margin-bottom: 0; }
 .bar:active { cursor: grabbing; }
 /* A panel's own status, right of its name: whether the harness is running,
    how many config lines failed. Quiet enough to ignore. */
@@ -234,6 +255,8 @@ button:disabled { opacity: .5; cursor: progress; }
 .panel-body {
   flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
   padding: .4rem var(--gutter);
+  background: Canvas;
+  border: 1px solid var(--line-strong);
 }
 
 /* Resize grip, bottom-right, drawn as two diagonal rules. */
