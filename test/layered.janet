@@ -373,3 +373,50 @@
                                        (when (string/has-prefix? "g" name) "G"))}))
   (def row (sorted-by |((get (out :points) $) :x) (keys (out :points))))
   (t/is= ["g1" "g2" "x"] row "the members are adjacent"))
+
+(t/test "the sweep scores a group's members together"
+  # THE MECHANISM. Ordering a layer and then shuffling the group together
+  # afterwards fixes where the ungrouped nodes go BEFORE the group has taken
+  # its slot, so a node whose only edge runs past the group gets stranded on
+  # the wrong side of it. Scoring the members as one node seats the group and
+  # everything around it in the same decision.
+  #
+  # `g1` and `g2` have neighbours at opposite ends of the layer above. Scored
+  # separately they sort to opposite ends too; scored together they share the
+  # median of both and stay adjacent, and `lone` -- whose neighbour is in the
+  # middle -- lands between the group and the end rather than inside it.
+  (def above @["p0" "p1" "p2" "p3"])
+  (def layers @{0 above 1 @["g1" "lone" "g2"]})
+  (def up {"g1" ["p0"] "g2" ["p3"] "lone" ["p1"]})
+  (def down {})
+  (defn group-of [n] (when (string/has-prefix? "g" n) "G"))
+
+  (def apart (layered/order layers (fn [n] (get up n [])) (fn [n] (get down n [])) 1))
+  (def together (layered/order layers (fn [n] (get up n [])) (fn [n] (get down n [])) 1
+                               group-of))
+  (defn spots [row] (seq [[i n] :pairs row :when (group-of n)] i))
+  (def far (spots (apart 1)))
+  (def near (spots (together 1)))
+  (t/is= 2 (- (far 1) (far 0))
+         "scored apart, the two members sort to opposite ends")
+  (t/is= 1 (- (near 1) (near 0))
+         "scored together, they stay side by side"))
+
+(t/test "grouping never leaves two nodes on top of each other"
+  # The group passes move nodes outside the usual separation, so this is the
+  # invariant that has to survive all of them.
+  (def names (map (fn [i] (string (if (even? i) "g" "x") i)) (range 12)))
+  (def graph {:nodes (map |{:name $} names)
+              :edges (seq [i :range [0 10]] [(names i) (names (+ i 2))])})
+  (def out (layered/place graph
+                          {:measure (fn [_] 70)
+                           :group-of (fn [n] (when (string/has-prefix? "g" n) "G"))}))
+  (def points (out :points))
+  (def rows @{})
+  (eachp [name p] points
+    (put rows (p :y) (array/push (or (rows (p :y)) @[]) (p :x))))
+  (eachp [_ xs] rows
+    (def sorted (sort xs))
+    (for i 0 (- (length sorted) 1)
+      (t/ok (>= (- (sorted (+ i 1)) (sorted i)) 69)
+            "neighbours on a row stay a node apart"))))

@@ -192,7 +192,7 @@ in between. Cycles are broken by provisionally reversing the edges that close
 them, so a dependency loop draws as an arrow running back up the page rather
 than being silently rewritten.
 
-Three things in there are what closed the gap with `dot`, each one measured
+Five things in there are what closed the gap with `dot`, each one measured
 against `dot`'s own output on this repository's graph:
 
 - **A long edge is threaded through real bend points**, one per layer it
@@ -218,12 +218,23 @@ against `dot`'s own output on this repository's graph:
   over itself across layers and reserves its full width on every rank it
   spans, evicting anything ungrouped that would land inside. The layer grows
   rather than the box telling a lie.
+- **The crossing sweep scores a group as one node.** Every member on a layer
+  takes the median of all their neighbours together, so the group and the
+  nodes around it are seated in the same decision. Ordering the layer first
+  and shuffling the group together afterwards — which is what cohesion alone
+  does — fixes where the ungrouped nodes go *before* the group has taken its
+  slot, and a node whose only edge runs past the group gets stranded on the
+  wrong side of it: `src/parser` sat 318 units from `src/scan`, the one node
+  it connects to, with its edge crossing the whole `src.term` box to reach
+  it. Scoring them together puts it 13 units away, directly above. Cohesion
+  still runs, and still last, because a shared median makes members *want*
+  the same slot without guaranteeing it.
 
 Sizes are fitted to what `dot` produced for the same labels rather than
 guessed. That sounds cosmetic and is not: `place-x` separates nodes by their
 drawn width, so an ellipse 78% too wide made *the layout* that much too wide.
-Together these took the picture from 2163×668 to 1190×745, against `dot`'s
-1140×629, and cut edge crossings from 44 to 19.
+Together these took the picture from 2163×668 to 1339×737, against `dot`'s
+1140×629, and cut edge crossings from 44 to 8.
 
 What it deliberately does not do is what made graphviz big: no spline routing,
 no port constraints, no orthogonal edges. A dependency graph needs none of
@@ -450,7 +461,7 @@ pane                type into a pane from a shell, so agent work is visible
 tools/replay.mjs    run a captured session through the emulator, headlessly
 web/term.js         a terminal emulator, in the ~25 sequences agents emit
 web/                the page: vanilla HTML, CSS and JS, no build step
-test/               463 assertions, no framework
+test/               477 assertions, no framework
 bin/janet           the compiled runtime (gitignored build artifact)
 ```
 
@@ -472,7 +483,7 @@ inverts the whole SVG rather than trying to re-colour it.
 ./test/run
 ```
 
-463 assertions (plus 82 for the terminal emulator, under node), no test
+477 assertions (plus 82 for the terminal emulator, under node), no test
 framework — the harness is 70 lines in
 `test/harness.janet`, because a dependency is a dependency. It runs against
 the **vendored** runtime, not whatever `janet` is on PATH: a green run against

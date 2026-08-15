@@ -164,8 +164,19 @@
   not optimal -- minimising crossings is NP-hard -- but it is what every
   layered layout in practice uses, and a few sweeps get most of the benefit.
 
+  A GROUP SCORES AS ONE NODE. Given `group-of`, every member of a group on a
+  layer takes the same median -- the median of all their neighbours together
+  -- so the sort seats the group as a block and everything ungrouped settles
+  around it in the SAME pass. Ordering the layer first and shuffling the
+  group together afterwards, which is what `cohere` alone does, decides the
+  positions of the ungrouped nodes before the group has taken its slot: on
+  this tool's own graph that left `src/parser` ordered after `src.term`
+  while `src/scan`, the one node it connects to, sat away to the left, and
+  its edge crossed the whole group to reach it.
+
   Returns {layer [names, in order]}.``
-  [layers up down sweeps]
+  [layers up down sweeps &opt group-of]
+  (default group-of (fn [_] nil))
   (def indexes (sort (keys layers)))
   (def current (table/clone layers))
 
@@ -179,9 +190,21 @@
       (def previous (current (+ index (if (= pick :down) -1 1))))
       (when previous
         (def positions (positions-in previous))
+        (defn neighbours [name] (if (= pick :down) (up name) (down name)))
+        # A group's members pool their neighbours and share the answer, which
+        # is what makes the sort treat them as one thing to place.
+        (def shared @{})
+        (each name (current index)
+          (when-let [key (group-of name)]
+            (unless (shared key) (put shared key @[]))
+            (array/push (shared key) ;(neighbours name))))
+        (def group-median @{})
+        (eachp [key all] shared
+          (put group-median key (median-of all positions)))
         (def scored (map (fn [name]
-                           [(median-of (if (= pick :down) (up name) (down name))
-                                       positions)
+                           [(if-let [key (group-of name)]
+                              (group-median key)
+                              (median-of (neighbours name) positions))
                             name])
                          (current index)))
         # Nodes with no neighbour above (-1) keep their relative order, which
@@ -192,7 +215,10 @@
                              (range (length scored)) scored))
         (def fixed (filter |(= -1 ($ 0)) with-index))
         (def movable (filter |(not= -1 ($ 0)) with-index))
-        (def placed (sorted-by |[($ 0) ($ 1)] movable))
+        # The group key breaks ties BEFORE the original index does, so an
+        # ungrouped node that happens to share the group's median cannot land
+        # in the middle of it -- which would put a stranger inside the box.
+        (def placed (sorted-by |[($ 0) (or (group-of ($ 2)) "") ($ 1)] movable))
         # The fixed ones go back at their original indexes, so a node with
         # no constraint does not drift to the edge of the layer.
         (def result (array ;(map |($ 2) placed)))
@@ -737,46 +763,25 @@
       (eachp [name index] dummy-layer
         (put layers index (array/push (or (layers index) @[]) name)))
 
+      # THE SWEEP KNOWS ABOUT GROUPS, so there is one pass here rather than a
+      # sweep followed by a fight with it. `order` scores a group's members as
+      # one node (see its docstring), which seats the group and everything
+      # around it in the same decision -- where cohering afterwards had
+      # already fixed the ungrouped nodes' positions before the group moved.
+      #
+      # `cohere` still runs, and still last, because scoring a group together
+      # makes its members *want* the same slot without guaranteeing they get
+      # it: a member whose own median lands elsewhere can still be separated
+      # from the rest by the tiebreak. Cohesion is the guarantee; the shared
+      # median is what makes it cheap.
+      (def group-of (when-let [of (opts :group-of)]
+                      (fn [name] (when (string? name) (of name)))))
       (def swept (order layers
                         (fn [name] (get up name []))
                         (fn [name] (get down name []))
-                        (tuning :sweeps)))
-
-      # Groups last, so cohesion overrides crossing reduction where the two
-      # disagree. That is the right precedence: a couple more crossings is a
-      # picture that is harder to read, whereas a box around a node that is
-      # not in the group is a picture that is WRONG.
-      #
-      # BUT THE REST OF THE LAYER GETS TO SETTLE AROUND IT. Cohering once and
-      # stopping leaves every ungrouped node where it was before the group
-      # moved, which is how `src/parser` ended up ordered after `src.term` on
-      # rank 0 while the one node it connects to, `src/scan`, sat away to the
-      # left -- its edge then crossed the whole group. Sweeping again after
-      # the group has taken its slot lets the median heuristic re-seat
-      # everything else around it, and re-cohering keeps the group whole; a
-      # few rounds converge.
-      (def ordered
-        (if-let [group-of (opts :group-of)]
-          (do
-            (var current (cohere swept group-of))
-            (for round 0 3
-              (set current (order current
-                                  (fn [name] (get up name []))
-                                  (fn [name] (get down name []))
-                                  2))
-              (set current (cohere current group-of)))
-            # A LAST UP-SWEEP, then cohere. The top rank has nothing above it,
-            # so the down-sweep leaves every node there exactly where it was
-            # -- `median-of` answers -1 for a node with no neighbours in the
-            # layer it is reading from. Only the up-sweep can seat rank 0 by
-            # its children, and that is the one thing `src/parser` needed: its
-            # single edge runs down to `src/scan`.
-            (set current (order current
-                                (fn [name] (get up name []))
-                                (fn [name] (get down name []))
-                                0))
-            (cohere current group-of))
-          swept))
+                        (tuning :sweeps)
+                        group-of))
+      (def ordered (if group-of (cohere swept group-of) swept))
 
       # A dummy is measured as the room its edge needs to pass, which is a
       # narrow column rather than nothing: at zero width the separation pass
