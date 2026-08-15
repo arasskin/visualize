@@ -32,42 +32,67 @@
 (defn read-request
   ``Read one request off `conn`. Returns {:method :path :body} or nil.
 
+  `carry` is the CONNECTION'S buffer, owned by the caller and living as long
+  as the connection does: with keep-alive a read can deliver the tail of one
+  request and the head of the next, and bytes left after this request's body
+  stay in `carry` for the next call. Losing them would desynchronize the
+  connection -- every later request parsed from its middle.
+
   The body is read by Content-Length rather than to end-of-stream, because
-  the connection stays open -- a browser reuses it, and reading until close
-  would hang until the tab did.``
-  [conn]
-  (def buf @"")
-  (var split nil)
+  the connection stays open. Reads carry a 75-second idle deadline: a
+  keep-alive connection a browser abandoned without closing would otherwise
+  hold its fiber forever.``
+  [conn carry]
+  (var split (header-end carry))
   # Headers first, one chunk at a time until the blank line shows up.
   (while (not split)
-    (def chunk (:read conn 4096))
+    (def chunk (:read conn 4096 nil 75))
     (if-not chunk (break))
-    (buffer/push-string buf chunk)
-    (set split (header-end buf)))
+    (buffer/push-string carry chunk)
+    (set split (header-end carry)))
   (when split
-    (def head (string/slice buf 0 split))
+    (def head (string/slice carry 0 split))
     (def lines (string/split "\n" head))
     (def request (string/split " " (string/trim (or (first lines) ""))))
     (when (>= (length request) 2)
       (def headers (parse-headers (string/join (drop 1 lines) "\n")))
       (def wanted (scan-number (or (headers "content-length") "0")))
-      (def body (buffer/slice buf split))
-      # Keep pulling until the whole body has arrived; one read is not a
+      # Pull until this request's whole body is here; one read is not a
       # promise of one message.
-      (while (< (length body) wanted)
-        (def chunk (:read conn 4096))
+      (while (< (- (length carry) split) wanted)
+        (def chunk (:read conn 4096 nil 75))
         (if-not chunk (break))
-        (buffer/push-string body chunk))
+        (buffer/push-string carry chunk))
+      (def have (min wanted (- (length carry) split)))
+      (def body (string/slice carry split (+ split have)))
+      # Everything past this request's body belongs to the NEXT request.
+      (def rest (string/slice carry (+ split have)))
+      (buffer/clear carry)
+      (buffer/push-string carry rest)
       {:method (request 0)
        :path (request 1)
        # Kept because the terminal endpoints check it: a page on another
        # origin can POST here, and one that runs a shell must not accept it.
        :origin (headers "origin")
-       :body (string body)})))
+       # Honoured by the serve loop: a client may still ask for the old
+       # one-request behaviour.
+       :close (= "close" (string/ascii-lower (or (headers "connection") "")))
+       :body body})))
 
 (defn respond
-  "Write one response and its body."
-  [conn status content-type body]
+  ``Write one response and its body. `keep` announces the connection stays
+  open for the next request.
+
+  KEEP-ALIVE EXISTS BECAUSE CLOSE WAS THE STALL. One connection per request
+  meant a hard scroll churned dozens of sockets a second through the
+  browser's six-per-origin pool; one reply lost to the macOS fd race left
+  its slot a zombie the browser reaps only on a ~10s timeout, a few zombies
+  exhausted the pool, and every fetch -- keystrokes included -- queued
+  behind them: the pane froze for exactly as long as the reaping took.
+  Reused connections make the churn, and most of the race's exposure,
+  simply not happen. Content-Length is always sent, which is what makes
+  reuse safe without chunked encoding.``
+  [conn status content-type body &opt keep]
   (def payload (if (bytes? body) body (string body)))
   (:write conn (string "HTTP/1.1 " status "\r\n"
                        "Content-Type: " content-type "\r\n"
@@ -81,10 +106,9 @@
                        # are local and tiny, revalidation would need ETags for
                        # no win.
                        "Cache-Control: no-store\r\n"
-                       # No keep-alive bookkeeping: one request per
-                       # connection, and the browser opens another when it
-                       # wants one. Simpler than getting reuse subtly wrong.
-                       "Connection: close\r\n"
+                       (if keep
+                         "Connection: keep-alive\r\n"
+                         "Connection: close\r\n")
                        "\r\n"
                        payload)))
 
@@ -143,11 +167,23 @@
        (ev/go
          (fn []
            (defer (:close conn)
+             (def carry @"")
+             (var serving true)
              (try
-               (when-let [request (read-request conn)]
-                 (def [status content-type body] (handler request))
-                 (setdyn :serving (request :path))
-                 (respond conn status content-type body))
+               # MANY REQUESTS PER CONNECTION, until the client hangs up or
+               # asks to -- the same shape as the supervisor's socket loop,
+               # and for the same reason: connection churn is where the fd
+               # race lives, and the browser's six-slot pool is what the
+               # churn was starving.
+               (while serving
+                 (def request (read-request conn carry))
+                 (if-not request
+                   (set serving false)
+                   (do
+                     (def [status content-type body] (handler request))
+                     (setdyn :serving (request :path))
+                     (respond conn status content-type body (not (request :close)))
+                     (when (request :close) (set serving false)))))
                ([err fib]
                  # A bug in a handler must not take the server down with it --
                  # the browser would see only "failed to fetch" and the next

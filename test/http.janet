@@ -79,6 +79,36 @@
     (t/is= found (http/static-file (string "/" found))
            (string found " is imported by app.js and must be servable"))))
 
+(t/test "a connection serves many requests, and close still means close"
+  # KEEP-ALIVE IS THE ANTI-STALL. One connection per request churned the
+  # browser's six-per-origin pool during a hard scroll; a reply lost to the
+  # fd race left a zombie slot the browser reaps on a ~10s timeout, and a
+  # few zombies froze every fetch the pane makes. Reuse removes the churn.
+  (def handler (fn [req] ["200 OK" "text/plain" (string "echo:" (req :path))]))
+  (def [server port accept-loop] (http/serve 8941 5 handler))
+  (ev/go accept-loop)
+  (def conn (net/connect "127.0.0.1" (string port)))
+  (defn ask [path & extra]
+    (:write conn (string "GET " path " HTTP/1.1\r\nHost: x\r\n"
+                         (string/join extra "") "\r\n"))
+    (var reply @"")
+    (var tries 0)
+    (while (and (< tries 40) (not (string/find (string "echo:" path) (string reply))))
+      (++ tries)
+      (when-let [chunk (:read conn 4096 nil 1)]
+        (buffer/push-string reply chunk)))
+    (string reply))
+  (def first-reply (ask "/one"))
+  (t/ok (string/find "echo:/one" first-reply) "the first request is answered")
+  (t/ok (string/find "keep-alive" first-reply) "and the connection is offered onward")
+  (t/ok (string/find "echo:/two" (ask "/two"))
+        "a second request on the SAME connection is answered")
+  (def parting (ask "/three" "Connection: close\r\n"))
+  (t/ok (string/find "echo:/three" parting) "a request asking to close is answered")
+  (t/ok (string/find "Connection: close" parting) "and told the connection ends")
+  (:close conn)
+  (:close server))
+
 (t/test "two servers walk to two ports, despite SO_REUSEPORT"
   # THE FREEZE THAT CAME FROM DEVELOPING INSIDE THE TOOL. The runtime sets
   # SO_REUSEPORT on every server socket, so binding a taken port SUCCEEDS --
