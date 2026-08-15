@@ -8,7 +8,7 @@
 # A TEST FILE RUNS ITS CHECKS AT IMPORT TIME, so this list is also the order
 # they run in -- and that order matters more than it should.
 #
-# `session` goes LAST because its tests spawn supervisor processes, ptys and
+# `detached-session` goes LAST because its tests spawn supervisor processes, ptys and
 # shells, and a module imported after them fails to load: Janet reports
 # "could not read file" while reading the next source file, not while running
 # any test. The suite is fine either side of that line; it is the loading that
@@ -27,6 +27,6 @@
 # be imported below them.
 (import ./watchdog)
 (import ./pty)
-(import ./session)
+(import ./detached-session)
 
 (os/exit (t/report))

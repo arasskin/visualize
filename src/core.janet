@@ -53,7 +53,7 @@
 (import ./parsers)
 (import ./json)
 (import ./harness)
-(import ./session)
+(import ./detached-session :as session)
 (import ./dev)
 (import ./stamp)
 (import ./watchdog)
@@ -261,7 +261,7 @@
 (defn main [& args]
   # ONE PROGRAM, TWO ROLES. Run plainly, this is the web server. Run with
   # --supervise it is the process that owns the terminal, spawned by the
-  # server's own client half and outliving it -- see src/session.janet
+  # server's own client half and outliving it -- see src/detached-session.janet
   # for why the pty cannot live here. Orchestrating both roles from this one
   # entry point means there is exactly one program to install, one to spawn,
   # and one place that knows how the pieces fit.

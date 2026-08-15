@@ -1,4 +1,5 @@
-# The harness session: a pty, a pump thread, and the backlog a page reads.
+# The detached session -- a pty, a pump thread, and the backlog a page reads --
+# exercised across the socket that separates it from the server.
 #
 # Driven with /bin/sh rather than a real agent, for the same reasons the pty
 # tests are: no API calls, no network, and the code path is identical -- the
@@ -12,7 +13,7 @@
 # between the two processes.
 
 (import ../src/harness)
-(import ../src/session)
+(import ../src/detached-session :as session)
 (import ../src/stamp)
 (import ./harness :as check)
 
