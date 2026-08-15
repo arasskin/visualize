@@ -357,6 +357,34 @@
         ["403 Forbidden" "application/json"
          (json/encode {"error" "bad or missing token"})]))
 
+    (defn poll-answer
+      ``The reply to a poll, for either pane. `ask` is the client's poll --
+      the ONLY thing that differs between the two panes, which is the point:
+      the page drives both with identical code, so the server answers them
+      with identical code. They were once two copy-pasted blocks, and the
+      repl's copy had already lost the comments explaining its own arguments.
+
+      One call rather than `since` plus `state`: this is the hot path, and
+      each one is a round trip to the supervisor.``
+      [ask body]
+      (def sent (json/decode body))
+      ["200 OK" "application/json"
+       (json/encode
+         (merge
+          (ask (math/floor (or (get sent "at") 0))
+               # Which session the page's `at` belongs to. Absent from an
+               # older page, which then gets the previous behaviour rather
+               # than an error.
+               (when-let [g (get sent "generation")] (math/floor g))
+               # How long the page is willing to have this request PARK for
+               # output -- the streaming transport. Absent from an older
+               # page, which keeps polling on its own timers.
+               (when-let [w (get sent "wait")] (math/floor w)))
+          # The server's own stamp beside the supervisor's, so the page can
+          # tell WHICH of its three parties is running old code -- see
+          # stamp.janet for the two rounds that question once cost.
+          {"serverStamp" stamp/born}))])
+
     (cond
       (and (= method "GET") (= path "/"))
       (do
@@ -409,30 +437,7 @@
                  ["200 OK" "application/json" (json/encode {"ok" true})]))
 
       (and (= method "POST") (= path "/harness/poll"))
-      (guarded (fn []
-                 (def sent (json/decode (request :body)))
-                 # One call rather than `since` plus `state`: this is the hot
-                 # path, and each one is a round trip to the supervisor.
-                 ["200 OK" "application/json"
-                  (json/encode
-                    (merge
-                     (harness/poll (math/floor (or (get sent "at") 0))
-                                  # Which session the page's `at` belongs to.
-                                  # Absent from an older page, which then gets
-                                  # the previous behaviour rather than an error.
-                                  (when-let [g (get sent "generation")]
-                                    (math/floor g))
-                                  # How long the page is willing to have this
-                                  # request PARK for output -- the streaming
-                                  # transport. Absent from an older page,
-                                  # which keeps polling on its own timers.
-                                  (when-let [w (get sent "wait")]
-                                    (math/floor w)))
-                     # The server's own stamp beside the supervisor's, so
-                     # the page can tell WHICH of its three parties is
-                     # running old code -- see stamp.janet for the two
-                     # rounds that question once cost.
-                     {"serverStamp" stamp/born}))]))
+      (guarded (fn [] (poll-answer harness/poll (request :body))))
 
       # -- the repl window --------------------------------------------------
       # The harness endpoints again, one per one, against the second
@@ -482,17 +487,8 @@
 
       (and dev? (= method "POST") (= path "/repl/poll"))
       (guarded (fn []
-                 (def sent (json/decode (request :body)))
-                 ["200 OK" "application/json"
-                  (json/encode
-                    (merge
-                     (:poll repl-client
-                            (math/floor (or (get sent "at") 0))
-                            (when-let [g (get sent "generation")]
-                              (math/floor g))
-                            (when-let [w (get sent "wait")]
-                              (math/floor w)))
-                     {"serverStamp" stamp/born}))]))
+                 (poll-answer (fn [at gen wait] (:poll repl-client at gen wait))
+                              (request :body))))
 
       # Anything else in web/, served by name rather than by a route per file.
       #
