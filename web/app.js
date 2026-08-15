@@ -813,7 +813,14 @@ function makeTerminalPane(root, prefix) {
   function diagNote(kind, ms) {
     diag.push({ t: Math.round(performance.now()), kind, ms: Math.round(ms) });
     if (diag.length > 60) diag.shift();
-    if (ms > 2000) setState(`stalled ${(ms / 1000).toFixed(1)}s (${kind})`);
+    // RECORDED, NOT ANNOUNCED. This used to write into the pane's state
+    // line, which is the wrong channel twice over: the line is for things a
+    // person acts on -- "exited", "server outdated" -- and a stall that has
+    // already ended is not one of those, while a message that stays until
+    // something overwrites it turns a moment into a permanent-looking
+    // condition. The ring is still here for window.__diag() and it is still
+    // what the next investigation reads; it just no longer shouts.
+    console.debug(`visualize: ${kind} stall ${(ms / 1000).toFixed(1)}s`);
   }
   if (prefix === 'harness') window.__diag = () => diag.slice();
   if (typeof PerformanceObserver === 'function' && prefix === 'harness') {
@@ -826,7 +833,6 @@ function makeTerminalPane(root, prefix) {
     } catch (e) { /* longtask unsupported: the ring still gets poll gaps */ }
   }
   let lastPollDone = 0;
-  let lastPollHadText = false;
   // A version mismatch among page, server and supervisor, once seen, is
   // named in the state line until it stops being true. Two debugging
   // rounds were once spent on fixes that sat on disk while every process
@@ -967,17 +973,20 @@ function makeTerminalPane(root, prefix) {
       setState(stampNote || faultNote || (out.running ? '' : 'exited'));
       if (!out.running) stopPolling();
       pollFailures = 0;
-      // A gap in the chain longer than its context explains is a stall.
-      // Idle, a park legitimately holds LONGPOLL_WAIT; mid-stream -- the
-      // previous reply carried text, more is coming -- anything past 5s
-      // is not a park, it is a hang.
+      // A gap longer than a park can explain is a stall. ONE THRESHOLD, and
+      // it is the park's own length plus slack: the previous version used a
+      // tighter 5s bound whenever the last reply carried text, reasoning
+      // that mid-stream means more is coming -- but output followed by
+      // quiet is how every burst ENDS, so the first park after any output
+      // tripped it. It reported "stalled 20.0s (poll-gap)" for a pane
+      // working exactly as designed, which is worse than reporting nothing:
+      // a warning that cries wolf teaches you to ignore the channel real
+      // warnings arrive on.
       const done = performance.now();
-      const allowed = lastPollHadText ? 5000 : LONGPOLL_WAIT + 5000;
-      if (lastPollDone && done - lastPollDone > allowed) {
+      if (lastPollDone && done - lastPollDone > LONGPOLL_WAIT + 8000) {
         diagNote('poll-gap', done - lastPollDone);
       }
       lastPollDone = done;
-      lastPollHadText = !!out.text;
       // A reply that says `waited` came from a supervisor that parks; the
       // next ask should already be on its way when output arrives, so the
       // chain re-polls with no timer at all. Judged per reply, not once:
