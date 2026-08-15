@@ -1,14 +1,26 @@
-# The supervisor: owning a live pty, and answering for it over a socket.
+# The pane host: owning a live pty, and answering for it over a socket.
 #
-# THIS FILE IS A WHOLE PROCESS. `visualize --supervise` starts it and it
-# outlives every server that talks to it -- which is the point, and the
-# reason the session cannot simply live in the server. A pty's master fd belongs to the process that
+# THIS FILE IS A WHOLE PROCESS -- one per terminal pane in the page, holding
+# the pty that pane displays. `visualize --supervise` starts it and it
+# outlives every server that talks to it, which is the point and the reason
+# the session cannot simply live in the server.
+#
+# HOST, NOT PANE. The pane is the browser's: a <pre> in the page that dies
+# with the tab. This process hosts the session behind one, and the two are
+# deliberately different words -- see the note on /pane/ routes in app.js
+# for what happens when one word covers three layers.
+#
+# The `--supervise` FLAG KEEPS ITS NAME though this file changed its own.
+# The flag is a process contract, not an internal one: it appears in live
+# command lines, in pgrep patterns (the test suite's leak check greps for
+# it), and in whatever a person has in scrollback right now. Renaming it
+# would break those for a word. A pty's master fd belongs to the process that
 # called forkpty and cannot be passed to a later one, so "restart the server,
 # keep the agent" is only possible if the server never holds the fd. Nothing
 # here ever runs in the server; the client that speaks to it lives in
 # ./harness.janet, and speaks to it ONLY over the wire -- that file does not
 # import this one. The single in-process caller is src/core.janet's
-# `--supervise` branch, which is this process's entry point.
+# `--supervise` branch, which calls `host` below: this process's entry point.
 #
 # THE WIRE IS THE CONTRACT, and it is written down twice on purpose -- the op
 # names and reply shapes below have to agree with the client's, and the two
@@ -537,7 +549,7 @@
            (- (os/clock :monotonic) started))
   out)
 
-(defn supervise
+(defn host
   ``Answer requests on `path` until a shutdown arrives.
 
   The socket file is removed on the way out so the next run binds cleanly:

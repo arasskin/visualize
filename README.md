@@ -214,10 +214,9 @@ src/parser.janet    what a language spec is, and how one is run
 src/parsers.janet   find the specs in src/parsers/ at runtime
 src/parsers/        one file per language
 src/pty.janet       a pseudo-terminal, via libc's forkpty through the FFI
-src/supervisor.janet
-                    the live session -- pty, pump thread, backlog -- in a
-                    process of its own (`visualize --supervise`), so
-                    restarting the server keeps the agent running
+src/pane-host.janet  the live session behind one pane -- pty, pump thread,
+                    backlog -- in a process of its own (`visualize
+                    --supervise`), so restarting the server keeps it running
 src/harness.janet   the client the HTTP routes talk through, and the wire
                     protocol both sides of that socket agree on
 src/dot.janet       prefix matching, filtering, and the DOT that comes out

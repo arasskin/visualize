@@ -1,9 +1,13 @@
 # The harness: talking to whoever owns a live session.
 #
-# THIS FILE IS THE SERVER PROCESS. It speaks to a supervisor over a unix
+# THIS FILE IS THE SERVER PROCESS. It speaks to a pane host over a unix
 # socket, one line of JSON each way, and knows how to start one that outlives
 # it. The session it talks about -- the pty, the pump thread, the backlog --
-# is owned by ./supervisor.janet in another process entirely.
+# is owned by ./pane-host.janet in another process entirely. ("Supervisor"
+# survives in prose throughout this file and its neighbours: it is still the
+# right English word for a process that owns and outlives a session, and
+# --supervise is still the flag that starts one. Only the file changed its
+# name, to say which pane's session it hosts.)
 #
 # THE WIRE IS THE CONTRACT, and it is the ONLY thing shared: this file does
 # not import that one and cannot call into it. The op names and reply shapes

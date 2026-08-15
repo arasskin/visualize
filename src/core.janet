@@ -53,7 +53,7 @@
 (import ./parsers)
 (import ./json)
 (import ./harness)
-(import ./supervisor)
+(import ./pane-host)
 (import ./dev)
 (import ./stamp)
 (import ./watchdog)
@@ -261,13 +261,13 @@
 (defn main [& args]
   # ONE PROGRAM, TWO ROLES. Run plainly, this is the web server. Run with
   # --supervise it is the process that owns the terminal, spawned by the
-  # server's own client half and outliving it -- see src/supervisor.janet
+  # server's own client half and outliving it -- see src/pane-host.janet
   # for why the pty cannot live here. Orchestrating both roles from this one
   # entry point means there is exactly one program to install, one to spawn,
   # and one place that knows how the pieces fit.
   (when (= (get args 1) "--supervise")
     (def path (or (get args 2) (error "usage: visualize --supervise <socket-path>")))
-    (supervisor/supervise path)
+    (pane-host/host path)
     (os/exit 0))
 
   # The dev flags were consumed at load (they had to be -- see the top of
