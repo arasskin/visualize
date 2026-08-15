@@ -1,11 +1,17 @@
 # The v language: what it parses, what it writes, and that the two agree.
 #
-# TWO LEVELS, because the language has two. `triples` turns text into rows,
-# and `parse` builds a graph out of rows -- so the tests that matter most are
-# the ones on the rows, since that is the model and the graph is a consumer.
+# TWO LEVELS, because the language has two. `facts` turns text into rows of
+# [entity attribute value], and `parse` builds a graph out of rows -- so the
+# tests that matter most are the ones on the rows, since that is the model
+# and the graph is a consumer of it.
 
 (import ../src/v)
 (import ./harness :as t)
+
+(defn- rows-of [text]
+  (def [ok rows] (v/facts text))
+  (t/ok ok (string "it parsed: " (if ok "" rows)))
+  (map |[($ 0) ($ 1) ($ 2)] rows))
 
 (defn- sample []
   {:nodes [{:name "Otto_App" :label "Otto/\nApp" :ours true}
@@ -19,90 +25,116 @@
    :ours {"Otto_App" true "Otto_View" true "OttoClip_Cart" true}})
 
 #
-# The triples: the language itself.
+# The facts: the language itself.
 #
 
-(t/test "a form desugars to one row per attribute"
-  (def [ok rows] (v/triples `(node A :label "A" :ours :size 12)`))
-  (t/ok ok "it parsed")
-  (t/is= [["A" :node true]
+(t/test "a form is an entity and what is true of it"
+  (t/is= [["A" :is true]
           ["A" :label "A"]
           ["A" :ours true]
           ["A" :size 12]]
-         (map |[($ 0) ($ 1) ($ 2)] rows)
-         "the entity repeats and each attribute is its own fact"))
+         (rows-of `(A label "A" ours size 12)`)
+         "one row per attribute, all sharing the entity"))
 
-(t/test "an edge is the row whose value is another entity"
-  (def [_ rows] (v/triples "(edge A B)"))
-  (t/is= [["A" :edge-to "B"]] (map |[($ 0) ($ 1) ($ 2)] rows)))
+(t/test "the schema decides which attributes take a value"
+  # THE WHOLE REASON FOR A SCHEMA. Without it `(A ours size 12)` is
+  # ambiguous: `size` could be the value of `ours` as easily as an
+  # attribute of its own. `ours` is declared a flag, so it is not.
+  (t/is= [["A" :is true] ["A" :ours true] ["A" :size 12]]
+         (rows-of "(A ours size 12)")))
 
-(t/test "a bare node is still a fact"
-  # Otherwise `(node Solo)` would parse to nothing at all and a node with
-  # nothing to say about it would vanish.
-  (def [_ rows] (v/triples "(node Solo)"))
-  (t/is= [["Solo" :node true]] (map |[($ 0) ($ 1) ($ 2)] rows)))
+(t/test "a colon on an attribute is spelling, not meaning"
+  (t/is= (rows-of `(A label "A" ours size 12)`)
+         (rows-of `(A :label "A" :ours :size 12)`)
+         "label and :label are the same word"))
 
-(t/test "a group declares itself and carries its colour"
-  (def [_ rows] (v/triples `(group ~.Otto :color "#ff4d6d")`))
-  (t/is= [["~.Otto" :group-decl true]
-          ["~.Otto" :color "#ff4d6d"]]
-         (map |[($ 0) ($ 1) ($ 2)] rows)))
+(t/test "an entity that says nothing still exists"
+  (t/is= [["Solo" :is true]] (rows-of "(Solo)")))
 
-(t/test "membership is an attribute on the member"
-  # THE WHOLE REASON FOR TRIPLES. Under nesting this fact lived in the node's
-  # POSITION, which meant a group could only ever own a contiguous run.
-  (def [_ rows] (v/triples "(node A :group ~.Otto)"))
-  (t/ok (find |(= $ ["A" :group "~.Otto"]) (map |[($ 0) ($ 1) ($ 2)] rows))))
+(t/test "a bare word that is not an attribute names another entity"
+  # How a node joins a group: it says the group's name. Decidable only
+  # because the schema is closed -- a known word is an attribute, an
+  # unknown one is a reference.
+  (t/is= [["A" :is true] ["A" :in "~.Otto"]]
+         (rows-of "(A ~.Otto)")))
 
-(t/test "a node can belong to two groups"
+(t/test "an edge is an entity with from and to"
+  (t/is= [["A->B" :is true] ["A->B" :from "A"] ["A->B" :to "B"]]
+         (rows-of "(A->B from A to B)")))
+
+(t/test "a group is an entity with a colour"
+  (t/is= [["~.term" :is true] ["~.term" :color "#ff4d6d"]]
+         (rows-of `(~.term color "#ff4d6d")`)))
+
+(t/test "a node may name several groups"
   # Unsayable under nesting: a node sat inside exactly one set of parens.
-  (def [_ rows] (v/triples "(node A :group One) (node A :group Two)"))
-  (def memberships (filter |(= (get $ 1) :group) rows))
-  (t/is= 2 (length memberships) "both facts survive as rows"))
+  (t/is= [["A" :is true] ["A" :in "One"] ["A" :in "Two"]]
+         (rows-of "(A One Two)")))
 
 #
-# The graph built from them.
+# What the schema refuses.
+#
+
+(t/test "an attribute with no value left is a message"
+  (def [ok why] (v/facts "(A size)"))
+  (t/ok (not ok))
+  (t/ok (string/find "needs a value" why)))
+
+(t/test "a value with no attribute to belong to is a message"
+  # A bare word would be an entity reference, but a NUMBER cannot name one.
+  (def [ok why] (v/facts "(A 187)"))
+  (t/ok (not ok))
+  (t/ok (string/find "no attribute" why)))
+
+(t/test "an empty form is a message"
+  (def [ok why] (v/facts "()"))
+  (t/ok (not ok))
+  (t/ok (string? why)))
+
+#
+# The graph built from the facts.
 #
 
 (t/test "a hand-written graph parses"
   (def [ok graph] (v/parse `
-    (node A :label "A" :ours :size 12)
-    (node B :label "B")
-    (edge A B)`))
+    (A label "A" ours size 12)
+    (B label "B")
+    (A->B from A to B)`))
   (t/ok ok "it parsed")
   (t/is= ["A" "B"] (map |($ :name) (graph :nodes)))
   (t/is= [["A" "B"]] (graph :edges))
   (t/is= 12 ((graph :sizes) "A"))
   (t/ok ((graph :ours) "A"))
-  (t/ok (not ((graph :ours) "B")) ":ours is a flag, and B does not carry it"))
+  (t/ok (not ((graph :ours) "B")) "`ours` is a flag, and B does not carry it"))
 
 (t/test "a node with no label uses its own name"
-  (def [_ graph] (v/parse "(node Solo)"))
+  (def [_ graph] (v/parse "(Solo)"))
   (t/is= "Solo" ((first (graph :nodes)) :label)))
 
 (t/test "comments and whitespace are skipped"
   (def [ok graph] (v/parse `
     ; the whole graph
-    (node A :label "A")   ; trailing
-    (edge A A)`))
+    (A label "A")   ; trailing
+    (A->A from A to A)`))
   (t/ok ok)
   (t/is= 1 (length (graph :nodes))))
 
 (t/test "a bare word takes characters DOT would have rejected"
   # The reason `safe-name` existed: graphviz rejected a hyphen in a bare
   # identifier. v has no such rule, so this parses as one token.
-  (def [ok graph] (v/parse `(node demo-api.worker :label "demo-api")`))
+  (def [ok graph] (v/parse `(demo-api.worker label "demo-api")`))
   (t/ok ok)
   (t/is= "demo-api.worker" ((first (graph :nodes)) :name)))
 
-(t/test "a group's members are found by attribute, not by position"
+(t/test "an entity somebody names is a group, not a node"
   (def [ok graph] (v/parse `
-    (group ~.Otto :color "#ff4d6d")
-    (node Loose :label "Loose")
-    (node Otto_App :label "Otto/App" :group ~.Otto)
-    (node Otto_View :label "Otto/View" :group ~.Otto)`))
+    (~.Otto color "#ff4d6d")
+    (Loose label "Loose")
+    (Otto_App label "Otto/App" ~.Otto)
+    (Otto_View label "Otto/View" ~.Otto)`))
   (t/ok ok)
-  (t/is= ["Loose" "Otto_App" "Otto_View"] (map |($ :name) (graph :nodes)))
+  (t/is= ["Loose" "Otto_App" "Otto_View"] (map |($ :name) (graph :nodes))
+         "the group is not among the nodes")
   (t/is= [{:prefix "~.Otto" :color "#ff4d6d"}] (graph :groups))
   (t/is= @{"Otto_App" "~.Otto" "Otto_View" "~.Otto"} (graph :claimed)
          "and membership came off the members"))
@@ -110,21 +142,46 @@
 (t/test "a group's members need not be adjacent"
   # The case the nested language could not express and svg/draw had to work
   # around by drawing one box per layer.
-  (def [_ graph] (v/parse `
-    (node A :group G)
-    (node B)
-    (node C :group G)`))
-  (t/is= @{"A" "G" "C" "G"} (graph :claimed)))
+  (def [_ graph] (v/parse "(A G) (B) (C G)"))
+  (t/is= @{"A" "G" "C" "G"} (graph :claimed))
+  (t/is= ["A" "B" "C"] (map |($ :name) (graph :nodes))))
 
-(t/test "a group used but never declared still exists"
-  (def [_ graph] (v/parse "(node A :group G)"))
+(t/test "a group named but never described still exists"
+  (def [_ graph] (v/parse "(A G)"))
   (t/is= ["G"] (map |($ :prefix) (graph :groups))
          "the row that names it is enough to create it"))
+
+(t/test "a group described but never joined still exists"
+  (def [_ graph] (v/parse `(G color "#abc")`))
+  (t/is= [{:prefix "G" :color "#abc"}] (graph :groups))
+  (t/is= 0 (length (graph :nodes)) "and it is not mistaken for a node"))
+
+(t/test "an edge may reference a node no form declared"
+  # The row that names it is enough to create it, so order never matters.
+  (def [ok graph] (v/parse "(A->B from A to B)"))
+  (t/ok ok)
+  (t/is= [["A" "B"]] (graph :edges))
+  (t/is= ["A" "B"] (map |($ :name) (graph :nodes))))
+
+(t/test "an edge may be declared before its ends"
+  (def [ok graph] (v/parse `
+    (A->B from A to B)
+    (A label "A")
+    (B label "B")`))
+  (t/ok ok)
+  (t/is= [["A" "B"]] (graph :edges))
+  (t/is= 2 (length (graph :nodes)))
+  (t/is= "A" ((first (graph :nodes)) :label) "and the later label still lands"))
+
+(t/test "an edge missing an end is a message"
+  (def [ok why] (v/parse "(A->B from A)"))
+  (t/ok (not ok))
+  (t/ok (string/find "both from and to" why)))
 
 (t/test "a string label decodes its escapes"
   # DOT carried the two characters `\` and `n` and let graphviz split them;
   # here the label reaches the renderer with a real newline in it.
-  (def [_ graph] (v/parse `(node A :label "Otto/\nApp")`))
+  (def [_ graph] (v/parse `(A label "Otto/\nApp")`))
   (t/is= "Otto/\nApp" ((first (graph :nodes)) :label))
   (t/is= 2 (length (string/split "\n" ((first (graph :nodes)) :label)))))
 
@@ -135,20 +192,27 @@
   (t/ok ok "the rendered text still parses")
   (t/is= `He said "hi"` ((first (graph :nodes)) :label) "and the label survives"))
 
+(t/test "an empty graph is a graph"
+  (def [ok graph] (v/parse ""))
+  (t/ok ok)
+  (t/is= 0 (length (graph :nodes)))
+  (t/is= 0 (length (graph :edges))))
+
 #
 # Writing.
 #
 
 (t/test "rendering writes a form per entity"
   (def text (v/render (sample)))
-  (t/ok (string/find `(node Otto_App :label "Otto/\nApp" :ours :size 120)` text))
-  (t/ok (string/find "(edge Otto_View Otto_App)" text))
-  (t/ok (not (string/find "(graph" text)) "and there is no wrapper to nest under"))
+  (t/ok (string/find `(Otto_App label "Otto/\nApp" ours size 120)` text))
+  (t/ok (string/find "(Otto_View->Otto_App from Otto_View to Otto_App)" text))
+  (t/ok (not (string/find "(node " text)) "there is no head, only the entity")
+  (t/ok (not (string/find "(graph" text)) "and no wrapper to nest under"))
 
-(t/test "a group is declared once and named on each member"
+(t/test "a group is described once and named by each member"
   (def text (v/render (sample) {:groups [{:prefix "Otto_" :color "#ff4d6d"}]}))
-  (t/ok (string/find `(group Otto_ :color "#ff4d6d")` text) "declared once")
-  (t/ok (string/find ":group Otto_)" text) "and claimed by a member")
+  (t/ok (string/find `(Otto_ color "#ff4d6d")` text) "described once")
+  (t/ok (string/find "size 120 Otto_)" text) "and named by a member")
   (t/ok (string/find "OttoClip_Cart" text) "and the unclaimed node is still there"))
 
 (t/test "render and parse are inverses"
@@ -169,66 +233,23 @@
   (def groups [{:prefix "Otto_" :color "#ff4d6d"}])
   (def [_ back] (v/parse (v/render (sample) {:groups groups})))
   # `OttoClip_Cart` is deliberately absent: it does not carry the `Otto_`
-  # prefix, so `select/group-for` never claimed it and no `:group` was
-  # written on it.
+  # prefix, so `select/group-for` never claimed it.
   (t/is= @{"Otto_App" "Otto_" "Otto_View" "Otto_"} (back :claimed))
   (t/is= [{:prefix "Otto_" :color "#ff4d6d"}] (back :groups)
          "and the colour came back with it"))
+
+(t/test "what the text said outranks what a prefix would derive"
+  # A graph read from v carries its memberships; re-deriving them from the
+  # config's prefixes would silently rewrite the file.
+  (def [_ graph] (v/parse `
+    (Weird color "#abc")
+    (unrelated_name label "n" Weird)`))
+  (def text (v/render graph {:groups (graph :groups)}))
+  (t/ok (string/find "Weird)" text)
+        "the membership is written back even though no prefix implies it"))
 
 (t/test "a second round trip changes nothing"
   # If the first pass were lossy, the second would differ from it.
   (def once (v/render (sample)))
   (def [_ back] (v/parse once))
   (t/is= once (v/render back)))
-
-#
-# What it tolerates.
-#
-
-(t/test "an edge may reference a node declared later"
-  # A row naming an unknown entity simply creates it, so order never matters.
-  (def [ok graph] (v/parse `(edge A B) (node A :label "A") (node B :label "B")`))
-  (t/ok ok)
-  (t/is= [["A" "B"]] (graph :edges))
-  (t/is= 2 (length (graph :nodes))))
-
-(t/test "an unknown form is skipped rather than fatal"
-  # Forward compatibility costs nothing and a hard error costs the picture.
-  (def [ok graph] (v/parse `(node A :label "A") (sparkle A :loudly)`))
-  (t/ok ok)
-  (t/is= 1 (length (graph :nodes))))
-
-(t/test "an unknown attribute is carried, not dropped"
-  # A row is a row. Under nesting an unrecognised form took everything
-  # inside it down too; here the fact just rides along.
-  (def [ok graph] (v/parse `(node A :label "A" :sparkle "loudly")`))
-  (t/ok ok)
-  (t/is= "loudly" ((first (graph :nodes)) :sparkle)))
-
-(t/test "malformed text is a message, not an exception"
-  (def [ok why] (v/parse "(node A"))
-  (t/ok (not ok))
-  (t/ok (string? why) "and the caller gets something to show"))
-
-(t/test "an edge needs two ends"
-  (def [ok why] (v/parse "(edge A)"))
-  (t/ok (not ok))
-  (t/ok (string/find "two node names" why)))
-
-(t/test "a node needs a name"
-  (def [ok why] (v/parse `(node :label "nameless")`))
-  (t/ok (not ok))
-  (t/ok (string/find "no name" why)))
-
-(t/test "an empty graph is a graph"
-  (def [ok graph] (v/parse ""))
-  (t/ok ok)
-  (t/is= 0 (length (graph :nodes)))
-  (t/is= 0 (length (graph :edges))))
-
-(t/test "a bare (graph) wrapper is tolerated"
-  # Older v files wrapped their forms in one. The nested body inside such a
-  # file no longer parses, but an empty wrapper is fact-free rather than fatal.
-  (def [ok graph] (v/parse "(graph)"))
-  (t/ok ok)
-  (t/is= 0 (length (graph :nodes))))
