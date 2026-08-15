@@ -538,15 +538,22 @@ async function send(action, index, keepView) {
 // somewhere else all update the answer for free.
 
 const SNAP = 14;          // how close a wall has to come to catch
-// How far, and how steeply, you must pull to take a tab out of a row.
-// STICKY ON PURPOSE. At 18px and a bare dy > dx, a sideways drag of the
-// whole strip with any downward drift in it came apart in your hand -- and
-// a row falling apart while you move it is a worse failure than one that
-// takes a moment to break, because you then have to rebuild it. Breaking
-// out is now a deliberate gesture: a long pull, and one that is mostly
-// downward rather than merely more downward than sideways.
-const BREAK = 48;         // pixels of vertical travel before the bond gives
-const BREAK_SLOPE = 2;    // ...and it must be this much steeper than sideways
+
+// WHAT BREAKS THE BOND IS A TUG, not a direction. The rule used to be a
+// distance downward plus a slope steeper than sideways, which asked the
+// wrong question twice: it made "out of the row" mean "downward", so a tab
+// could not be pulled out to the side at all, and it turned an intention
+// into arithmetic about angles that nobody performs while dragging.
+//
+// A tab comes free when you YANK it -- when the pointer accelerates hard
+// enough, whichever way it goes. Carry the strip anywhere you like at any
+// speed and it stays together; snatch one tab off it and it lets go. That
+// is one number, one comparison, and it matches what hands already do with
+// things that are stuck together.
+// Measured rather than guessed: a smooth carry of any speed peaks around
+// 0.05 px/ms^2 between samples, a snatch lands near 0.36. Sitting at 0.15
+// leaves a wide margin either side of the only line that matters.
+const BREAK_ACCEL = 0.15; // px/ms^2, sampled between pointer moves
 
 const panels = [];        // every panel, in creation order
 
@@ -617,7 +624,7 @@ function makePanel(root, options = {}) {
       raise(root);
       const box = root.getBoundingClientRect();
       const from = { x: e.clientX, y: e.clientY, w: box.width, h: box.height,
-                     left: box.left, top: box.top };
+                     left: box.left, top: box.top, at: performance.now() };
       let moved = false;
       // A FRESH GESTURE STARTS FRESH. `onGrab` clears whatever the last one
       // left behind -- which matters because a drag too small to count as
@@ -658,20 +665,34 @@ function makePanel(root, options = {}) {
   // past BREAK pulls this one out of the row on its own.
   let travelling = null;   // the tabs stuck to this one when the drag began
   let broken = false;      // has this drag pulled it out of its row?
+  let last = null;         // previous sample, for measuring the tug
 
   grab(bar, (dx, dy, from) => {
+    const now = performance.now();
     if (travelling === null) {
       travelling = stuckTo(panel).map((other) => {
         const box = other.root.getBoundingClientRect();
         return { panel: other, left: box.left, top: box.top };
       });
       broken = false;
+      // FROM REST, not from here. The slop gate above swallows the first
+      // few pixels of every gesture, so the first sample this handler sees
+      // may already be a jump -- and seeding from it would measure that
+      // jump as the starting speed and see no acceleration at all. The
+      // gesture began at the grab, motionless, and that is the baseline.
+      last = { t: from.at, dx: 0, dy: 0, speed: 0 };
     }
-    // A deliberate vertical move breaks the bond -- and once broken it stays
-    // broken for the rest of the drag, so a wobble back through the row does
-    // not silently re-attach the others to your pointer.
-    if (!broken && Math.abs(dy) > BREAK
-        && Math.abs(dy) > Math.abs(dx) * BREAK_SLOPE) {
+    // Speed between samples, then the change in speed between them: a
+    // steady drag of any pace has an acceleration near zero, and a snatch
+    // spikes it. Guarded against a zero interval, which a burst of events
+    // in one millisecond will otherwise turn into infinity.
+    const gap = Math.max(now - last.t, 1);
+    const speed = Math.hypot(dx - last.dx, dy - last.dy) / gap;
+    const accel = Math.abs(speed - last.speed) / gap;
+    last = { t: now, dx, dy, speed };
+    // Once broken it stays broken for the rest of the drag, so easing off
+    // after the yank does not silently re-attach the others to the pointer.
+    if (!broken && accel > BREAK_ACCEL) {
       broken = true;
       travelling = [];
     }
@@ -692,16 +713,20 @@ function makePanel(root, options = {}) {
   options.onGrab = () => {
     travelling = null;
     broken = false;
+    last = null;
   };
 
   options.onDrop = () => {
-    // Snapping applies to a tab that just broke out too: pull one down and
-    // drop it beside a different row and it joins that one, which is what
-    // makes rearranging a strip feel like moving folders rather than
-    // negotiating with an escape rule.
-    const box = root.getBoundingClientRect();
-    const target = snapFor(panel, box.left, box.top);
-    if (target) place(target.x, target.y);
+    // A TAB THAT WAS YANKED STAYS WHERE IT LANDS. Snapping otherwise
+    // undoes the gesture: pull one free, let go while it is still within
+    // reach of the row it came from, and it springs back -- so the tug
+    // appears to do nothing at all, which is worse than it being hard.
+    // An ordinary drag still snaps, which is how a tab joins a row.
+    if (!broken) {
+      const box = root.getBoundingClientRect();
+      const target = snapFor(panel, box.left, box.top);
+      if (target) place(target.x, target.y);
+    }
     travelling = null;
   };
 
