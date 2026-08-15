@@ -58,7 +58,18 @@
       (if-let [chunk (:read connection 65536 nil deadline)]
         (buffer/push-string reply chunk)
         (set reading false))))
-  (when line (json/decode line)))
+  # NO LINE MEANS THIS CONNECTION IS POISONED, and saying so is the whole
+  # difference between a failed request and a corrupted stream. The request
+  # was already written; if the reply did not arrive whole, the host may
+  # still send it -- into the next exchange on this connection, which then
+  # reads the PREVIOUS answer to the PREVIOUS question. Answers shift by one
+  # and never recover. That is not theoretical: it put a raw `since` REQUEST
+  # into an HTTP response body, which is what a browser (or ./pane) sees as
+  # "BadStatusLine: {"op":"since"}". Callers close on error, so throwing is
+  # what makes reuse impossible; returning nil would let a standing
+  # connection carry the damage forward.
+  (unless line (error "incomplete reply -- connection unusable"))
+  (json/decode line))
 
 (defn- client-state
   ``A `state` reply as this side's callers expect it: keyword keys, and a

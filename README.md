@@ -130,6 +130,26 @@ The session survives a page reload — the browser attaches to a backlog of
 output rather than to the pty — and collapsing the panel leaves the agent
 running.
 
+### Driving a pane from outside the page
+
+An agent working on this tool -- or you, from a second shell -- can type
+into a pane instead of opening a private connection to the image:
+
+```bash
+./pane repl '(dev/reload "dot")'   # evaluate in the live image
+./pane harness 'what changed?'     # type at the agent
+./pane repl                        # just read what the pane shows
+```
+
+The point is visibility. `nc -U` to the repl socket gets its own evaluation
+environment, invisible to whoever is watching the pane in the page; work done
+that way leaves no trace on screen. `./pane` sends the same text as keystrokes
+to the pane's pty, so what an agent types, you see typed -- and can scroll back
+through afterwards.
+
+It reads this run's url and token from a dev-mode file beside the sockets, and
+posts to the same endpoints the page uses.
+
 ### The terminal endpoints need a token
 
 Everything else visualize serves is derived from files, and the worst a stray
@@ -229,6 +249,7 @@ src/json.janet      just enough JSON for the browser protocol
 src/dev.janet       the repl the running server hosts, and its equipment
 src/watchdog.janet  a thread that names event-loop stalls from outside them
 src/stamp.janet     which code each process is running, for the handshake
+pane                type into a pane from a shell, so agent work is visible
 tools/replay.mjs    run a captured session through the emulator, headlessly
 web/term.js         a terminal emulator, in the ~25 sequences agents emit
 web/                the page: vanilla HTML, CSS and JS, no build step

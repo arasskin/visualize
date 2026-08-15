@@ -1,0 +1,104 @@
+#!/bin/sh
+#
+# Type into a terminal pane of a running visualize, and read what it says.
+#
+#     ./pane repl '(dev/reload "dot")'    evaluate in the live image
+#     ./pane repl                         just read what the pane shows
+#     ./pane harness 'hello'              type at the agent
+#     ./pane repl --raw $'\003'           send bytes exactly as given
+#
+# WHY THIS EXISTS. An agent working on this tool used to reach the live
+# image by opening its own `nc -U` to the repl socket -- a second, private
+# connection with its own evaluation environment, invisible to the person
+# watching the repl pane in the page. Work done that way left no trace on
+# screen: no command, no result, nothing to see or scroll back to. This
+# sends the same text as KEYSTROKES to the pane's pty, so the agent and the
+# person are looking at one terminal. What the agent types, you see typed.
+#
+# It posts to /pane/<name>/input and /pane/<name>/poll exactly as the page
+# does, with the token this run wrote to its endpoint file (dev mode only --
+# see core.janet). No token, no access: the endpoint runs a program.
+
+set -e
+
+here=$(cd "$(dirname "$0")" && pwd)
+
+pane=${1:-repl}
+[ $# -gt 0 ] && shift
+
+raw=no
+if [ "$1" = "--raw" ]; then
+  raw=yes
+  shift
+fi
+text=${1:-}
+
+tmp=${TMPDIR:-/tmp}
+endpoint=$(ls -t "${tmp%/}"/visualize-*.endpoint.json 2>/dev/null | head -n 1)
+
+if [ -z "$endpoint" ] || [ ! -f "$endpoint" ]; then
+  echo "no endpoint file -- is a dev-mode server running? (./visualize)" >&2
+  exit 1
+fi
+
+url=$(sed 's/.*"url":"\([^"]*\)".*/\1/' "$endpoint")
+token=$(sed 's/.*"token":"\([^"]*\)".*/\1/' "$endpoint")
+
+# One python for the whole exchange: json encoding of the text (which may
+# contain quotes, newlines, escapes), the POST, and the wait for output.
+# python3 is already required by the test suite's replay tool.
+exec python3 - "$url" "$token" "$pane" "$raw" "$text" <<'PY'
+import json, sys, time, urllib.request
+
+url, token, pane, raw, text = sys.argv[1:6]
+
+def post(op, body):
+    request = urllib.request.Request(
+        f"{url}/pane/{pane}/{op}?k={token}",
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST")
+    with urllib.request.urlopen(request, timeout=15) as response:
+        return json.loads(response.read())
+
+# Where the pane's output stands right now: everything after this is the
+# answer to what we are about to type.
+start = post("poll", {"at": 0, "generation": 0})
+if not start.get("running"):
+    print(f"pane '{pane}' is not running -- open it in the page first",
+          file=sys.stderr)
+    sys.exit(1)
+
+at = start["at"]
+generation = start["generation"]
+
+if text:
+    # A newline unless the caller is sending exact bytes: typing a line at a
+    # repl means pressing return, and forgetting it is the whole of "why is
+    # nothing happening".
+    payload = text if raw == "yes" else text + "\r"
+    reply = post("input", {"text": payload, "at": at})
+    at = reply.get("at", at)
+    seen = reply.get("text", "")
+else:
+    seen = ""
+
+# Output arrives when the program gets round to it; the parked poll returns
+# as soon as there is any, and a couple of rounds catch a prompt that comes
+# after the result.
+deadline = time.time() + 5
+while time.time() < deadline:
+    out = post("poll", {"at": at, "generation": generation, "wait": 1500})
+    if out.get("text"):
+        seen += out["text"]
+        at = out["at"]
+        # A prompt at the end means the program is waiting for us again.
+        if seen.rstrip().endswith(">") or seen.rstrip().endswith("$"):
+            break
+    else:
+        break
+
+sys.stdout.write(seen)
+if seen and not seen.endswith("\n"):
+    sys.stdout.write("\n")
+PY

@@ -194,6 +194,31 @@
   (check/is= stamp/born (reply "stamp"))
   (stop))
 
+(check/test "an incomplete reply poisons its connection instead of shifting answers"
+  # THE DESYNC. `talk` writes a request, then reads to a newline. If the
+  # reply never completes -- a deadline, a half-written line -- the request
+  # has still been SENT, and the host may answer it later. Returning nil and
+  # keeping the connection meant the next exchange read the PREVIOUS answer
+  # to the PREVIOUS question, and every answer after it shifted by one. The
+  # symptom was a raw `since` REQUEST arriving in an HTTP response body:
+  # "BadStatusLine: {"op":"since"}" from anything speaking to the server.
+  # So an incomplete reply throws, and every caller closes on a throw.
+  (def dead (string socket ".halfline"))
+  (def listener (net/server :unix dead))
+  # A host that writes half a line and stops: the shape that used to poison.
+  (ev/go (fn []
+           (when-let [conn (try (:accept listener) ([_] nil))]
+             (try (:read conn 4096 nil 2) ([_] nil))
+             (try (:write conn "{\"partial\": tr") ([_] nil))
+             (ev/sleep 0.2)
+             (try (:close conn) ([_] nil)))))
+  (def broken (pane-client/make-client dead ["/bin/sh" "-c" "true"]))
+  (def answer (:state broken))
+  (check/ok (not (answer :running))
+            "a half-line reply is a failure, not a value")
+  (try (:close listener) ([_] nil))
+  (try (os/rm dead) ([_] nil)))
+
 (check/test "a quiet input skips the echo wait"
   # Mouse reports ride input requests but need no echo riding back -- the
   # parked poll carries the repaint. Against a program that echoes NOTHING,

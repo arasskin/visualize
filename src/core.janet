@@ -316,6 +316,8 @@
   # Where this run's dev repl listens. Named after the port, so it is only
   # knowable once the server has bound one -- set below, read per request.
   (var repl-socket nil)
+  # Where this run advertises its url and token for local tooling (dev only).
+  (var endpoint-path nil)
 
   (defn permitted?
     ``May this request drive the terminal?
@@ -554,6 +556,19 @@
   # taken name on purpose. The port is the one thing the walk just made
   # unique, which is why this waits until after the bind.
   (when dev? (set repl-socket (socket-for root (string ".repl." bound ".sock"))))
+
+  # WHERE AN AGENT FINDS THE DOOR. The terminal endpoints need this run's
+  # token, and until now the only copy lived in the served HTML -- so an
+  # agent working on this tool had to scrape the page for it, which is
+  # precisely what one did before driving `start` at the wrong port and
+  # replacing its own session. A dev-mode file says where the server is and
+  # what the token is, so ./pane can post like the page does. Dev-only and
+  # 0600: the token is the whole gate on a socket that runs a program.
+  (when dev?
+    (set endpoint-path (socket-for root ".endpoint.json"))
+    (spit endpoint-path (json/encode {"url" url "token" token
+                                      "stamp" stamp/born}))
+    (os/chmod endpoint-path 8r600))
   # The repl advertises the session tools without importing them: harness
   # writes the lines, core hands them over, dev prints whatever it is given.
   # The repl advertises the session tools without importing them: harness
@@ -584,6 +599,7 @@
                        # should too: every run mints one now, and the port in
                        # the name means a restart rarely reclaims yesterday's.
                        (when repl-socket (try (os/rm repl-socket) ([_] nil)))
+                       (when endpoint-path (try (os/rm endpoint-path) ([_] nil)))
                        (os/exit 0)))
 
   (defn align-word
