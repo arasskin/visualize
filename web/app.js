@@ -669,6 +669,7 @@ function makeTerminalPane(root, prefix) {
     } catch (e) { /* longtask unsupported: the ring still gets poll gaps */ }
   }
   let lastPollDone = 0;
+  let lastPollHadText = false;
 
   let at = 0;              // how much of the session output we have consumed
   let polling = false;     // is the loop running? (see scheduleNextPoll)
@@ -787,13 +788,17 @@ function makeTerminalPane(root, prefix) {
       setState(out.running ? '' : 'exited');
       if (!out.running) stopPolling();
       pollFailures = 0;
-      // A gap in the chain longer than a park can explain is a stall --
-      // network, browser scheduling, or an aborted fetch retried late.
+      // A gap in the chain longer than its context explains is a stall.
+      // Idle, a park legitimately holds LONGPOLL_WAIT; mid-stream -- the
+      // previous reply carried text, more is coming -- anything past 5s
+      // is not a park, it is a hang.
       const done = performance.now();
-      if (lastPollDone && done - lastPollDone > LONGPOLL_WAIT + 5000) {
+      const allowed = lastPollHadText ? 5000 : LONGPOLL_WAIT + 5000;
+      if (lastPollDone && done - lastPollDone > allowed) {
         diagNote('poll-gap', done - lastPollDone);
       }
       lastPollDone = done;
+      lastPollHadText = !!out.text;
       // A reply that says `waited` came from a supervisor that parks; the
       // next ask should already be on its way when output arrives, so the
       // chain re-polls with no timer at all. Judged per reply, not once:
@@ -969,8 +974,16 @@ function makeTerminalPane(root, prefix) {
     if (!text) return inputTurn;
     inputTurn = inputTurn.then(() => {
       const askedAt = at, askedGen = generation;
+      const sentAt = performance.now();
       return post('input', quiet ? { text, at: askedAt, quiet: true }
                                  : { text, at: askedAt })
+        .finally(() => {
+          // The sensor the first stall report was missing: a hung input
+          // fetch freezes the wheel pipeline (one batch in flight) with no
+          // longtask and no poll gap -- invisible to both other sensors.
+          const took = performance.now() - sentAt;
+          if (took > 1500) diagNote('input-stall', took);
+        })
         .then((out) => {
           if (!out || out.text === undefined) return;
           // A poll got home first with these same bytes; the echo is already

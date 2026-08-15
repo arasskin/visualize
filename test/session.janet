@@ -130,6 +130,34 @@
   (check/ok (state :running) "and the supervisor still answers")
   (harness/stop))
 
+(check/test "concurrent polls and inputs never trip over the drain"
+  # THE DRAIN RACE: drain used to read the channel's count once and take
+  # that many -- correct from one fiber, a trap from several. A parked
+  # poll's 10ms loop racing the timer and an input's echo-wait could both
+  # read N and both take N, and the loser's takes suspended on the emptied
+  # channel until the pump refilled it: 4-10 second freezes of whichever
+  # request was unlucky, and interleaved pushes scrambling backlog order.
+  # Reproduced at ~2 stalls per 8,000 browser-paced inputs; the guard makes
+  # a second drainer impossible. This runs the same collision pattern hot.
+  (harness/start ["/bin/sh" "-i"] (os/cwd) 24 80)
+  (ev/sleep 0.3)
+  (def worst @[0])
+  (def note (fn [took] (when (> took (worst 0)) (put worst 0 took))))
+  (def stop (ev/chan 1))
+  (ev/go (fn []
+           (while (zero? (ev/count stop))
+             (def t0 (os/clock :monotonic))
+             (harness/poll 999999 0 200)
+             (note (- (os/clock :monotonic) t0)))))
+  (for _ 0 300
+    (def t0 (os/clock :monotonic))
+    (harness/send "x" nil true)
+    (note (- (os/clock :monotonic) t0)))
+  (ev/give stop true)
+  (check/ok (< (worst 0) 2)
+            (string "no operation stalled (worst " (worst 0) "s)"))
+  (harness/stop))
+
 (check/test "a quiet input skips the echo wait"
   # Mouse reports ride input requests but need no echo riding back -- the
   # parked poll carries the repaint. Against a program that echoes NOTHING,

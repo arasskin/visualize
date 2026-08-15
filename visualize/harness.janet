@@ -99,23 +99,36 @@
 # buffer the write returns short and the loss is one probe answer, not a
 # frozen event loop.)
 
+(var- draining false)
 (defn- drain
   ``Move whatever the pump thread has produced into the backlog.
 
-  MUST NOT BLOCK. `ev/take` on an empty channel suspends until something
-  arrives, which would hang the request that called it -- so `ev/count` says
-  how many items are actually waiting and only that many are taken.``
+  MUST NOT BLOCK, AND ONE AT A TIME. `ev/take` on an empty channel suspends
+  until something arrives, so only as many items are taken as are actually
+  there -- and the count must hold for THIS taker. The old form read the
+  count once and took that many, which was correct from one fiber and a trap
+  from several: two drains racing -- the timer against a parked poll's 10ms
+  loop, hundreds of chances a second under a scroll flood -- both read N,
+  both took N, and the loser's takes SUSPENDED on the emptied channel until
+  the pump produced enough new chunks to pay the debt. That suspension froze
+  whichever request had called drain for 4-10 seconds (however long the
+  flood took to refill the channel), and the two drainers' interleaved
+  pushes scrambled backlog order, which the page then faithfully painted as
+  corruption. One bug, both of the last symptoms. The guard makes the race
+  impossible; the count-per-take makes over-taking impossible even alone.``
   []
-  (when output
-    (repeat (ev/count output)
-      (def value (ev/take output))
-      (if (= value :eof)
-        (set exited true)
-        (do (array/push backlog value)
-            (answer-queries value)
-            (when (> (length backlog) backlog-limit)
-              (array/remove backlog 0)
-              (++ base)))))))
+  (when (and output (not draining))
+    (set draining true)
+    (defer (set draining false)
+      (while (pos? (ev/count output))
+        (def value (ev/take output))
+        (if (= value :eof)
+          (set exited true)
+          (do (array/push backlog value)
+              (answer-queries value)
+              (when (> (length backlog) backlog-limit)
+                (array/remove backlog 0)
+                (++ base))))))))
 
 # THE TERMINAL USED TO HANG HERE, and the mechanism is worth stating because
 # nothing about it looks like a bug at the call site.
@@ -732,8 +745,12 @@
     # and the next server's is-it-free probe reads "taken". Ports 3-9 cover
     # everything the server has open at first-start time; the supervisor
     # opens its own fds after exec.
+    # The supervisor's stderr normally goes nowhere -- it is an orphan with
+    # no terminal. VISUALIZE_SUPERVISOR_LOG names a file to keep it instead,
+    # which is how the drain race was finally caught in the act.
+    (def errlog (or (os/getenv "VISUALIZE_SUPERVISOR_LOG") "/dev/null"))
     (os/execute ["/bin/sh" "-c"
-                 (string quoted " >/dev/null 2>&1"
+                 (string quoted " >/dev/null 2>" errlog
                          " 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &")]
                 :p))
 
