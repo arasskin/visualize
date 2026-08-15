@@ -524,6 +524,72 @@ async function send(action, index, keepView) {
 // the same furniture with different contents. A second copy of this logic
 // would be a second place for the drag-versus-click rule to drift.
 
+// -- snapping ----------------------------------------------------------------
+// Tabs stick together along their vertical walls, so a row of them reads as
+// one strip of folder tabs rather than three things that happen to be near
+// each other. Stuck tabs travel together when dragged sideways; a vertical
+// slide is how you break one out, which is the same motion as pulling a
+// folder up out of a drawer.
+//
+// THE BOND IS THE GEOMETRY, not a stored relationship. Two tabs are stuck
+// when their tops line up and their walls touch -- recomputed on every drag
+// rather than remembered, so there is no bookkeeping to get out of step with
+// where things actually are. Closing a panel, resizing it, or dropping it
+// somewhere else all update the answer for free.
+
+const SNAP = 14;          // how close a wall has to come to catch
+const BREAK = 18;         // how far down you must slide to pull one out
+
+const panels = [];        // every panel, in creation order
+
+// A tab's own box: the BAR's, not the panel's, since an open panel is a
+// folder hanging below a tab that keeps its own width.
+function tabBox(panel) {
+  const b = panel.bar.getBoundingClientRect();
+  return { left: b.left, right: b.right, top: b.top, bottom: b.bottom, w: b.width };
+}
+
+// Everything stuck to `panel`, walking both ways along the row so the middle
+// of a strip drags the whole strip rather than tearing it in half.
+function stuckTo(panel) {
+  const group = new Set([panel]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const other of panels) {
+      if (group.has(other) || other.root.classList.contains('hidden')) continue;
+      const a = tabBox(other);
+      for (const member of group) {
+        const b = tabBox(member);
+        const aligned = Math.abs(a.top - b.top) < 2;
+        const touching = Math.abs(a.left - b.right) < 2 || Math.abs(a.right - b.left) < 2;
+        if (aligned && touching) { group.add(other); grew = true; break; }
+      }
+    }
+  }
+  group.delete(panel);
+  return [...group];
+}
+
+// Where `panel` would land if it snapped: the nearest wall within reach,
+// or null. Only ever snaps a tab to a tab, and only sideways -- a tab that
+// wants to sit somewhere else vertically is a tab being taken out of a row.
+function snapFor(panel, left, top) {
+  const self = tabBox(panel);
+  let best = null;
+  for (const other of panels) {
+    if (other === panel || other.root.classList.contains('hidden')) continue;
+    const box = tabBox(other);
+    // Same row, or close enough to be joining it.
+    if (Math.abs(top - box.top) > SNAP) continue;
+    for (const [x, why] of [[box.right, 'after'], [box.left - self.w, 'before']]) {
+      const gap = Math.abs(left - x);
+      if (gap < SNAP && (!best || gap < best.gap)) best = { x, y: box.top, gap, why };
+    }
+  }
+  return best;
+}
+
 function makePanel(root, options = {}) {
   const bar = root.querySelector('.bar');
   const body = root.querySelector('.panel-body');
@@ -557,6 +623,7 @@ function makePanel(root, options = {}) {
         handle.removeEventListener('pointerup', drop);
         handle.removeEventListener('pointercancel', drop);
         handle.dragged = moved;
+        if (moved && options.onDrop) options.onDrop();
       };
       handle.addEventListener('pointermove', move);
       handle.addEventListener('pointerup', drop);
@@ -572,7 +639,29 @@ function makePanel(root, options = {}) {
     root.style.top = Math.min(Math.max(top, 0), innerHeight - edge) + 'px';
   }
 
-  grab(bar, (dx, dy, from) => place(from.left + dx, from.top + dy));
+  // Dragging a tab: the group comes along sideways, and a vertical slide
+  // past BREAK pulls this one out of the row on its own.
+  let travelling = null;   // the tabs stuck to this one when the drag began
+  let broken = false;      // has this drag pulled it out of its row?
+
+  grab(bar, (dx, dy, from) => {
+    if (travelling === null) {
+      travelling = stuckTo(panel).map((other) => {
+        const box = other.root.getBoundingClientRect();
+        return { panel: other, left: box.left, top: box.top };
+      });
+      broken = false;
+    }
+    // A deliberate vertical move breaks the bond -- and once broken it stays
+    // broken for the rest of the drag, so a wobble back through the row does
+    // not silently re-attach the others to your pointer.
+    if (!broken && Math.abs(dy) > BREAK && Math.abs(dy) > Math.abs(dx)) {
+      broken = true;
+      travelling = [];
+    }
+    place(from.left + dx, from.top + dy);
+    for (const rider of travelling) rider.panel.place(rider.left + dx, rider.top + dy);
+  });
   grab(grip, (dx, dy, from) => {
     const w = Math.max(options.minWidth || 240, from.w + dx);
     const h = Math.max(options.minHeight || 120, from.h + dy);
@@ -581,6 +670,20 @@ function makePanel(root, options = {}) {
     if (options.onResize) options.onResize(w, h);
   });
 
+  // Landing: if a wall is within reach, sit flush against it. Done on drop
+  // rather than continuously, so the tab follows the pointer honestly while
+  // moving and only commits when let go.
+  options.onDrop = () => {
+    // Snapping applies to a tab that just broke out too: pull one down and
+    // drop it beside a different row and it joins that one, which is what
+    // makes rearranging a strip feel like moving folders rather than
+    // negotiating with an escape rule.
+    const box = root.getBoundingClientRect();
+    const target = snapFor(panel, box.left, box.top);
+    if (target) place(target.x, target.y);
+    travelling = null;
+  };
+
   const panel = {
     root, bar, body, grip,
     place,
@@ -588,6 +691,7 @@ function makePanel(root, options = {}) {
     open() { if (panel.shut) bar.click(); },
     toggle() { bar.click(); },
   };
+  panels.push(panel);
 
   bar.addEventListener('click', () => {
     // A drag that ended on the bar is not a click asking to collapse it.
