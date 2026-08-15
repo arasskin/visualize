@@ -128,8 +128,8 @@ function moduleNames(svg) {
     if (!key) continue;
     const runs = [...node.querySelectorAll('text')].map(t => t.textContent.trim());
     // The show-lines view appends a count as its own run. Only a run that is
-    // ALL digits (or 1.3k) goes -- a file could legitimately end in a number.
-    if (runs.length > 1 && /^[\d.]+k?$/.test(runs[runs.length - 1])) runs.pop();
+    // ALL digits goes -- a file could legitimately end in a number.
+    if (runs.length > 1 && /^\d+$/.test(runs[runs.length - 1])) runs.pop();
     const label = runs.join('');
     byNode.set(key.textContent.trim(), label || key.textContent.trim());
   }
@@ -682,7 +682,7 @@ function makeTerminalPane(root, prefix) {
   let generation = 0;      // bumped server-side per start, so a restart resets us
 
   // Every terminal request carries the token; without it the server answers 403.
-  // See `permitted?` in visualize.janet for why localhost alone is not enough.
+  // See `permitted?` in src/core.janet for why localhost alone is not enough.
   async function post(path, body = {}, timeoutMs = 15000) {
     // THE TIMEOUT IS WHAT SURVIVES A SUSPEND. A fetch that is in flight when
     // the machine sleeps can come back neither resolved nor rejected, and the

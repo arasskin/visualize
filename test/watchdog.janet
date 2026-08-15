@@ -6,7 +6,7 @@
 # (the "test-loop" line in this suite's output is this test running, not a
 # problem being reported).
 
-(import ../visualize/watchdog)
+(import ../src/watchdog)
 (import ./harness :as t)
 
 (t/test "the watchdog names a stalled event loop"

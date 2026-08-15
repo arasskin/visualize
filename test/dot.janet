@@ -1,7 +1,7 @@
 # Prefix matching, filtering, and the DOT that comes out the far side.
 
-(import ../visualize/dot)
-(import ../visualize/color)
+(import ../src/dot)
+(import ../src/color)
 (import ./harness :as t)
 
 # A small graph with the shape that matters: our own files in two directories,
@@ -70,10 +70,10 @@
   (t/is= 2 (counts "Otto_App"))
   (t/is= 1 (counts "SwiftUI")))
 
-(t/test "line counts shorten the way the Python tool wrote them"
+(t/test "line counts are written out in full"
   (t/is= "240" (dot/thousands 240))
-  (t/is= "1k" (dot/thousands 1000) "a bare 1k, not 1.0k")
-  (t/is= "1.3k" (dot/thousands 1300))
+  (t/is= "1000" (dot/thousands 1000) "no k abbreviation")
+  (t/is= "1300" (dot/thousands 1300) "and no rounding to a tenth")
   (t/is= "999" (dot/thousands 999)))
 
 (t/test "rendering produces DOT with the nodes, edges and a font"
@@ -81,7 +81,7 @@
   (t/ok (string/find "digraph G {" text))
   (t/ok (string/find "Otto_View -> Otto_App;" text))
   (t/ok (string/find "Comic Sans MS" text))
-  (t/ok (string/find "shape=box" text)))
+  (t/ok (string/find "shape=ellipse" text)))
 
 (t/test "unfilled is the default and fills nothing"
   # A wall of saturated boxes is harder to read the EDGES over, and the edges
@@ -111,7 +111,7 @@
 
 (t/test "show-lines writes the count onto the label"
   (def text (dot/render (sample) {:sized true}))
-  (t/ok (string/find `Otto/\nView\n1.3k` text))
+  (t/ok (string/find `Otto/\nView\n1300` text))
   (t/ok (not (string/find "SwiftUI\\n" text))
         "an external has no file behind it and is left alone"))
 

@@ -34,7 +34,7 @@
   (def janet? |(string/has-suffix? ".janet" $))
   (def latest
     (max (newest-in root janet?)
-         (newest-in (string root "/visualize") janet?)
+         (newest-in (string root "/src") janet?)
          (newest-in (string root "/web") (fn [_] true))))
   (def d (os/date (math/floor latest)))
   (string/format "%d%02d%02d-%02d%02d%02d"

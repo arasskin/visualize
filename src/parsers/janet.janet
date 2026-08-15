@@ -6,7 +6,7 @@
 # libraries -- the same reason the JavaScript spec keeps `./store` whole.
 #
 # A .janet file's own `spec` export is why this file exists at all: with it in
-# place, `janet visualize.janet .` draws the dependency graph of visualize.
+# place, `janet src/core.janet .` draws the dependency graph of visualize.
 
 (def- line-start '(+ (> -1 "\n") (! (> -1 1))))
 (def- space '(any (set " \t")))

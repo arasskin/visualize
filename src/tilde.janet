@@ -1,7 +1,7 @@
 # Making `~` and `#rrggbb` mean what a config author means by them.
 #
 # The config language is real Janet, which buys loops, defs and helpers for
-# free (see visualize/config.janet). It costs two collisions with Janet's reader,
+# free (see src/config.janet). It costs two collisions with Janet's reader,
 # both in the notation the Python tools already established and neither
 # negotiable -- `(show-only ~)` and `(group ~.Shared #a54a4a)` are what every
 # existing config says.

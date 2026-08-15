@@ -2,7 +2,7 @@
 #
 # visualize -- a dependency graph you draw by editing a file.
 #
-#     janet visualize.janet [directory]
+#     janet src/core.janet [directory]
 #
 # Opens a browser on the first free port at or above 8770. How the graph is
 # drawn lives in `visualize.conf` in the directory being scanned -- a few
@@ -30,7 +30,7 @@
 # to. Every button press is a real edit to the real file.
 
 # DEV MODE IS THE DEFAULT, DECIDED BEFORE ANYTHING COMPILES. Every server run
-# hosts a repl inside itself (see visualize/dev.janet) and turns on `*redef*`,
+# hosts a repl inside itself (see src/dev.janet) and turns on `*redef*`,
 # which is a property of code generation, not of runtime: set after the
 # imports below, the engine would already be compiled to constants and a repl
 # redefinition would silently change nothing. `--no-dev` opts out; `--dev` is
@@ -46,16 +46,17 @@
 
 (when dev? (put root-env *redef* true))
 
-(import ./visualize/scan)
-(import ./visualize/dot)
-(import ./visualize/config)
-(import ./visualize/http)
-(import ./visualize/parsers)
-(import ./visualize/json)
-(import ./visualize/harness)
-(import ./visualize/dev)
-(import ./visualize/stamp)
-(import ./visualize/watchdog)
+(import ./scan)
+(import ./dot)
+(import ./config)
+(import ./http)
+(import ./parsers)
+(import ./json)
+(import ./harness)
+(import ./session)
+(import ./dev)
+(import ./stamp)
+(import ./watchdog)
 
 # The env the dev repl evaluates in protos to THIS one, captured at load so
 # a connection sees the same names this file sees -- every module above,
@@ -260,27 +261,29 @@
 (defn main [& args]
   # ONE PROGRAM, TWO ROLES. Run plainly, this is the web server. Run with
   # --supervise it is the process that owns the terminal, spawned by the
-  # server's own client half and outliving it -- see visualize/harness.janet for
-  # why the pty cannot live here. Orchestrating both roles from this one
+  # server's own client half and outliving it -- see src/session.janet
+  # for why the pty cannot live here. Orchestrating both roles from this one
   # entry point means there is exactly one program to install, one to spawn,
   # and one place that knows how the pieces fit.
   (when (= (get args 1) "--supervise")
     (def path (or (get args 2) (error "usage: visualize --supervise <socket-path>")))
-    (harness/supervise path)
+    (session/supervise path)
     (os/exit 0))
 
   # The dev flags were consumed at load (they had to be -- see the top of
   # this file); here they just must not be mistaken for the directory.
   (def args (filter |(not (index-of $ ["--dev" "--no-dev"])) args))
   (def root (os/realpath (or (get args 1) (os/cwd))))
-  (def here (os/realpath (string (dyn :current-file) "/..")))
+  # The REPO root, two levels up: this file lives in visualize/, and bin/,
+  # web/ and the parsers are siblings of that directory, not of this file.
+  (def here (os/realpath (string (dyn :current-file) "/../..")))
   (def web-dir (string here "/web"))
   (def config-path (string root "/" config-name))
-  (def specs (parsers/load (string here "/visualize/parsers")))
+  (def specs (parsers/load (string here "/src/parsers")))
   (def token (make-token))
 
   # The terminal lives in another process, so that this one can be restarted
-  # without killing the agent -- see visualize/harness.janet. Told where to find it
+  # without killing the agent -- see src/harness.janet. Told where to find it
   # and how to start one, both of which only this function knows.
   #
   # The path is computed ONCE and passed twice: the address we look on and the
@@ -288,7 +291,7 @@
   # two calls is two chances for that to stop being true.
   (def socket (socket-for root))
   (harness/configure socket
-                     [(string here "/bin/janet") (string here "/visualize.janet")
+                     [(string here "/bin/janet") (string here "/src/core.janet")
                       "--supervise" socket])
 
   # The repl window's pty, behind a SECOND supervisor -- the same machinery as
@@ -303,7 +306,7 @@
   (def repl-client
     (when dev?
       (harness/make-client replterm-socket
-                           [(string here "/bin/janet") (string here "/visualize.janet")
+                           [(string here "/bin/janet") (string here "/src/core.janet")
                             "--supervise" replterm-socket])))
   # Where this run's dev repl listens. Named after the port, so it is only
   # knowable once the server has bound one -- set below, read per request.

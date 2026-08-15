@@ -10,7 +10,7 @@
 # by name. That is only safe if a name cannot describe a path, which is what
 # most of these assertions are about.
 
-(import ../visualize/http)
+(import ../src/http)
 (import ./harness :as t)
 
 (t/test "a plain filename in web/ is served"
@@ -22,9 +22,9 @@
 (t/test "a name may not describe a path"
   # `..` and `/` are REFUSED rather than resolved. There is no traversal to
   # get subtly wrong when the answer to anything containing a separator is no.
-  (t/is= nil (http/static-file "/../visualize.janet"))
+  (t/is= nil (http/static-file "/../visualize.conf"))
   (t/is= nil (http/static-file "/../../etc/passwd"))
-  (t/is= nil (http/static-file "/visualize/pty.janet"))
+  (t/is= nil (http/static-file "/src/pty.janet"))
   (t/is= nil (http/static-file "/web/term.js"))
   (t/is= nil (http/static-file "/a/b"))
   (t/is= nil (http/static-file "/..\\windows"))

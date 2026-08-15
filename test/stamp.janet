@@ -1,6 +1,6 @@
 # The stamp: which code is this process actually running?
 
-(import ../visualize/stamp)
+(import ../src/stamp)
 (import ./harness :as t)
 
 (t/test "the stamp is stable and shaped like a timestamp"

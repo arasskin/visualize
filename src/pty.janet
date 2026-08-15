@@ -18,7 +18,7 @@
 # starves Janet's scheduler, and the server would stop answering HTTP while
 # the terminal was busy -- measured, not guessed. So the pump runs on
 # `ev/thread`, a real OS thread, where blocking is allowed and harmless. That
-# is the same threading `visualize/scan.janet` uses for the parallel file scan.
+# is the same threading `src/scan.janet` uses for the parallel file scan.
 #
 # NOTHING HERE KNOWS WHAT IT IS RUNNING. The command is argv. Claude Code and
 # pi were both driven through this unchanged, which is the point: the harness

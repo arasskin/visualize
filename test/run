@@ -57,7 +57,7 @@ fi
 # that cries leak over somebody else's session cannot be run while the tool
 # is in use, which is exactly when its tests matter most.
 count_supervisors() {
-  pgrep -f "visualize\.janet --supervise .*visualize-test\.sock" 2>/dev/null | wc -l | tr -d ' '
+  pgrep -f "core\.janet --supervise .*visualize-test\.sock" 2>/dev/null | wc -l | tr -d ' '
 }
 
 survivors=$(count_supervisors)
@@ -70,6 +70,6 @@ done
 
 if [ "$survivors" -ne 0 ]; then
   echo "  FAIL  $survivors supervisor process(es) survived the suite" >&2
-  pgrep -lf "visualize\.janet --supervise .*visualize-test\.sock" >&2 || true
+  pgrep -lf "core\.janet --supervise .*visualize-test\.sock" >&2 || true
   exit 1
 fi

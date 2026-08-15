@@ -3,7 +3,7 @@
 A dependency graph you draw by editing a file.
 
 ```bash
-./run ~/code/some-project
+./visualize ~/code/some-project
 ```
 
 Opens a browser. The graph is your project; the panel top-left is the config
@@ -37,7 +37,7 @@ same runtime a year from now.
 ./build --clean   # delete it
 ```
 
-`./run` and `./test/run` both call `./build` first, and it does nothing
+`./visualize` and `./test/run` both call `./build` first, and it does nothing
 when the runtime is already compiled — so there is no separate setup step to
 remember.
 
@@ -91,7 +91,7 @@ functions and everything else comes free:
 
 Two notes on the notation, both consequences of Janet's reader:
 
-- `~` and `#rrggbb` are rewritten before parsing (`visualize/tilde.janet`). Janet
+- `~` and `#rrggbb` are rewritten before parsing (`src/tilde.janet`). Janet
   reads `~` as quasiquote and `#` as a comment, and both collisions are in
   notation the existing config files already use.
 - A bare name that isn't bound resolves to itself, which is the rule the Python
@@ -117,7 +117,7 @@ click the bar to collapse it into just the bar.
 (harness "/bin/sh" "-i")  ; anything with a command line
 ```
 
-**Nothing in the terminal knows which agent it is running.** `visualize/pty.janet`
+**Nothing in the terminal knows which agent it is running.** `src/pty.janet`
 takes argv and `web/term.js` takes bytes, so Claude Code and pi go through
 identical code — the harness is a config value, not a code path.
 
@@ -141,8 +141,8 @@ it dies with the tab), and required on every terminal request alongside an
 
 ## Adding a language
 
-Drop a file in `visualize/parsers/`. Nothing else in the tree knows languages exist —
-`visualize/parsers.janet` finds them by looking, so there is no registry to update.
+Drop a file in `src/parsers/`. Nothing else in the tree knows languages exist —
+`src/parsers.janet` finds them by looking, so there is no registry to update.
 
 A spec is data:
 
@@ -180,7 +180,7 @@ JavaScript; declarations get the strings blanked, imports get only the comments
 blanked.
 
 Five ship: `swift`, `python`, `javascript` (also .ts/.jsx/.tsx), `go`, `janet`
-— which is why `./run .` draws this tool's own graph.
+— which is why `./visualize .` draws this tool's own graph.
 
 ## Speed
 
@@ -205,27 +205,33 @@ edit. **Regenerate** is how you say the source changed.
 ## Layout
 
 ```
-run                 run it (builds the runtime first if needed)
+visualize           run it (builds the runtime first if needed)
 build               compile vendor/janet -> bin/janet, once
 vendor/janet/       the Janet runtime, amalgamated: three files, no deps
-visualize.janet     entry point: the server's two endpoints
-visualize/scan.janet    walk the tree, read every file on all cores, build the graph
-visualize/parser.janet  what a language spec is, and how one is run
-visualize/parsers.janet find the specs in visualize/parsers/ at runtime
-visualize/parsers/      one file per language
-visualize/pty.janet     a pseudo-terminal, via libc's forkpty through the FFI
-visualize/harness.janet the agent session, both halves: the owner (run as
-                        `visualize.janet --supervise`, outliving the server)
-                        and the client the HTTP routes talk through
-visualize/dot.janet     prefix matching, filtering, and the DOT that comes out
-visualize/color.janet   the palette, the ramp, and WCAG-checked label ink
-visualize/config.janet  the sandbox the config runs in
-visualize/tilde.janet   rewriting ~ and #rrggbb past Janet's reader
-visualize/http.janet    just enough HTTP for one browser on localhost
-visualize/json.janet    just enough JSON for the browser protocol
+src/core.janet      entry point: the server's two endpoints
+src/scan.janet      walk the tree, read every file on all cores, build the graph
+src/parser.janet    what a language spec is, and how one is run
+src/parsers.janet   find the specs in src/parsers/ at runtime
+src/parsers/        one file per language
+src/pty.janet       a pseudo-terminal, via libc's forkpty through the FFI
+src/session.janet   the live session -- pty, pump thread, backlog -- owned by
+                    the supervisor process (`visualize --supervise`), which
+                    outlives the server so a restart keeps the agent
+src/harness.janet   the client the HTTP routes talk through, and the wire
+                    protocol both sides of that socket agree on
+src/dot.janet       prefix matching, filtering, and the DOT that comes out
+src/color.janet     the palette, the ramp, and WCAG-checked label ink
+src/config.janet    the sandbox the config runs in
+src/tilde.janet     rewriting ~ and #rrggbb past Janet's reader
+src/http.janet      just enough HTTP for one browser on localhost
+src/json.janet      just enough JSON for the browser protocol
+src/dev.janet       the repl the running server hosts, and its equipment
+src/watchdog.janet  a thread that names event-loop stalls from outside them
+src/stamp.janet     which code each process is running, for the handshake
+tools/replay.mjs    run a captured session through the emulator, headlessly
 web/term.js         a terminal emulator, in the ~25 sequences agents emit
 web/                the page: vanilla HTML, CSS and JS, no build step
-test/               236 assertions, no framework
+test/               401 assertions, no framework
 bin/janet           the compiled runtime (gitignored build artifact)
 ```
 
@@ -261,7 +267,7 @@ error messages arriving as `null`.
 ## Developing it from inside
 
 ```bash
-./run ~/code/project
+./visualize ~/code/project
 # ...
 #   repl: nc -U /tmp/visualize-1a2b3c4d.repl.8770.sock
 
@@ -282,7 +288,7 @@ There is also a **repl window** on the page itself, beside the harness window
 It only exists in dev mode, since without one there is nothing to connect to.
 
 Connect and you are in the server's own image: every module under its prefix,
-every def in `visualize.janet` by name. From there:
+every def in `src/core.janet` by name. From there:
 
 - **Hot reload:** edit a file, `(dev/reload "scan")` — re-evaluated into the
   module's *live* environment, so every caller sees the new definitions

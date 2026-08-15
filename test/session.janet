@@ -11,15 +11,16 @@
 # are spawning, framing and reconnection, and all three live on the wire
 # between the two processes.
 
-(import ../visualize/harness)
-(import ../visualize/stamp)
+(import ../src/harness)
+(import ../src/session)
+(import ../src/stamp)
 (import ./harness :as check)
 
 # A socket of this suite's own, so running the tests never adopts (or kills)
 # the supervisor belonging to a visualize the user has open.
 (def- root (os/realpath (string (dyn :current-file) "/../..")))
 (def- socket (string (string/trimr (or (os/getenv "TMPDIR") "/tmp") "/") "/visualize-test.sock"))
-(harness/configure socket [(string root "/bin/janet") (string root "/visualize.janet") "--supervise" socket])
+(harness/configure socket [(string root "/bin/janet") (string root "/src/core.janet") "--supervise" socket])
 
 (defn- wait-for
   ``Poll until `ready?` passes or the patience runs out.
@@ -246,7 +247,7 @@
   (harness/start ["/bin/sh" "-c" "echo SURVIVOR; sleep 5"] (os/cwd) 24 80)
   (wait-for |(string/find "SURVIVOR" $))
   (harness/configure socket
-                     [(string root "/bin/janet") (string root "/visualize.janet") "--supervise" socket])
+                     [(string root "/bin/janet") (string root "/src/core.janet") "--supervise" socket])
   (def now (harness/state))
   (check/ok (now :running) "the session is still running for a new client")
   # From 0, because a fresh page has seen nothing -- this is the reload path.
@@ -382,15 +383,15 @@
   # Pure half of the fix: a read() splits the stream wherever it likes, so
   # the scanner must find a query that arrives half in one chunk and half in
   # the next -- and find it exactly once.
-  (check/is= [1 ""] (harness/da1-queries "" "\e[c"))
-  (check/is= [1 ""] (harness/da1-queries "" "before \e[0c after"))
-  (check/is= [2 ""] (harness/da1-queries "" "\e[c\e[c"))
-  (check/is= [0 "\e["] (harness/da1-queries "" "output ends \e["))
-  (check/is= [1 ""] (harness/da1-queries "\e[" "c and more"))
-  (check/is= [0 "\e[0"] (harness/da1-queries "\e[" "0"))
-  (check/is= [1 ""] (harness/da1-queries "\e[0" "c"))
-  (check/is= [0 ""] (harness/da1-queries "" "\e[0m is a colour, not a query"))
-  (check/is= [0 ""] (harness/da1-queries "\e[" "2J is a clear, not a query")))
+  (check/is= [1 ""] (session/da1-queries "" "\e[c"))
+  (check/is= [1 ""] (session/da1-queries "" "before \e[0c after"))
+  (check/is= [2 ""] (session/da1-queries "" "\e[c\e[c"))
+  (check/is= [0 "\e["] (session/da1-queries "" "output ends \e["))
+  (check/is= [1 ""] (session/da1-queries "\e[" "c and more"))
+  (check/is= [0 "\e[0"] (session/da1-queries "\e[" "0"))
+  (check/is= [1 ""] (session/da1-queries "\e[0" "c"))
+  (check/is= [0 ""] (session/da1-queries "" "\e[0m is a colour, not a query"))
+  (check/is= [0 ""] (session/da1-queries "\e[" "2J is a clear, not a query")))
 
 (check/test "a DA1 query is answered, page or no page"
   # THE STARTUP FREEZE. claude sends ESC [ c and waits for the terminal to

@@ -146,18 +146,13 @@
   (color/ramp sizes))
 
 (defn thousands
-  ``A line count as a short label: 240, 1k, 1.3k.
+  ``A line count as a label: 240, 1000, 1300.
 
-  Under a thousand is written out -- 0.2k throws away precision that fits
-  anyway. Above it, one decimal, with a bare `1k` rather than `1.0k` since the
-  tenth is only worth printing when it says something.``
+  Written out in full. The abbreviated form this used to print -- 1.3k for
+  1300 -- rounded away the difference between files a hundred lines apart,
+  which is exactly the comparison the number is on the box to support.``
   [count]
-  (if (< count 1000)
-    (string count)
-    (let [scaled (/ (math/round (/ count 100)) 10)]
-      (if (= scaled (math/floor scaled))
-        (string (math/floor scaled) "k")
-        (string scaled "k")))))
+  (string count))
 
 (defn- quoted
   "A string as a DOT literal, with quotes and backslashes escaped.
@@ -231,7 +226,7 @@
                           ", ranksep=0.6, nodesep=0.35];"))
   (array/push out (string "    edge [fontname=" (quoted font) "];"))
   (array/push out (string "    node [style=filled,fontname=" (quoted font)
-                          ",fontsize=10,shape=box];"))
+                          ",fontsize=10,shape=ellipse];"))
 
   # Nodes inside their boxes first, then the loose ones, then the edges --
   # clusters have to be declared before the edges that reference them.

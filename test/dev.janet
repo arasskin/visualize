@@ -7,7 +7,7 @@
 # still returns 200, and a debug signal under the ev scheduler is printed and
 # dropped rather than delivered anywhere. These tests keep both facts pinned.
 
-(import ../visualize/dev)
+(import ../src/dev)
 (import ./harness :as t)
 
 (def tmp (string/trimr (or (os/getenv "TMPDIR") "/tmp") "/"))

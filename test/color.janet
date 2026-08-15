@@ -5,7 +5,7 @@
 # port that drifts is a port that fails, rather than one that quietly draws a
 # different-looking graph.
 
-(import ../visualize/color :as color)
+(import ../src/color :as color)
 (import ./harness :as t)
 
 (t/test "as-hex resolves names, hex and rubbish"

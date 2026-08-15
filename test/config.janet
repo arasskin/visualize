@@ -1,8 +1,8 @@
 # The config language, and the source rewriting that makes it readable.
 
-(import ../visualize/config)
-(import ../visualize/tilde)
-(import ../visualize/color)
+(import ../src/config)
+(import ../src/tilde)
+(import ../src/color)
 (import ./harness :as t)
 
 (defn- run [& lines] (config/run lines))
@@ -10,7 +10,7 @@
 
 (t/test "the reader survives the notation the Python tools established"
   # Each of these is a Janet reader collision, and each one appears in real
-  # config files. See visualize/tilde.janet.
+  # config files. See src/tilde.janet.
   (t/is= `(show-only "~")` (tilde/prepare "(show-only ~)")
          "a bare ~ would otherwise kill the parser outright")
   (t/is= `(hide "~.OttoClip")` (tilde/prepare "(hide ~.OttoClip)"))
