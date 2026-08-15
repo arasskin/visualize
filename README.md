@@ -141,6 +141,7 @@ rather than only the tools it brought:
 vz scan [pattern]     files, sizes, what each one needs
 vz faults [n]         what has gone wrong, with stacks
 vz eval '(expr)'      evaluate in the running server's image
+vz shot [file]        the graph as it looks now (SVG, or .png)
 vz pane repl 'text'   type into a pane
 vz state [name]       the facts on disk
 vz where              url, root, state directory

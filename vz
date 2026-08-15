@@ -6,6 +6,7 @@
 #     vz faults [n]         what has gone wrong lately, with stacks
 #     vz eval '(expr)'      evaluate in the running server's own image
 #     vz pane repl 'text'   type into a pane, where a person can watch
+#     vz shot [file]        the graph as it looks right now (SVG, or .png)
 #     vz state [name]       list or print the facts on disk
 #     vz where              this run's url, token file, state directory
 #
@@ -120,6 +121,45 @@ PY
     exec "$here/pane" "$@"
     ;;
 
+  shot)
+    # WHAT THE GRAPH LOOKS LIKE, for an agent that just changed something
+    # and wants to see the result rather than trust it. SVG by default
+    # because SVG is TEXT: a tool that can read a file can read the node
+    # names, the positions and the edges out of it, which no raster format
+    # allows. Ask for a .png and it is rasterized instead -- useful for a
+    # human, or for a model that can look at images.
+    out=${1:-}
+    if [ -z "$out" ]; then
+      out=$(mktemp -t visualize-shot).svg
+    fi
+    case "$out" in
+      *.png)
+        svg=$(mktemp -t visualize-shot).svg
+        curl -fsS -m 20 "$url/graph.svg?k=$token" -o "$svg"
+        # qlmanage and sips ship with macOS, so a PNG costs no dependency.
+        # rsvg-convert is better when it happens to be installed.
+        if command -v rsvg-convert >/dev/null 2>&1; then
+          rsvg-convert -o "$out" "$svg"
+        elif command -v qlmanage >/dev/null 2>&1; then
+          dir=$(mktemp -d)
+          qlmanage -t -s 1600 -o "$dir" "$svg" >/dev/null 2>&1
+          mv "$dir"/*.png "$out" 2>/dev/null || {
+            echo "could not rasterize; the SVG is at $svg" >&2; exit 1; }
+          rm -rf "$dir"
+        else
+          echo "no rasterizer found; the SVG is at $svg" >&2
+          exit 1
+        fi
+        rm -f "$svg"
+        ;;
+      *)
+        curl -fsS -m 20 "$url/graph.svg?k=$token" -o "$out"
+        ;;
+    esac
+    # The path on stdout, so a caller can pipe it straight into a Read.
+    echo "$out"
+    ;;
+
   state)
     if [ -z "${1:-}" ]; then
       ls -1 "$state" 2>/dev/null || echo "no state yet"
@@ -136,6 +176,6 @@ PY
     ;;
 
   help|*)
-    sed -n '3,16p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'
     ;;
 esac

@@ -415,6 +415,18 @@
                   (json/encode {"generation" source-generation
                                 "changed" (not= seen source-generation)})]))
 
+      # THE GRAPH ALONE, as SVG. The page embeds the same picture, but an
+      # agent asking "what does it look like now?" should not have to dig
+      # it out of a page full of terminal panes and config rows -- and SVG
+      # is text, which is the one image format something with a Read tool
+      # can actually reason about. `vz shot` fetches this.
+      (and (= method "GET") (= path "/graph.svg"))
+      (guarded (fn []
+                 (def [_ _ ok result] (draw))
+                 (if ok
+                   ["200 OK" "image/svg+xml" result]
+                   ["500 Internal Server Error" "text/plain" result])))
+
       # WHICH TREE THIS RUN SERVES. The harness tools need the state
       # directory, and an agent's working directory is not a reliable
       # guide -- it may have cd'd anywhere. Cheap, and it means `vz` never
