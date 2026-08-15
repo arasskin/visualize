@@ -538,7 +538,15 @@ async function send(action, index, keepView) {
 // somewhere else all update the answer for free.
 
 const SNAP = 14;          // how close a wall has to come to catch
-const BREAK = 18;         // how far down you must slide to pull one out
+// How far, and how steeply, you must pull to take a tab out of a row.
+// STICKY ON PURPOSE. At 18px and a bare dy > dx, a sideways drag of the
+// whole strip with any downward drift in it came apart in your hand -- and
+// a row falling apart while you move it is a worse failure than one that
+// takes a moment to break, because you then have to rebuild it. Breaking
+// out is now a deliberate gesture: a long pull, and one that is mostly
+// downward rather than merely more downward than sideways.
+const BREAK = 48;         // pixels of vertical travel before the bond gives
+const BREAK_SLOPE = 2;    // ...and it must be this much steeper than sideways
 
 const panels = [];        // every panel, in creation order
 
@@ -611,6 +619,13 @@ function makePanel(root, options = {}) {
       const from = { x: e.clientX, y: e.clientY, w: box.width, h: box.height,
                      left: box.left, top: box.top };
       let moved = false;
+      // A FRESH GESTURE STARTS FRESH. `onGrab` clears whatever the last one
+      // left behind -- which matters because a drag too small to count as
+      // movement never reaches `drop`, so anything reset only there would
+      // still be set when the next drag began. That is how a stuck pair
+      // stopped being able to break apart: the second drag reused the
+      // first's rider list and its already-broken flag.
+      if (options.onGrab) options.onGrab();
       handle.setPointerCapture(e.pointerId);
       const move = (m) => {
         const dx = m.clientX - from.x, dy = m.clientY - from.y;
@@ -655,7 +670,8 @@ function makePanel(root, options = {}) {
     // A deliberate vertical move breaks the bond -- and once broken it stays
     // broken for the rest of the drag, so a wobble back through the row does
     // not silently re-attach the others to your pointer.
-    if (!broken && Math.abs(dy) > BREAK && Math.abs(dy) > Math.abs(dx)) {
+    if (!broken && Math.abs(dy) > BREAK
+        && Math.abs(dy) > Math.abs(dx) * BREAK_SLOPE) {
       broken = true;
       travelling = [];
     }
@@ -673,6 +689,11 @@ function makePanel(root, options = {}) {
   // Landing: if a wall is within reach, sit flush against it. Done on drop
   // rather than continuously, so the tab follows the pointer honestly while
   // moving and only commits when let go.
+  options.onGrab = () => {
+    travelling = null;
+    broken = false;
+  };
+
   options.onDrop = () => {
     // Snapping applies to a tab that just broke out too: pull one down and
     // drop it beside a different row and it joins that one, which is what
