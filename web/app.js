@@ -682,6 +682,8 @@ function makeTerminalPane(root, prefix) {
   // rounds were once spent on fixes that sat on disk while every process
   // kept running its birth code; this is what would have said so.
   let stampNote = '';
+  // Server-side faults since this pane attached, named in the state line.
+  let faultNote = '';
 
   let at = 0;              // how much of the session output we have consumed
   let polling = false;     // is the loop running? (see scheduleNextPoll)
@@ -797,13 +799,22 @@ function makeTerminalPane(root, prefix) {
         // Following the output happens in the emulator's onPaint, once the
         // new height exists to scroll to.
       }
+      // SERVER FAULTS SURFACE IN THE PANE. They used to go only to stderr,
+      // which nobody working in this page can see -- so a tool for making a
+      // codebase visible hid its own failures. The count is cheap to carry
+      // and the detail is one repl call away, or ./pane faults.
+      if (out.faults) faultNote = out.faults > 0
+        ? `${out.faults} server fault${out.faults > 1 ? 's' : ''}` : '';
       if (out.serverStamp) {
         stampNote = window.STAMP && out.serverStamp !== window.STAMP
           ? 'page outdated — reload'
           : (out.stamp && out.stamp !== out.serverStamp
               ? 'supervisor outdated — restart the session to update' : '');
       }
-      setState(stampNote || (out.running ? '' : 'exited'));
+      // Order is severity: a version mismatch explains everything else, a
+      // fault is the next most useful thing to know, and "exited" is the
+      // ordinary end of a session.
+      setState(stampNote || faultNote || (out.running ? '' : 'exited'));
       if (!out.running) stopPolling();
       pollFailures = 0;
       // A gap in the chain longer than its context explains is a stall.

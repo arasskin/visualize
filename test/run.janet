@@ -22,6 +22,7 @@
 (import ./json)
 (import ./scan)
 (import ./dev)
+(import ./faults)
 (import ./stamp)
 # These spawn real processes (and the watchdog a real thread). Nothing may
 # be imported below them.

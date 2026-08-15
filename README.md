@@ -150,6 +150,21 @@ through afterwards.
 It reads this run's url and token from a dev-mode file beside the sockets, and
 posts to the same endpoints the page uses.
 
+### When the server itself breaks
+
+Server errors used to go only to stderr -- invisible to an agent working in a
+pane, and gone unless you were watching the terminal you launched from. They
+are now kept in a ring the tool can be asked about:
+
+```bash
+./pane repl '(faults/print-recent)'   # the last few, with their stacks
+```
+
+The pane's state line says `2 server faults` when there are any, so a failure
+announces itself rather than waiting to be looked for. Repeats collapse into a
+count, since a failing poll fails several times a second and sixty identical
+entries would bury the one fault that explains them.
+
 ### The terminal endpoints need a token
 
 Everything else visualize serves is derived from files, and the worst a stray
@@ -247,6 +262,7 @@ src/tilde.janet     rewriting ~ and #rrggbb past Janet's reader
 src/http.janet      just enough HTTP for one browser on localhost
 src/json.janet      just enough JSON for the browser protocol
 src/dev.janet       the repl the running server hosts, and its equipment
+src/faults.janet    what has gone wrong lately, where an agent can read it
 src/watchdog.janet  a thread that names event-loop stalls from outside them
 src/stamp.janet     which code each process is running, for the handshake
 pane                type into a pane from a shell, so agent work is visible

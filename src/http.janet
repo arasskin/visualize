@@ -8,6 +8,8 @@
 # Bound to 127.0.0.1 rather than 0.0.0.0, deliberately: the server reads the
 # filesystem and runs a config, and neither belongs on the network.
 
+(import ./faults)
+
 (defn- header-end
   "Where the headers stop and the body begins, or nil if they have not."
   [buf]
@@ -176,6 +178,14 @@
                # race lives, and the browser's six-slot pool is what the
                # churn was starving.
                (while serving
+                 # CLEARED BEFORE EACH READ, so it names the request being
+                 # served rather than the last one served. On a keep-alive
+                 # connection it used to persist, and an idle timeout waiting
+                 # for the NEXT request was logged against the PREVIOUS one
+                 # -- "request failed (/style.css): timeout" for a connection
+                 # that had finished style.css a minute earlier and was
+                 # simply idle. Alarming, and pointing at the wrong place.
+                 (setdyn :serving nil)
                  (def request (read-request conn carry))
                  (if-not request
                    (set serving false)
@@ -188,7 +198,17 @@
                  # A bug in a handler must not take the server down with it --
                  # the browser would see only "failed to fetch" and the next
                  # request would find nothing listening.
-                 (if (= (string err) "Bad file descriptor")
+                 (if (or (= (string err) "Bad file descriptor")
+                         # AN IDLE KEEP-ALIVE CONNECTION IS NOT A FAULT. A
+                         # browser opens several and abandons most of them
+                         # without closing; the read deadline in
+                         # `read-request` is what stops those holding fibers
+                         # forever, and it firing is the deadline WORKING.
+                         # Logged as a crash with a stack trace, it filled
+                         # the terminal with alarming noise about nothing --
+                         # and taught the reader to ignore the place real
+                         # faults appear.
+                         (and (= (string err) "timeout") (nil? (dyn :serving))))
                    # A known, survivable race, worth one quiet line and no
                    # more: under heavy browser concurrency the runtime very
                    # occasionally invalidates a connection's fd behind its
@@ -198,8 +218,9 @@
                    # provoked it is also gone, so this is rare. No 500 is
                    # attempted -- it would be a second write to the same dead
                    # descriptor.
-                   (eprintf "dropped one reply (%s): connection fd went stale"
-                            (or (dyn :serving) "?"))
+                   (unless (= (string err) "timeout")
+                     (eprintf "dropped one reply (%s): connection fd went stale"
+                              (or (dyn :serving) "?")))
                    (do
                      # WITH THE STACK, not just the message. An error with no
                      # location here was diagnosed wrong twice -- a leaked
@@ -207,9 +228,15 @@
                      # and neither the one being chased -- because one line
                      # said nothing about which of a dozen fd-using calls had
                      # thrown. An error a person must chase carries its trace.
-                     (eprintf "request failed (%s): %s"
-                              (or (dyn :serving) "before-respond") (string err))
+                     (def where (or (dyn :serving) "before-respond"))
+                     (eprintf "request failed (%s): %s" where (string err))
                      (debug/stacktrace fib err "  ")
+                     # AND INTO THE RING, where the agent working on this
+                     # tool can find it without watching a terminal it
+                     # cannot see. See src/faults.janet.
+                     (def trace @"")
+                     (with-dyns [*err* trace] (debug/stacktrace fib err "  "))
+                     (faults/record :request where (string err) (string trace))
                      (try
                        (respond conn "500 Internal Server Error" "text/plain"
                                 (string err))

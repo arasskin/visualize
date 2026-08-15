@@ -55,6 +55,7 @@
 (import ./pane-client)
 (import ./pane-host)
 (import ./dev)
+(import ./faults)
 (import ./stamp)
 (import ./watchdog)
 
@@ -281,6 +282,9 @@
   (def config-path (string root "/" config-name))
   (def specs (parsers/load (string here "/src/parsers")))
   (def token (make-token))
+  # When this run began. Faults are counted from here, so the page's number
+  # means "since the server started" rather than "ever".
+  (def page-born (os/time))
 
   # The terminal lives in another process, so that this one can be restarted
   # without killing the agent -- see src/pane-client.janet. Told where to find
@@ -389,8 +393,12 @@
                (when-let [w (get sent "wait")] (math/floor w)))
           # The server's own stamp beside the supervisor's, so the page can
           # tell WHICH of its three parties is running old code -- see
-          # stamp.janet for the two rounds that question once cost.
-          {"serverStamp" stamp/born}))])
+          # stamp.janet for the two rounds that question once cost. And how
+          # many faults the server has recorded since this page loaded, so
+          # the pane can say so rather than leaving them on a stderr nobody
+          # is watching.
+          {"serverStamp" stamp/born
+           "faults" (faults/count-since page-born)}))])
 
     (cond
       (and (= method "GET") (= path "/"))
@@ -499,6 +507,20 @@
                  (poll-answer (fn [at gen wait] (:poll repl-client at gen wait))
                               (request :body))))
 
+      # WHAT HAS GONE WRONG LATELY, for the page's state line and for an
+      # agent asking the tool about itself. Guarded like the terminal
+      # endpoints because a stack trace names paths and code: the same
+      # reasoning as `permitted?`, and no reason to be laxer.
+      (and (= method "POST") (= path "/faults"))
+      (guarded (fn []
+                 (def sent (try (json/decode (request :body)) ([_] {})))
+                 (def since (math/floor (or (get sent "since") 0)))
+                 ["200 OK" "application/json"
+                  (json/encode {"faults" (faults/recent
+                                           (math/floor (or (get sent "limit") 10)))
+                                "since" (faults/count-since since)
+                                "now" (os/time)})]))
+
       # Anything else in web/, served by name rather than by a route per file.
       #
       # THIS WAS A ROUTE PER FILE and it broke the whole page: app.js grew an
@@ -573,7 +595,10 @@
   # writes the lines, core hands them over, dev prints whatever it is given.
   # The repl advertises the session tools without importing them: harness
   # writes the lines, core hands them over, dev prints whatever it is given.
-  (when dev? (dev/serve repl-socket this-env "visualize" pane-client/equipment))
+  (when dev?
+    (dev/serve repl-socket this-env "visualize"
+               (string pane-client/equipment
+                       "faults:   (faults/print-recent) what has gone wrong lately\n")))
 
   # CTRL-C TAKES THE AGENT WITH IT, and this is the only thing that does.
   #
