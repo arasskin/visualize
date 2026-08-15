@@ -22,6 +22,8 @@
 # vocabularies cannot collide.
 
 (import ./pty)
+(import ./stamp)
+(import ./watchdog)
 (import ./json)
 
 # -- owning a session --------------------------------------------------------
@@ -207,6 +209,11 @@
    # the observable that separates "our pipeline stalled" from "the
    # program did".
    "unsent" (length unsent)
+   # The code THIS process was born running. The page compares it against
+   # the server's with every poll and names a mismatch in its state line,
+   # because two debugging rounds were once spent on fixes that sat on
+   # disk while every process kept running its birth code.
+   "stamp" stamp/born
    "cols" pty-cols})
 
 (defn- session-start
@@ -478,6 +485,7 @@
           "rows" (now "rows")
           "cols" (now "cols")
           "trimmed" (now "trimmed")
+          "stamp" (now "stamp")
           "waited" (pos? wait)}
          false]))
 
@@ -506,6 +514,10 @@
   (def done (ev/chan 1))
   # Before any connection is answered: the pump must never wait on a poll.
   (keep-draining)
+  # And a witness that survives a stalled event loop -- the one observer
+  # position every in-process instrument lacks. Its reports land on stderr,
+  # which VISUALIZE_SUPERVISOR_LOG can keep.
+  (watchdog/start "supervisor")
   # AN UNREACHABLE SUPERVISOR MUST DIE ON ITS OWN. Clients find this process
   # through the socket file and nothing else, so a supervisor whose file is
   # gone can never again be spoken to -- including the `shutdown` that is its
@@ -911,6 +923,7 @@
         # Whether the supervisor understood `wait` -- the page's signal that
         # it may chain polls with no timer instead of pacing them.
         "waited" (truthy? (get reply "waited"))
+        "stamp" (or (get reply "stamp") "")
         "reachable" true}
        # UNREACHABLE IS NOT DEAD. This fallback used to say running=false,
        # generation=0 -- and the page, taking it as truth, blanked its screen

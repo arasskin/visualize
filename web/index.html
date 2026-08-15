@@ -58,5 +58,9 @@ window.CONFIG_PROBLEMS = {{CONFIG_PROBLEMS}};
 window.TOKEN = {{TOKEN}};
 // Whether this run hosts a dev repl -- without one there is no repl panel.
 window.DEV = {{DEV}};
+// The code the server was running when it rendered this page. Poll replies
+// carry the server's and supervisor's current stamps; a mismatch among the
+// three is named in the terminal's state line instead of being debugged.
+window.STAMP = {{STAMP}};
 </script>
 <script type="module" src="/app.js"></script>

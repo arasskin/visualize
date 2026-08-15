@@ -54,6 +54,8 @@
 (import ./visualize/json)
 (import ./visualize/harness)
 (import ./visualize/dev)
+(import ./visualize/stamp)
+(import ./visualize/watchdog)
 
 # The env the dev repl evaluates in protos to THIS one, captured at load so
 # a connection sees the same names this file sees -- every module above,
@@ -193,6 +195,7 @@
        # Whether this run hosts a dev repl; without one the page drops the
        # repl panel rather than offering a window onto nothing.
        (string/replace "{{DEV}}" (json/encode dev?))
+       (string/replace "{{STAMP}}" (json/encode stamp/born))
        # The SVG goes in last, and with a function rather than a literal:
        # string/replace treats `%` sequences in its replacement specially, and
        # graphviz output is full of them (`%3C` in URLs, percent widths). A
@@ -409,7 +412,8 @@
                  # path, and each one is a round trip to the supervisor.
                  ["200 OK" "application/json"
                   (json/encode
-                    (harness/poll (math/floor (or (get sent "at") 0))
+                    (merge
+                     (harness/poll (math/floor (or (get sent "at") 0))
                                   # Which session the page's `at` belongs to.
                                   # Absent from an older page, which then gets
                                   # the previous behaviour rather than an error.
@@ -420,7 +424,12 @@
                                   # transport. Absent from an older page,
                                   # which keeps polling on its own timers.
                                   (when-let [w (get sent "wait")]
-                                    (math/floor w))))]))
+                                    (math/floor w)))
+                     # The server's own stamp beside the supervisor's, so
+                     # the page can tell WHICH of its three parties is
+                     # running old code -- see stamp.janet for the two
+                     # rounds that question once cost.
+                     {"serverStamp" stamp/born}))]))
 
       # -- the repl window --------------------------------------------------
       # The harness endpoints again, one per one, against the second
@@ -473,12 +482,14 @@
                  (def sent (json/decode (request :body)))
                  ["200 OK" "application/json"
                   (json/encode
-                    (:poll repl-client
-                           (math/floor (or (get sent "at") 0))
-                           (when-let [g (get sent "generation")]
-                             (math/floor g))
-                           (when-let [w (get sent "wait")]
-                             (math/floor w))))]))
+                    (merge
+                     (:poll repl-client
+                            (math/floor (or (get sent "at") 0))
+                            (when-let [g (get sent "generation")]
+                              (math/floor g))
+                            (when-let [w (get sent "wait")]
+                              (math/floor w)))
+                     {"serverStamp" stamp/born}))]))
 
       # Anything else in web/, served by name rather than by a route per file.
       #
@@ -574,6 +585,9 @@
   (print (align-word "parsers: " "visualize: ") (string/join (map |($ :name) specs) ", "))
   (when dev? (print (align-word "repl: " "visualize: ") "nc -U " repl-socket))
   (print "ctrl-c to stop")
+  # The loop's own witness: a thread that names event-loop stalls on stderr,
+  # from the one vantage point a stall cannot silence.
+  (watchdog/start "server")
   # Off the server, not off the constant: they differ whenever the first
   # choice was taken, and printing the wrong one sends you to somebody else's
   # page.

@@ -12,6 +12,7 @@
 # between the two processes.
 
 (import ../visualize/harness)
+(import ../visualize/stamp)
 (import ./harness :as check)
 
 # A socket of this suite's own, so running the tests never adopts (or kills)
@@ -156,6 +157,16 @@
   (ev/give stop true)
   (check/ok (< (worst 0) 2)
             (string "no operation stalled (worst " (worst 0) "s)"))
+  (harness/stop))
+
+(check/test "poll reports which code the supervisor runs"
+  # The handshake's supervisor half: a fresh supervisor was born from the
+  # sources on disk, so its stamp matches ours. A long-lived one after an
+  # edit would not -- which is the page's cue to say "supervisor outdated"
+  # instead of letting fixes be debugged that were never running.
+  (harness/start ["/bin/sh" "-c" "sleep 3"] (os/cwd) 24 80)
+  (def reply (harness/poll 0))
+  (check/is= stamp/born (reply "stamp"))
   (harness/stop))
 
 (check/test "a quiet input skips the echo wait"

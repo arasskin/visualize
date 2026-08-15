@@ -670,6 +670,11 @@ function makeTerminalPane(root, prefix) {
   }
   let lastPollDone = 0;
   let lastPollHadText = false;
+  // A version mismatch among page, server and supervisor, once seen, is
+  // named in the state line until it stops being true. Two debugging
+  // rounds were once spent on fixes that sat on disk while every process
+  // kept running its birth code; this is what would have said so.
+  let stampNote = '';
 
   let at = 0;              // how much of the session output we have consumed
   let polling = false;     // is the loop running? (see scheduleNextPoll)
@@ -785,7 +790,13 @@ function makeTerminalPane(root, prefix) {
         // Following the output happens in the emulator's onPaint, once the
         // new height exists to scroll to.
       }
-      setState(out.running ? '' : 'exited');
+      if (out.serverStamp) {
+        stampNote = window.STAMP && out.serverStamp !== window.STAMP
+          ? 'page outdated — reload'
+          : (out.stamp && out.stamp !== out.serverStamp
+              ? 'supervisor outdated — restart the session to update' : '');
+      }
+      setState(stampNote || (out.running ? '' : 'exited'));
       if (!out.running) stopPolling();
       pollFailures = 0;
       // A gap in the chain longer than its context explains is a stall.
