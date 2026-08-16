@@ -508,3 +508,14 @@
          "scored plainly, the exact median sorts first")
   (t/is= ["node" "bend"] (order-with (fn [n] (= n "bend")))
          "as a bend, it yields the slot and routes past instead"))
+
+# NOT TESTED HERE: the claim reaching one rank past the group's lowest member
+# (see `claims-by-layer` in `place-x`). A node is drawn as an ellipse, so the
+# box around it extends half a node plus the inset BELOW the rank line -- about
+# fifty units into the gap before the next rank -- and an edge bending on that
+# next rank could sit inside the box's x-range and clip the overhang on the way
+# up to it. `src/json -> src/core` and `src/stamp -> src/core` both cut the
+# bottom corner of `src.term` that way. Extending the claim fixed it and took
+# the picture from 1269 to 1204 wide, but every minimal graph tried here places
+# identically with the extension on or off, so a test built on one would assert
+# nothing.

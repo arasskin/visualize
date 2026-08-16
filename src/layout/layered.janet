@@ -540,7 +540,19 @@
     (each index indexes
       (def here @[])
       (eachp [key s] span
-        (when (and (<= (s :top) index) (<= index (s :low)))
+        # ONE RANK PAST THE LOWEST MEMBER, because the box reaches there. A
+        # node is drawn as an ellipse, so the box around it extends half a
+        # node plus the inset BELOW the rank line -- about fifty units into
+        # the gap before the next rank. An edge bending on that next rank is
+        # free to sit inside the box's x-range, and the segment climbing to
+        # it clips the overhang: `src/json -> src/core` and
+        # `src/stamp -> src/core` both cut the bottom corner of `src.term`
+        # that way, having cleared it perfectly well on the ranks the group
+        # actually has members on.
+        #
+        # The same is true above the topmost member, where the box also
+        # carries its name.
+        (when (and (<= (- (s :top) 1) index) (<= index (+ (s :low) 1)))
           (array/push here [key (- (s :x0) inset) (+ (s :x1) inset)])))
       (put out index here))
     [span out])
