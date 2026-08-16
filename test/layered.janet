@@ -486,6 +486,37 @@
   (def beside (- (out "bend1") (out "a")))
   (t/is= 55 beside "a bend beside a node keeps the full gap"))
 
+(t/test "a bundle keeps its shape when a bound pushes it"
+  # BLOCKS THAT NEVER COLLIDED still stack at the minimum gap once a bound
+  # pushes one of them: each is clamped to the same wall in turn, and the
+  # "never behind the block before it" rule packs the rest against it.
+  #
+  # Three `src/core` bends passing the `src.term` box wanted x=192, 211 and
+  # 264 -- gaps of 19 and 53, a bundle tapering toward the node it converges
+  # on. All three were floored at the box's right edge and came out 10 apart
+  # each, then sprang back to 35 one rank down, past the box: tight at the
+  # top and loose below, the opposite of how a bundle should read.
+  (def names ["a" "b" "c"])
+  (def want {"a" 192.4 "b" 211.3 "c" 264.3})
+  (def widths {"a" 10 "b" 10 "c" 10})
+  (defn gap [_ _] 4)
+  (defn floored [] (fn [_] 294.6))
+  (def flattened
+    (layered/settle names (fn [n] (want n)) widths gap
+                    (fn [_] false) (floored) (fn [_] nil)))
+  (t/is= 10 (math/round (- (flattened "b") (flattened "a")))
+         "without the carry, the wall flattens them to the minimum")
+  # Told they are one bundle, the push moves all three and the shape holds.
+  (def kept
+    (layered/settle names (fn [n] (want n)) widths gap
+                    (fn [_] false) (floored) (fn [_] nil)
+                    (fn [_ _] true)))
+  (t/is= 19 (math/round (- (kept "b") (kept "a")))
+         "the gap they asked for survives the push")
+  (t/is= 53 (math/round (- (kept "c") (kept "b")))
+         "and so does the wider one")
+  (t/ok (>= (kept "a") 294.6) "every one of them still clears the wall"))
+
 (t/test "the whole picture does not get worse"
   # THE GUARD. A graph shaped like the one this tool draws of itself: a rank
   # of sources, a rank of middles, and a long edge that has to cross the
