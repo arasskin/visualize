@@ -487,3 +487,24 @@
   (for i 0 (- (length sorted) 1)
     (t/ok (>= (- (out (sorted (+ i 1))) (out (sorted i))) 69.9)
           "neighbours stay a node apart")))
+
+(t/test "a real node wins a near-tie with a bend"
+  # A bend's median comes from the ONE chain link it has, so it is exact; a
+  # real node's is the average of everything it touches, and a single
+  # unrelated neighbour off to one side drags it half a position. `src/scan`
+  # scored 8.5 from links at 7 and 10 while the `src/json -> src/graph` bend
+  # scored exactly 8, so the bend sorted ahead of it by half a slot and got
+  # pushed out the far side -- its bend landed ninety units from the straight
+  # line between its own ends and the edge took the long way round.
+  #
+  # Half a position is not a real preference, so the node keeps the slot.
+  # Reproduced here: the bend's link is at 1, the node's links average 1.5,
+  # and the node starts ahead -- so without the nudge the bend jumps it.
+  (def layers @{0 @["p0" "p1" "p2"] 1 @["node" "bend"]})
+  (def up {"bend" ["p1"] "node" ["p1" "p2"]})
+  (defn order-with [bend?]
+    ((layered/order layers (fn [n] (get up n [])) (fn [_] []) 1 nil bend?) 1))
+  (t/is= ["bend" "node"] (order-with nil)
+         "scored plainly, the exact median sorts first")
+  (t/is= ["node" "bend"] (order-with (fn [n] (= n "bend")))
+         "as a bend, it yields the slot and routes past instead"))

@@ -176,8 +176,9 @@
   its edge crossed the whole group to reach it.
 
   Returns {layer [names, in order]}.``
-  [layers up down sweeps &opt group-of]
+  [layers up down sweeps &opt group-of bend?]
   (default group-of (fn [_] nil))
+  (default bend? (fn [_] false))
   (def indexes (sort (keys layers)))
   (def current (table/clone layers))
 
@@ -219,7 +220,24 @@
         # The group key breaks ties BEFORE the original index does, so an
         # ungrouped node that happens to share the group's median cannot land
         # in the middle of it -- which would put a stranger inside the box.
-        (def placed (sorted-by |[($ 0) (or (group-of ($ 2)) "") ($ 1)] movable))
+        #
+        # A BEND LOSES A NEAR-TIE TO A REAL NODE, and that is the point of
+        # `nudge`. A bend's median comes from the one chain link it has, so
+        # it is exact; a node's is the average of everything it touches, and
+        # a single unrelated neighbour off to one side drags it half a
+        # position. `src/scan` scored 8.5 from links at 7 and 10 while the
+        # `src/json -> src/graph` bend scored exactly 8, so the bend sorted
+        # ahead of it by half a slot and was pushed out the far side -- its
+        # rank-1 bend landed ninety units left of the straight line between
+        # its own ends, and the edge took the long way round `src/scan`
+        # instead of running down beside `src/state`'s.
+        #
+        # Half a position is not a real preference, so the node keeps the
+        # slot and the edge routes past it on the side its line wants.
+        (defn nudge [entry]
+          (if (bend? (entry 2)) 0.5 0))
+        (def placed (sorted-by |[(+ ($ 0) (nudge $)) (or (group-of ($ 2)) "") ($ 1)]
+                               movable))
         # The fixed ones go back at their original indexes, so a node with
         # no constraint does not drift to the edge of the layer.
         (def result (array ;(map |($ 2) placed)))
@@ -903,7 +921,8 @@
                         (fn [name] (get up name []))
                         (fn [name] (get down name []))
                         (tuning :sweeps)
-                        group-of))
+                        group-of
+                        (fn [name] (not (nil? (dummy-layer name))))))
       (def ordered (if group-of (cohere swept group-of) swept))
 
       # A dummy is measured as the room its edge needs to pass, which is a

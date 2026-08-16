@@ -192,7 +192,7 @@ in between. Cycles are broken by provisionally reversing the edges that close
 them, so a dependency loop draws as an arrow running back up the page rather
 than being silently rewritten.
 
-Six things in there are what closed the gap with `dot`, each one measured
+Seven things in there are what closed the gap with `dot`, each one measured
 against `dot`'s own output on this repository's graph:
 
 - **A long edge is threaded through real bend points**, one per layer it
@@ -242,12 +242,22 @@ against `dot`'s own output on this repository's graph:
   a desired position, a hard bound, or a pin, and `settle` returns the
   closest arrangement that keeps the order and the gaps — so non-overlap is a
   property of the output rather than of the order the passes ran in.
+- **A real node wins a near-tie with a bend.** A bend's median comes from the
+  one chain link it has, so it is exact; a node's is the average of
+  everything it touches, and a single unrelated neighbour off to one side
+  drags it half a position. `src/scan` scored 8.5 from links at 7 and 10
+  while the `src/json → src/graph` bend scored exactly 8, so the bend sorted
+  ahead of it by half a slot and was pushed out the far side: its bend landed
+  ninety units from the straight line between its own ends, and the edge took
+  the long way round `src/scan` instead of running down beside
+  `src/state`'s. Half a position is not a real preference, so the node keeps
+  the slot and the edge routes past it on the side its line wants.
 
 Sizes are fitted to what `dot` produced for the same labels rather than
 guessed. That sounds cosmetic and is not: `place-x` separates nodes by their
 drawn width, so an ellipse 78% too wide made *the layout* that much too wide.
-Together these took the picture from 2163×668 to 1144×737, against `dot`'s
-1140×629, and cut edge crossings from 44 to 5.
+Together these took the picture from 2163×668 to 1269×737, against `dot`'s
+1140×629, and cut edge crossings from 44 to 6.
 
 What it deliberately does not do is what made graphviz big: no spline routing,
 no port constraints, no orthogonal edges. A dependency graph needs none of
@@ -474,7 +484,7 @@ pane                type into a pane from a shell, so agent work is visible
 tools/replay.mjs    run a captured session through the emulator, headlessly
 web/term.js         a terminal emulator, in the ~25 sequences agents emit
 web/                the page: vanilla HTML, CSS and JS, no build step
-test/               498 assertions, no framework
+test/               500 assertions, no framework
 bin/janet           the compiled runtime (gitignored build artifact)
 ```
 
@@ -496,7 +506,7 @@ inverts the whole SVG rather than trying to re-colour it.
 ./test/run
 ```
 
-498 assertions (plus 82 for the terminal emulator, under node), no test
+500 assertions (plus 82 for the terminal emulator, under node), no test
 framework — the harness is 70 lines in
 `test/harness.janet`, because a dependency is a dependency. It runs against
 the **vendored** runtime, not whatever `janet` is on PATH: a green run against
