@@ -57,14 +57,31 @@
 # Shorter edges mean nodes packed onto fewer, fuller ranks, and the ordering
 # and placement passes then have less room to keep lines clear.
 #
-# dot can afford the tighter ranking because it routes splines inside box
-# corridors -- given a tight drawing it finds a path through it. Ours checks
-# a candidate line and bows it when blocked, which needs slack in the
-# drawing to work with. So the ranking and the router have to improve
-# together, and the router is the half still missing: the corridors are
-# computed (see `layered.janet`) and nothing fits a curve inside them.
+# THE FIRST EXPLANATION WAS WRONG, AND MEASURING IT IS WHAT SHOWED THAT.
+# This header used to say the missing half was the ROUTER: dot can afford a
+# tight ranking because it fits splines inside box corridors, ours only
+# checked a candidate line and bowed it, so the two had to improve together.
+# The router was then built -- funnel.janet and fit.janet, the port scoped
+# in docs/dotgen-audit.md -- and the prediction was testable.
 #
-# Wiring this in is one line in `rank`, the moment that changes.
+# It was false. Behind VISUALIZE_SIMPLEX, with the new router, this ranking
+# draws 3 edges crossing a node, 5 clipping an outline and 9 passing close,
+# against the relaxation's 1/1/1 on the same graph. And the router is not
+# the thing failing: it fits 13 of 13 corridors under simplex ranking and
+# falls back on none of them. Every curve stays inside the box it was
+# given. The boxes are in the wrong places.
+#
+# WHICH MOVES THE SUSPECT TO X-PLACEMENT. A corridor is only as good as the
+# column the ordering and placement passes reserved for it, and packing
+# nodes onto fewer ranks makes those columns narrower and more contested --
+# see the corridor measurement in docs/dotgen-audit.md, where 20 of 37 were
+# already under 20px with the LOOSER ranking. dot's answer is the aux graph
+# in position.c, which decides x for the whole drawing at once instead of a
+# rank at a time; src/layout/aux.janet is that port, and it is also not the
+# default yet.
+#
+# So: still one line in `rank`, and the flag now exists to try it. The next
+# thing that has to get better is x, not the ranking and not the router.
 
 (defn- tree-of
   "Adjacency for an undirected view of the tree edges."

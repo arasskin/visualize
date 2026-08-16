@@ -1,4 +1,5 @@
 (import ./aux)
+(import ./simplex)
 # A layered layout: the one that replaces graphviz.
 #
 # THE ALGORITHM IS SUGIYAMA, which is what `dot` runs and what a dependency
@@ -198,6 +199,26 @@
     (def top (min ;(map |(layer $) names)))
     (when (pos? top)
       (each name names (put layer name (- (layer name) top)))))
+
+  # NETWORK SIMPLEX, behind VISUALIZE_SIMPLEX, and still not the default.
+  #
+  # It reaches the true optimum of the objective the relaxation approximates
+  # -- see src/layout/simplex.janet, which was written and left unwired
+  # because a better ranking was measurably a worse PICTURE: the drawing
+  # packs onto fewer, fuller ranks and the router of the day could not find
+  # a way through. Now there is a router that fits curves inside the
+  # corridors, which was the stated condition for trying again, so the flag
+  # exists to make the comparison one command rather than one branch.
+  (when (os/getenv "VISUALIZE_SIMPLEX")
+    (def forward-edges
+      (filter (fn [[from to]]
+                (and (forward from) (forward to)
+                     (not (back [from to])) (not= from to)))
+              edges))
+    (def better (simplex/rank names forward-edges layer))
+    (each name names
+      (when-let [r (better name)] (put layer name r))))
+
   [layer back])
 
 #

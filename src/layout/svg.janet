@@ -24,6 +24,7 @@
 
 (import ../color)
 (import ../select)
+(import ./fit)
 
 (def- pad 40)          # margin around the drawing
 (def- ry-base 16)      # half-height of a single-line node
@@ -409,20 +410,44 @@
       # curve through the same points says the same thing about where the
       # edge goes and nothing about corners that are not there.
       #
-      # CATMULL-ROM CONVERTED TO BEZIER, which is the standard way to get a
-      # curve that actually passes THROUGH its waypoints -- a plain bezier
-      # treats them as magnets and misses, which would undo the routing the
-      # layout worked out. Each segment's control points come from the
-      # neighbouring points' slope, scaled by `tension`; the endpoints are
-      # duplicated so the first and last segments have a neighbour to read.
+      # ROUTED INSIDE THE CORRIDOR WHEN THERE IS ONE, and through the bends
+      # themselves when there is not.
+      #
+      # THE DIFFERENCE IS WHAT THE BENDS MEAN. A Catmull-Rom through the
+      # bend points has to pass through them, which treats each bend as a
+      # place the edge must visit. It is not: the bend is where the layout
+      # PARKED the edge on that rank, and the box around it is how far it
+      # may move. Fitting inside the boxes uses that freedom, so an edge
+      # whose bend sits far from its line can still be drawn near it.
+      # See funnel.janet and fit.janet, and docs/pathplan-scope.md.
+      #
+      # THE FALLBACK IS NOT DECORATION. The router returns nil rather than
+      # a curve that leaves the corridor, and a corridor is only as good as
+      # the layout that built it; when it declines, the spline through the
+      # bends is the answer that shipped before and still draws.
       (let [first-target (first bends)
             last-source (last bends)
             [x1 y1] (on-ellipse a (ra :w) (ra :h)
                                 (first-target 0) (first-target 1) 0)
             [x2 y2] (on-ellipse b (rb :w) (rb :h)
                                 (last-source 0) (last-source 1) 0 turn)
-            pts (array [x1 y1] ;(map |[($ 0) ($ 1)] bends) [x2 y2])]
-        (spline pts)))))
+            pts (array [x1 y1] ;(map |[($ 0) ($ 1)] bends) [x2 y2])
+            # Tangents from the ellipse exits, so the fitted curve leaves
+            # and arrives at the angles the fan logic already chose.
+            fitted (when (and corridor (>= (length corridor) 2))
+                     (fit/route [x1 y1] [x2 y2] corridor
+                                [(- (first-target 0) x1) (- (first-target 1) y1)]
+                                [(- x2 (last-source 0)) (- y2 (last-source 1))]))]
+        (if fitted
+          (string/join
+            (array (string/format "M%.1f,%.1f" x1 y1)
+                   ;(map (fn [[c1 c2 end]]
+                           (string/format "C%.1f,%.1f %.1f,%.1f %.1f,%.1f"
+                                          (c1 0) (c1 1) (c2 0) (c2 1)
+                                          (end 0) (end 1)))
+                         fitted))
+            " ")
+          (spline pts))))))
 
 (defn draw
   ``The graph as SVG, laid out by `places`.
