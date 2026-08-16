@@ -21,6 +21,7 @@
 (import ./v)
 (import ./layered)
 (import ./funnel)
+(import ./fit)
 (import ./http)
 (import ./json)
 (import ./scan)
