@@ -311,3 +311,60 @@ service.
 So flat-edge handling is not worth building here. If flat edges ever appear
 in this tool's output it means the back-edge pass left a knot unbroken, and
 the useful fix is better cycle breaking rather than a flat-edge router.
+
+## Feature by feature, measured against dot on the same graph
+
+Going through what we HAVE rather than what we lack, since the missing list
+turned out to be empty. Same 35-node graph, same config, dot 15.1.0.
+
+### Ranking — a real gap, and the only one
+
+| | dot | ours |
+|---|---|---|
+| ranks used | 6 | 7 |
+| nodes per rank | 1, 5, 8, 6, 6, 9 | 6, 8, 7, 8, 3, 4, 1 |
+| total edge span | **68 ranks** | **84 ranks** |
+| longest edge | 4 ranks | 5 ranks |
+
+Twenty-four per cent more total edge length, an extra rank, and a lopsided
+tail: our lower ranks hold 3, 4 and 1 nodes where dot's hold 6, 6 and 9.
+
+**Our ranking is at a local optimum.** Checked directly: no single node can
+move to a better rank without inverting an edge — zero of thirty-five could
+improve. The relaxation has done everything a relaxation can do.
+
+That is exactly the difference the audit predicted. Network simplex maintains
+a tight spanning tree and swaps edges across negative cut values, which moves
+WHOLE SUBTREES at once; coordinate descent moves one node at a time and cannot
+reach an arrangement that requires several nodes to move together. Our answer
+is locally optimal and globally 24% worse.
+
+### And it explains everything downstream
+
+Slack is the direct cost: **17 edges span more than one rank, carrying 37
+ranks of slack between them**, worst being `src/stamp -> src/core` at 4. Every
+unit of slack is a bend, every bend needs a column, and the columns are what
+crowded the ranks until corridors measured eight pixels wide.
+
+So the chain is: relaxation leaves 24% more edge length than simplex → more
+slack → more bends → crowded ranks → no room to route → the detour that
+started this audit. Five ports downstream of ranking could not fix it because
+the cost was already paid upstream.
+
+### The other passes, for completeness
+
+- **Ordering.** Crossings are what this optimises and both reach a good
+  answer; we measure zero crossings in the finished picture. No visible gap.
+- **Coordinates.** Ours is a correct isotonic solver per rank; the aux-graph
+  port (behind `VISUALIZE_AUX`) draws narrower but currently crosses nodes.
+  Not the bottleneck.
+- **Routing.** Zero edges touch a node they do not connect, measured. Better
+  than parity on the metric that matters, and only because the checking router
+  refuses to draw a bad line rather than because the bends are well placed.
+
+### Conclusion
+
+**Network simplex ranking is the one remaining difference that matters.** Not
+because ranking looks wrong, but because everything downstream inherits its
+slack. It is `rank.c` -- feasible tree, cut values, leave/enter edge, balance
+-- and it is the port with a measurable target: 84 down to 68.
