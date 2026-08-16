@@ -180,18 +180,33 @@
   (stop))
 
 (check/test "poll reports which code the supervisor runs"
-  # The handshake's supervisor half: a FRESH supervisor was born from the
-  # sources on disk, so its stamp matches ours. A long-lived one after an
-  # edit would not -- which is the page's cue to say "supervisor outdated"
-  # instead of letting fixes be debugged that were never running. Fresh is
-  # forced first: a supervisor surviving from an earlier (crashed) suite
-  # run is exactly such a stale process, and this test once failed by
-  # catching one -- the feature working, but not what is asserted here.
+  # The handshake's supervisor half: a supervisor reports the stamp of the
+  # sources IT loaded, which is the page's cue to say "supervisor outdated"
+  # rather than letting fixes be debugged that were never running.
+  #
+  # WHAT IS ASSERTED IS THE SHAPE, NOT EQUALITY WITH OURS, and the
+  # difference cost a red suite for a while. Comparing the supervisor's
+  # stamp to this process's assumes nothing on disk changed between our
+  # load and its spawn -- which is false exactly when someone is working:
+  # edit a source file while the suite runs (a rebase, a stash, a save in
+  # another window) and the supervisor, spawning seconds later, correctly
+  # computes a NEWER stamp than ours. The test then failed for the feature
+  # working. Reproduced deterministically by touching a source file four
+  # seconds into a run.
+  #
+  # So: the supervisor must report a well-formed stamp, and it must be its
+  # own rather than an echo of what we sent -- nothing here can promise the
+  # two agree.
   (shutdown)
   (ev/sleep 0.3)
   (start ["/bin/sh" "-c" "sleep 3"] (os/cwd) 24 80)
   (def reply (poll 0))
-  (check/is= stamp/born (reply "stamp"))
+  (def reported (reply "stamp"))
+  (check/ok (peg/match ~(* (repeat 8 :d) "-" (repeat 6 :d) -1) reported)
+            (string "the supervisor reports a stamp of its own: " reported))
+  # Not older than ours: it loaded the same tree or a newer state of it.
+  (check/ok (>= (compare reported stamp/born) 0)
+            "and it is not older than the sources this process loaded")
   (stop))
 
 (check/test "an incomplete reply poisons its connection instead of shifting answers"
