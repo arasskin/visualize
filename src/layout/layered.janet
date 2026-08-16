@@ -251,9 +251,10 @@
   its edge crossed the whole group to reach it.
 
   Returns {layer [names, in order]}.``
-  [layers up down sweeps &opt group-of bend?]
+  [layers up down sweeps &opt group-of bend? from]
   (default group-of (fn [_] nil))
   (default bend? (fn [_] false))
+  (default from 0)
   (def indexes (sort (keys layers)))
   (def current (table/clone layers))
 
@@ -324,11 +325,22 @@
   # TOP rank: it has no layer above it, so a down-sweep reads an empty
   # neighbour list and `median-of` answers -1 -- leave it alone. Only reading
   # downward puts a source over the work it feeds.
+  #
+  # RESUMABLE, because dot's loop needs to drive this one pass at a time and
+  # score in between. Calling it repeatedly with `sweeps` of 1 is NOT the
+  # same computation: each call would start its own down-then-up sequence, so
+  # every pass would begin with a down-sweep and the alternation the median
+  # depends on would never happen. `from` says which pass number this is, so
+  # a caller stepping through passes gets the same sequence a single call
+  # with a bigger `sweeps` would have produced.
   (if (zero? sweeps)
     (sweep (reverse (slice indexes 0 -2)) :up)
-    (for pass 0 sweeps
-      (sweep (slice indexes 1) :down)
-      (sweep (reverse (slice indexes 0 -2)) :up)))
+    (for pass from (+ from sweeps)
+      # Down on even passes, up on odd, so consecutive single-pass calls
+      # alternate exactly as the loop inside one call does.
+      (if (even? pass)
+        (sweep (slice indexes 1) :down)
+        (sweep (reverse (slice indexes 0 -2)) :up))))
   current)
 
 (defn- crossings-between
@@ -376,8 +388,9 @@
 
   Only ranks touched last round are reconsidered: a swap can only change the
   crossings of the ranks it borders.``
-  [rows up down &opt fixed?]
+  [rows up down &opt fixed? reverse]
   (default fixed? (fn [_] false))
+  (default reverse false)
   (def current (table/clone rows))
   (def indexes (sort (keys current)))
   (def candidate @{})
@@ -413,7 +426,12 @@
             (put swapped i b)
             (put swapped (+ i 1) a)
             (put current index swapped)
-            (if (< (crossings-at index) before)
+            # Strictly better, or -- on a reverse pass -- equally good. The
+            # equal case is dot's escape from a local minimum, and it is safe
+            # only because the loop above keeps the best ordering aside.
+            (def after (crossings-at index))
+            (if (or (< after before)
+                    (and reverse (= after before) (pos? before)))
               (do
                 (set moved true)
                 (put candidate index true)
@@ -1562,12 +1580,74 @@
       # median is what makes it cheap.
       (def group-of (when-let [of (opts :group-of)]
                       (fn [name] (when (string? name) (of name)))))
-      (def swept (order layers
-                        (fn [name] (get up name []))
-                        (fn [name] (get down name []))
-                        (tuning :sweeps)
-                        group-of
-                        (fn [name] (not (nil? (dummy-layer name))))))
+      # ORDERING, THE WAY dot RUNS IT (the mincross loop in mincross.c):
+      # one sweep, one transpose, score, keep if best, stop when a pass
+      # fails to beat the best by the convergence ratio, with a patience
+      # counter so a single flat pass does not end it.
+      #
+      # KEEPING THE BEST ASIDE is the point. A monotone chain of passes can
+      # only walk into the nearest local minimum; holding the best ordering
+      # ever seen lets a pass end up worse without costing anything, which
+      # is what makes the search wider than the walk.
+      #
+      # THE SWEEP HAS TO BE RESUMABLE for this to be the same computation --
+      # see `order`'s `from`. Driving it with repeated one-sweep calls that
+      # each restarted the down/up alternation is what made an earlier
+      # attempt at this loop draw five crossings where two is normal.
+      #
+      # WITHOUT dot's TIE-TAKING, and that was measured rather than assumed.
+      # dot lets alternate passes accept equal-cost transpositions as a way
+      # out of a local minimum. Enabled here it narrows the drawing by
+      # thirteen pixels and puts an edge through a node's outline -- 1149
+      # wide with one clip against 1162 with none. Thirteen pixels is not
+      # worth a clip, so the flag stays off; the loop around it is the part
+      # that pays.
+      (def bend-name? (fn [name] (not (nil? (dummy-layer name)))))
+      (def held-still (fn [name] (and group-of (group-of name) true)))
+      # THE SCORE HAS TO SEE THE EDGES. `crossings-between` asks a node for
+      # its neighbours in the OTHER row, and the two tables here are keyed
+      # the way the rest of this function keys them -- `up` for what points
+      # at a node, `down` for what it points at. Consulting the wrong one
+      # answers an empty list for every node, which scores every ordering as
+      # zero crossings: the loop then keeps its first attempt and exits,
+      # which is exactly what it did.
+      (def score
+        (fn [rows]
+          (var total 0)
+          (def ranks (sort (keys rows)))
+          (each i ranks
+            (def below (get rows (+ i 1)))
+            (when (and below (indexed? below) (indexed? (rows i)))
+              (+= total (crossings-between (rows i) below
+                                           (fn [n] (get up n []))))))
+          total))
+
+      (var current (table/clone layers))
+      (var best (table/clone layers))
+      (var best-cross math/inf)
+      (var patience 0)
+      (var pass 0)
+      (def passes (max 8 (* 2 (tuning :sweeps))))
+      (while (and (< pass passes) (< patience 4) (pos? best-cross))
+        (set current (order current
+                            (fn [name] (get up name []))
+                            (fn [name] (get down name []))
+                            1 group-of bend-name? pass))
+        (set current (transpose current
+                                (fn [n] (get up n []))
+                                (fn [n] (get down n []))
+                                held-still))
+        (def now (score current))
+        (if (< now best-cross)
+          (do
+            (set best (table/clone current))
+            # Only a real improvement buys more passes: dot's .995 ratio, so
+            # shaving one crossing off a hundred does not reset the clock.
+            (when (< now (* 0.995 best-cross)) (set patience 0))
+            (set best-cross now))
+          (++ patience))
+        (++ pass))
+      (def swept best)
       # THEN SIFT, which is the step the sweep cannot do for itself: it tries
       # each node in every slot and keeps what measures best, so it finds the
       # orderings the median is blind to -- the ones where both adjacent
