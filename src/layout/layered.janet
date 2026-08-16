@@ -79,7 +79,8 @@
   one layer below `from` therefore puts the depended-upon files at the top
   and the things importing them underneath -- which is where graphviz put
   them, and keeping it identical is what makes the swap invisible.``
-  [names edges]
+  [names edges &opt group-of]
+  (default group-of (fn [_] nil))
   (def outgoing @{})
   (each name names (put outgoing name @[]))
   (each [from to] edges
@@ -113,30 +114,89 @@
   # pass did not fully break; leaving it at its current rank is fine and
   # keeps the function total.
 
-  # TIGHTEN. Longest-path ranking puts every node with nothing above it on
-  # layer 0, which is correct and reads badly: on this tool's own graph that
-  # is seventeen of thirty-three nodes in one row, and the row sets the width
-  # of the whole picture. A node with no PARENT is only pinned to the top by
-  # the accident of being ranked from above.
+  # TIGHTEN, by moving every node that can move rather than only the sources.
   #
-  # So each such node drops to just above its lowest child. That cannot
-  # invert an edge -- the new rank is strictly less than every child's -- and
-  # it cannot reorder anything already correct, because a node with a parent
-  # is left exactly where the longest path put it. What it does is move the
-  # sources down to meet their work, which is what makes the rank sizes come
-  # out even instead of top-heavy.
+  # Longest-path ranking is correct and reads badly: it pins everything with
+  # nothing above it to layer 0, which on this tool's own graph was seventeen
+  # of thirty-three nodes in one row, and that row sets the width of the
+  # whole picture. The first fix here dropped each PARENTLESS node to just
+  # above its lowest child, which helped and stopped there -- a node in the
+  # middle of a chain stayed wherever the longest path had put it even when
+  # every one of its edges was longer than it needed to be.
   #
-  # A node with no children either is genuinely isolated, and `place` puts
-  # those somewhere useful rather than in the middle of the widest row.
+  # WHAT GRAPHVIZ DOES IS MINIMISE TOTAL EDGE LENGTH, by network simplex over
+  # a tight spanning tree. The full algorithm maintains that tree with cut
+  # values and swaps edges across the negative ones; what is below is the
+  # same objective reached by relaxation, which is a great deal shorter and
+  # converges to the same place on graphs this shape.
+  #
+  # Each round, every node moves to the rank that minimises the total length
+  # of its own edges -- the median of its neighbours, clamped to what its
+  # edges allow (strictly below every parent, strictly above every child).
+  # A node whose neighbours pull it nowhere stays. Repeat until nothing
+  # moves. Every step strictly reduces total edge length or leaves it equal,
+  # so it terminates; the cap is there for the pathological case rather than
+  # the expected one.
   (def parents @{})
-  (each name names (put parents name 0))
+  (def children @{})
+  (each name names (put parents name @[]) (put children name @[]))
   (each [from to] edges
     (when (and (forward from) (forward to) (not (back [from to])) (not= from to))
-      (put parents to (+ 1 (parents to)))))
-  (each name names
-    (when (and (zero? (parents name)) (not (empty? (forward name))))
-      (def lowest (min ;(map |(layer $) (forward name))))
-      (put layer name (max 0 (- lowest 1)))))
+      (array/push (children from) to)
+      (array/push (parents to) from)))
+
+  (var moved true)
+  (var rounds 0)
+  (while (and moved (< rounds 24))
+    (set moved false)
+    (++ rounds)
+    (each name names
+      (def up (parents name))
+      (def down (children name))
+      (unless (and (empty? up) (empty? down))
+        # The window this node may occupy without inverting an edge.
+        (def floor (if (empty? up) 0 (+ 1 (max ;(map |(layer $) up)))))
+        (def ceiling (if (empty? down)
+                       math/int-max
+                       (- (min ;(map |(layer $) down)) 1)))
+        (when (<= floor ceiling)
+          # Where its edges would rather it sat: the median of everything it
+          # touches, which is the point minimising the sum of distances.
+          (def neighbours (sorted (map |(layer $) [;up ;down])))
+          (def want (neighbours (div (length neighbours) 2)))
+          # A GROUP PULLS ITS MEMBERS TOGETHER. Minimising edge length alone
+          # sent `src/term/client` eight ranks from its two siblings, and the
+          # box drawn around the three of them became a ribbon down the whole
+          # picture -- a box that large says nothing about the group and
+          # blocks everything it crosses. The group's own span counts as a
+          # neighbour, so a member is pulled toward its siblings with about
+          # the weight of one edge: enough to keep a group compact, not
+          # enough to drag a node through an edge it would invert.
+          (def key (group-of name))
+          (def pull
+            (if-let [mates (and key (filter |(and (not= $ name) (= key (group-of $)))
+                                            names))]
+              (if (empty? mates) want
+                (let [ranks (sorted (map |(layer $) mates))]
+                  (ranks (div (length ranks) 2))))
+              want))
+          # Weighted toward the group when there is one: a member follows
+          # its siblings unless an edge forbids it, since the box is drawn
+          # around whatever spread remains and a tall box crosses more than
+          # a short edge costs.
+          (def blended (if key (/ (+ want (* 2 pull)) 3) want))
+          (def target (min ceiling (max floor (math/round blended))))
+          (unless (= target (layer name))
+            (put layer name target)
+            (set moved true))))))
+
+  # NORMALISE. The relaxation can leave the topmost rank above zero -- every
+  # node in a component may have shifted down together -- and a picture that
+  # starts at rank three has an empty band across the top.
+  (when (not (empty? names))
+    (def top (min ;(map |(layer $) names)))
+    (when (pos? top)
+      (each name names (put layer name (- (layer name) top)))))
   [layer back])
 
 #
@@ -1292,7 +1352,7 @@
                      nil (opts :group-of))
      :routes @{}}
     (do
-      (def [layer back] (rank names edges))
+      (def [layer back] (rank names edges (opts :group-of)))
 
       # The dummy chains. One per edge spanning more than one layer, each a
       # list of [name layer] the edge is threaded through. The name is a
