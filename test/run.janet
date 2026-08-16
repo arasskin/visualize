@@ -20,6 +20,7 @@
 (import ./select)
 (import ./v)
 (import ./layered)
+(import ./funnel)
 (import ./http)
 (import ./json)
 (import ./scan)
