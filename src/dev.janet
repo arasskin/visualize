@@ -93,17 +93,31 @@
   state that must survive development belongs in the supervisor anyway,
   which is the same reason the server itself is restartable.
 
-  `name` matches a substring of the module's path: (dev/reload "scan").``
+  `name` matches a substring of the module's path: (dev/reload "scan").
+
+  A NAME THAT IS ALSO A DIRECTORY MEANS THE FILE. "layout" matches
+  `src/layout.janet` and everything under `src/layout/`, which used to be an
+  ambiguity error listing four paths and leaving the caller to guess which
+  spelling would work -- while the file they almost always meant was sitting
+  right there in the list. So a hit whose basename is exactly the name wins
+  outright, and only a genuine tie between unrelated modules is an error.``
   [name]
   (unless (dyn *redef*)
     (error "not in dev mode: without *redef* set at startup, a reload compiles but changes no caller"))
   (def hits (filter (fn [[path _]] (string/find name path)) (pairs module/cache)))
-  (case (length hits)
+  # The file whose own name IS the name asked for, if there is one.
+  (def exact (filter (fn [[path _]]
+                       (or (string/has-suffix? (string "/" name ".janet") path)
+                           (= name path)))
+                     hits))
+  (def chosen (if (= 1 (length exact)) exact hits))
+  (case (length chosen)
     0 (errorf "no loaded module matches %v" name)
-    1 (let [[path env] (first hits)]
+    1 (let [[path env] (first chosen)]
         (dofile path :env env)
         path)
-    (errorf "%v is ambiguous: %s" name (string/join (map first hits) ", "))))
+    (errorf "%v is ambiguous: %s -- name one of them exactly"
+            name (string/join (map first chosen) ", "))))
 
 # -- the socket repl ----------------------------------------------------------
 # Core `repl` and core `debugger-env`, re-plumbed from stdin to a connection.

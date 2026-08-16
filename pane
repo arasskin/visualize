@@ -23,6 +23,27 @@ set -e
 
 here=$(cd "$(dirname "$0")" && pwd)
 
+# BARE INVOCATION TEACHES. `vz` with no arguments prints its commands, and
+# this printed nothing at all -- so the one probe anybody makes of an unknown
+# script ("what is this?") answered silently and sent them looking elsewhere.
+# `./pane repl` with no text still reads the pane, which is why the usage
+# check is for NO arguments rather than for a missing text.
+if [ $# -eq 0 ]; then
+  cat <<'USAGE'
+Type into a terminal pane of a running visualize, and read what it says.
+
+    ./pane repl '(dev/reload "layout")'   evaluate in the live image
+    ./pane repl                           just read what the pane shows
+    ./pane harness 'hello'                type at the agent
+    ./pane repl --raw $'\003'             send bytes exactly as given
+
+The same thing as `vz eval '(expr)'` and `vz pane repl '(expr)'`, which both
+run this script -- so whichever you reach for, a person watching the repl
+pane in the page sees what you typed.
+USAGE
+  exit 0
+fi
+
 pane=${1:-repl}
 [ $# -gt 0 ] && shift
 
@@ -65,9 +86,27 @@ def post(op, body):
 # answer to what we are about to type.
 start = post("poll", {"at": 0, "generation": 0})
 if not start.get("running"):
-    print(f"pane '{pane}' is not running -- open it in the page first",
-          file=sys.stderr)
-    sys.exit(1)
+    # START IT RATHER THAN REFUSING. This used to say "open it in the page
+    # first", which reads as a dead end to anything without a browser -- and
+    # is not even true: /pane/<name>/start is the same endpoint the page's
+    # own button posts to. An agent that hit this went looking for another
+    # way into the image and found `nc -U`, which is the one route this
+    # script exists to make unnecessary.
+    try:
+        post("start", {})
+    except Exception as e:
+        print(f"pane '{pane}' is not running and would not start: {e}",
+              file=sys.stderr)
+        sys.exit(1)
+    # The pty needs a moment to come up and print its first prompt.
+    for _ in range(50):
+        time.sleep(0.1)
+        start = post("poll", {"at": 0, "generation": 0})
+        if start.get("running"):
+            break
+    else:
+        print(f"pane '{pane}' did not come up", file=sys.stderr)
+        sys.exit(1)
 
 at = start["at"]
 generation = start["generation"]

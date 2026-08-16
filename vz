@@ -4,11 +4,17 @@
 #
 #     vz scan [pattern]     what the program knows about this source tree
 #     vz faults [n]         what has gone wrong lately, with stacks
+#     vz reload             load your edits into the running server
 #     vz eval '(expr)'      evaluate in the running server's own image
 #     vz pane repl 'text'   type into a pane, where a person can watch
 #     vz shot [file]        the graph as it looks right now (SVG, or .png)
 #     vz state [name]       list or print the facts on disk
 #     vz where              this run's url, token file, state directory
+#
+# CHANGED A FILE AND WANT TO SEE IT? `vz reload && vz shot out.png`. The
+# server runs from a loaded image, so an edit on disk changes nothing it
+# draws until the module is reloaded -- and a fresh `janet` you run yourself
+# will happily disagree with the page for exactly that reason.
 #
 # WHY THESE EXIST. The harness thread holds the intelligence -- claude, pi,
 # whatever the config names -- but until now visualize offered it nothing:
@@ -119,6 +125,69 @@ PY
 
   pane)
     exec "$here/pane" "$@"
+    ;;
+
+  reload)
+    # THE SERVER HOLDS A LOADED IMAGE, and editing a file does not change it.
+    # That is the single most expensive thing to not know about this program:
+    # a change looks like it did nothing, the numbers you measure in a fresh
+    # process disagree with the page, and you go looking for a bug in the
+    # code you just wrote. It cost a full session once.
+    #
+    # So: reload what git says you changed, innermost first, then re-render.
+    # Innermost first because a module that imports another holds bindings
+    # from it -- reloading `layout/layered` alone leaves `layout.janet` and
+    # `graph.janet` still calling the version they compiled against, so the
+    # picture does not move and the reload looks broken.
+    #
+    # Depth is the count of slashes: src/layout/layered.janet reloads before
+    # src/layout.janet, which reloads before src/graph.janet.
+    changed=$(cd "$root" && git diff --name-only HEAD -- 'src/*.janet' 2>/dev/null)
+    [ -z "$changed" ] && changed=$(cd "$root" && git diff --cached --name-only HEAD -- 'src/*.janet' 2>/dev/null)
+    if [ -z "$changed" ]; then
+      echo "nothing changed under src/ -- the image is already what the files say" >&2
+      exit 0
+    fi
+    # Deepest path first.
+    ordered=$(printf '%s\n' $changed | awk '{print gsub(/\//,"/"), $0}' | sort -rn | cut -d' ' -f2-)
+    for file in $ordered; do
+      printf 'reloading %s ... ' "$file"
+      # `dofile` on the module's own env, by exact path -- see dev/reload.
+      # The repl colours its output, so `error:` arrives wrapped in escape
+      # sequences and a plain match for it silently never fires -- which is
+      # how this reported "ok" for a file with a syntax error in it. Strip
+      # the escapes before looking, and look at the WHOLE answer: the
+      # stacktrace is several lines and the word is on the first of them.
+      answer=$("$here/pane" repl "(dev/reload \"$file\")" 2>&1 \
+               | sed $'s/\033\\[[0-9;]*m//g')
+      case "$answer" in
+        *"error:"*|*"parse error"*|*"compile error"*)
+          printf 'FAILED\n' >&2
+          printf '%s\n' "$answer" | grep -E 'error' >&2
+          # A failed reload leaves the repl inside the debugger, where every
+          # later expression is evaluated in the wrong environment -- so the
+          # next reload would "succeed" against nothing. Leave it clean.
+          #
+          # ONE `(quit)` PER LEVEL: debuggers nest, so a session that has
+          # tripped twice sits at debug[2] and a single quit only gets back
+          # to debug[1], which looks fine in passing and is not.
+          #
+          # The prompt after each quit says where it landed -- `visualize:`
+          # once it is out, `debug[n]:` while it is not -- so quit until it
+          # says the former. Reading the answer to the quit ITSELF is what
+          # makes this work: asking the pane separately returns nothing to
+          # match on, since an empty line types nothing and prints nothing.
+          for _ in 1 2 3 4 5; do
+            case $("$here/pane" repl '(quit)' 2>&1 | tail -1) in
+              *debug*) ;;
+              *) break ;;
+            esac
+          done
+          exit 1 ;;
+        *) printf 'ok\n' ;;
+      esac
+    done
+    echo "the running image now matches the files"
     ;;
 
   shot)
