@@ -196,7 +196,7 @@
   straight line can be checked against the nodes it would pass. Without
   them -- the force layout does not pass them -- the straight line is used
   whenever the layout gave no bends, which is what this did before.``
-  [a b ra rb bends &opt from to places sizes box-rects paths turn]
+  [a b ra rb bends &opt from to places sizes box-rects paths turn corridor]
 
   (defn hits-anything?
     ``Is a straight line from (x1,y1) to (x2,y2) clear of everything it has
@@ -296,6 +296,29 @@
   # Stopping short by the marker's length, which is what the 9 here used to
   # do, subtracted the arrowhead twice and left every edge floating a
   # visible gap away from the node it points at.
+    # SLIDE EACH BEND ALONG ITS CORRIDOR toward the straight line, which
+    # is dot's routing step: the bends say where the edge may pass, the
+    # corridor says how far either way it may move, and the line between
+    # the endpoints says where it would rather be. A bend whose slot sits
+    # far from its line -- because crossing count was indifferent between
+    # that slot and a near one -- can now be drawn near it anyway, as long
+    # as it stays inside the free space its rank actually has.
+    (def bends
+      (if (empty? corridor)
+        bends
+        (let [ax (a :x) ay (a :y) bx (b :x) by (b :y)
+              span (- by ay)]
+          (map (fn [i bend]
+                 (def box (get corridor i))
+                 (if-not box
+                   bend
+                   (let [[left right _] box
+                         # Where the straight line is at this bend's rank.
+                         t (if (zero? span) 0.5 (/ (- (bend 1) ay) span))
+                         wants (+ ax (* t (- bx ax)))]
+                     [(min right (max left wants)) (bend 1)])))
+               (range (length bends)) bends))))
+
   (def straight-from (on-ellipse a (ra :w) (ra :h) (b :x) (b :y) 0))
   (def straight-to (on-ellipse b (rb :w) (rb :h) (a :x) (a :y) 0 turn))
 
@@ -422,6 +445,9 @@
   (def sizes-in (or (graph :sizes) {}))
   (def font (or (opts :font) "Comic Sans MS"))
   (def routes (or (opts :routes) {}))
+  # The free space each bend has on its rank -- see the corridor note in
+  # layered.janet. Empty for the force layout, which has no ranks.
+  (def corridors (or (opts :corridors) {}))
   (def weights (or (opts :weights) {}))
   (def filled (opts :filled))
 
@@ -595,7 +621,8 @@
           `<path d="%s" stroke="var(--edge, #888)" stroke-width="1.2" fill="none" marker-end="url(#arrow)"/>`
           (path-through a b (sizes from) (sizes to) bends
                         from to places sizes box-rects paths
-                        (get fan [from to] 0)))
+                        (get fan [from to] 0)
+                        (get corridors [from to] [])))
         `</g>`)))
 
   (each node nodes

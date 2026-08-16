@@ -1844,4 +1844,47 @@
                (map (fn [name] [(x name) (* (dummy-layer name) (tuning :layer-gap))])
                     chain))))
 
-      {:points points :routes routes :back back})))
+      # CORRIDORS, from dot's maximal_bbox in dotsplines.c. For each bend,
+      # the free space it has on its rank: from the right edge of whatever
+      # is ordered before it to the left edge of whatever is ordered after.
+      #
+      # WHY A ROUTE IS NOT ENOUGH. The bends say where the edge passes, and
+      # every pass so far has tried to put them somewhere sensible -- but a
+      # bend's slot is chosen by crossing count, and crossing count is
+      # indifferent between two slots that cross the same number of times.
+      # When one of those is beside the line and the other is three hundred
+      # units away past a group, nothing in ordering prefers the near one,
+      # and the edge takes the detour.
+      #
+      # dot does not solve that in ordering either. It hands the router the
+      # BOX the bend may move within, and the spline is fitted inside the
+      # chain of boxes -- so an edge whose bend sits far from its line can
+      # still be drawn near it, as long as it stays in the free space. The
+      # boxes are the permission; the route is only the default.
+      (def corridors @{})
+      (eachp [pair chain] chains
+        (def [from to] pair)
+        (when (and (points from) (points to))
+          (put corridors pair
+               (map (fn [name]
+                      (def rank (dummy-layer name))
+                      (def row (get ordered rank []))
+                      (def at (find-index |(= $ name) row))
+                      (def here (x name))
+                      # Left wall: the right edge of the previous occupant,
+                      # plus the gap that keeps lines legible. Nothing to the
+                      # left means the bend may go as far as it likes.
+                      (def left
+                        (if (and at (pos? at))
+                          (let [n (row (- at 1))]
+                            (+ (x n) (/ (widths n) 2) (gap-between n name)))
+                          (- here 1000)))
+                      (def right
+                        (if (and at (< at (- (length row) 1)))
+                          (let [n (row (+ at 1))]
+                            (- (x n) (/ (widths n) 2) (gap-between name n)))
+                          (+ here 1000)))
+                      [left right (* rank (tuning :layer-gap))])
+                    chain))))
+
+      {:points points :routes routes :corridors corridors :back back})))

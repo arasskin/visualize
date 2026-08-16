@@ -53,6 +53,7 @@
   [true (svg/draw graph (places :points)
                   (merge (table ;(kvs opts))
                          {:routes (places :routes)
+                          :corridors (places :corridors)
                           # A layered layout keeps a group's members near each
                           # other, so a box around them means something.
                           :boxes true}))])
