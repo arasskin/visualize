@@ -497,17 +497,11 @@
   that keeps two labelled ellipses legible is far more than two parallel
   lines need to read as parallel. Given the same gap as everything else, the
   nine edges converging on `src/core` were spaced 32 units apart and read as
-  a splayed fan rather than a bundle.
-
-  `together?` answers whether two neighbours belong to the same bundle -- the
-  chains converging on one node. A BOUND THAT PUSHES ONE OF THEM PUSHES THEM
-  ALL, so the bundle keeps its shape instead of collapsing against whatever
-  it had to clear: see the note on the carry in the layout loop below.``
-  [names want widths gap &opt fixed floor ceiling together?]
+  a splayed fan rather than a bundle.``
+  [names want widths gap &opt fixed floor ceiling]
   (default fixed (fn [_] false))
   (default floor (fn [_] nil))
   (default ceiling (fn [_] nil))
-  (default together? (fn [_ _] false))
   # A scalar gap is the same gap everywhere, which is what every caller but
   # `place-x` wants.
   (def gap-between (if (function? gap) gap (fn [_ _] gap)))
@@ -585,39 +579,13 @@
   # A floor beats a ceiling where the two cannot both hold: the floor is what
   # keeps a node out of a group's box, and a box containing a node it does
   # not group is the defect that has to be impossible.
-  # A SHARED FLOOR MUST NOT FLATTEN A BUNDLE. Blocks that never collided are
-  # laid out one after another here, and a block a bound pushes rightward
-  # drags the ones behind it along -- each landing at the minimum gap from the
-  # last, however far apart they wanted to be.
-  #
-  # Three `src/core` bends passing the `src.term` box wanted x=192, 211 and
-  # 264: gaps of 19 and 53, a bundle tapering toward the node they converge
-  # on. All three were floored at the box's right edge, so the first went to
-  # 294.6 and the others stacked behind it 10 apart. One rank down, past the
-  # box, they sprang back to 35 apart -- tight at the top and loose below,
-  # the opposite of how a bundle arriving at a node should read.
-  #
-  # So a displaced block passes its push to the next block IN THE SAME
-  # BUNDLE, and the two keep the distance they asked for. Only within a
-  # bundle: carrying the shift along the whole rank moves everything to the
-  # right of any obstacle, which took the `src/select -> src/layout` bend 136
-  # units out of the gap between `src/layout/force` and `src/layout/layered`
-  # that it was put there to sit in, and bought a crossing with it.
   (var edge nil)
-  (var carried 0)
-  (var behind nil)
   (each b blocks
     (var left (b :left))
     (when (b :high) (set left (min left (b :high))))
     (when (b :low) (set left (max left (b :low))))
-    # However far the block in front was pushed, this one is pushed too --
-    # but only if the two are part of the same bundle.
-    (when (and behind (pos? carried) (together? behind (first (b :names))))
-      (set left (max left (+ (b :left) carried))))
     # Never behind the block before it -- the bounds must not undo the order.
     (when edge (set left (max left edge)))
-    (set carried (max 0 (- left (b :left))))
-    (set behind (last (b :names)))
     (var cursor left)
     (var previous nil)
     (each name (b :names)
@@ -1084,16 +1052,10 @@
                 share (/ whole (max 1 (get members-here key 1)))]
             (max (+ (widths name) (* 2 inset)) share))
           (widths name)))
-      # Two bends heading for the same node are one bundle, and a bound that
-      # pushes one of them pushes the rest -- so the spacing they wanted
-      # survives whatever they had to get around. A bend's name carries its
-      # own edge, so this is a comparison rather than a lookup.
-      (defn same-bundle? [a b]
-        (and (bend? a) (bend? b) (= (a 2) (b 2))))
       (defn seat [lo hi]
         (settle names (fn [n] (want n)) padded gap
                 (fn [n] (and group-of (group-of n) true))
-                lo hi same-bundle?))
+                lo hi))
       (def first-pass (seat (fn [n] (low n)) (fn [n] (high n))))
 
       # THE BOUNDS ARE RE-DERIVED FROM WHERE THE MEMBERS ACTUALLY LANDED.
