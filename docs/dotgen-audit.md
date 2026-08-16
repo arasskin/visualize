@@ -215,3 +215,72 @@ So the remaining lever is not in any of dot's passes. It is either:
 parity fix -- dot has it, we do not, and on a dependency graph where one
 module is imported by everything it is the difference between a readable
 picture and a bundle of wires.
+
+## Feature inventory
+
+Everything `lib/dotgen` does, and whether we do it. Written after porting
+concentrate, which was the last item on the "would visibly help" list.
+
+### Have, and equivalent
+
+| feature | dot | ours |
+|---|---|---|
+| cycle breaking | `acyclic.c`, DFS back edges | `back-edges`, same method |
+| ranking | `rank.c`, network simplex | relaxation to the same objective |
+| ordering: median sweep | `mincross.c` wmedian | `order` |
+| ordering: transpose | `mincross.c` transpose | `transpose` (monotone half) |
+| ordering: keep-the-best | save/restore, .995, patience | the mincross loop |
+| coordinates | `position.c` aux graph | `settle` + relaxation; aux graph behind a flag |
+| cluster containment | `contain_nodes` and friends | walls in `aux.janet`; ordering + box otherwise |
+| virtual nodes for long edges | chains of vnodes | bend chains |
+| concentrate | `conc.c` | tried and reverted -- see below |
+| splines | `dotsplines.c` + pathplan | Catmull-Rom through the bends |
+| box corridors | `maximal_bbox` | computed, carried, unused by the router |
+
+### Have, but weaker
+
+| feature | dot | ours |
+|---|---|---|
+| ranking solver | exact (simplex) | relaxation; agrees here, may not elsewhere |
+| ordering escape | takes equal-cost swaps | measured: costs a clip, left off |
+| spline routing | fits a bezier inside the box chain | checks a curve and bows it if blocked |
+| edge attachment | full port model | fan by arrival angle |
+
+### Do not have
+
+| feature | what it is | worth it? |
+|---|---|---|
+| flat edges | `flat.c`, same-rank edges cycle-broken and routed | **yes** -- real in any project, currently drawn as a chord |
+| self edges | a loop beside the node | minor; we skip them |
+| edge labels | a virtual node on an odd rank | no -- we do not label edges |
+| recursive clusters | `cluster.c`, own mincross per cluster | no -- our groups are one level |
+| leaf packing | `expand_leaves`, `make_leafslots` | maybe -- would tighten the parser row |
+| aspect targeting | `set_aspect`, ratio and size | no -- the page zooms |
+| multi-edges | parallel edges bowed apart | no -- the scan emits one per pair |
+| ports | attach at a named point on the node | no |
+
+The one item left that would visibly change this graph is **flat edges**, and
+only for projects that have same-rank dependencies. Everything else on the
+"do not have" list is either irrelevant to a dependency graph or cosmetic.
+
+## Concentrate: tried, measured well, looked worse, reverted
+
+Worth recording because the metrics said yes and the picture said no.
+
+Bundling the twelve chains into `src/core` halved the narrow corridors (20 to
+11) and took the drawing from 1162 to 955 pixels -- better than any of the
+five previous attempts managed. It also made the graph harder to read, which
+is the only thing that matters.
+
+Twelve thin lines that stay thin, spread out and individually followable beat
+one thick rope, however much narrower the rope makes the picture. The bundle
+became the most visually dominant object in the drawing, it crossed `src/state`
+and `src/faults` on its way down, and it pushed the nodes around it into a
+worse arrangement.
+
+**The lesson is about the metrics, not the feature.** Width and corridor width
+measure PACKING. Nothing here measured legibility, so a change that traded
+twelve readable lines for one dense one scored as an improvement. `concentrate`
+may still be right for a graph with genuinely parallel structure -- several
+edges running the same route between the same two regions -- but on a fan into
+one popular node it is exactly the wrong shape.
