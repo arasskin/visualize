@@ -167,3 +167,51 @@ picture at every step is: `position.c` (aux graph + reuse our ranker),
 `flat.c` (the missing feature), `mincross.c` (save/restore + its convergence
 rule), then `dotsplines.c` (box corridors) last, since our checking router is
 adequate until the bends are right.
+
+## Postscript: why the detour survived five ports
+
+Recorded after porting the aux graph, cluster walls, transpose, the mincross
+loop and box corridors, none of which moved the edge that prompted the audit.
+
+The corridors gave the number that explains it. A bend's corridor is the free
+space it has on its rank -- from the right edge of the thing ordered before it
+to the left edge of the thing after. On the rank where the `src/stamp ->
+src/core` chain swings out, that corridor is **eight pixels wide**, and across
+the graph **20 of 37 bend corridors are under twenty pixels**. There is no
+space to route into, so no router can help.
+
+Widening the gaps does not create any. Raising `bend-gap` from 3 to 26 and
+`bend-width` from 8 to 14 makes it *worse* -- 26 narrow corridors instead of
+20, on a drawing grown from 1162 to 1364 pixels -- because a corridor is the
+gap *between neighbours*, and giving every bend more personal space moves the
+neighbours out by the same amount. Every bend gets more room of its own and no
+more room to move.
+
+The rank census says what is actually there:
+
+```
+rank 0:  8 nodes +  0 bends
+rank 1:  7 nodes +  8 bends
+rank 2:  7 nodes + 10 bends
+rank 3:  3 nodes + 12 bends
+rank 4:  4 nodes +  7 bends
+```
+
+The crowded ranks are crowded with **pass-through edges, not nodes**. Twelve
+long edges cross rank 3 on their way to `src/core`, which has thirteen
+dependents. The detour is those twelve edges competing for one rank's width.
+
+So the remaining lever is not in any of dot's passes. It is either:
+
+- **fewer things per rank** -- real network simplex ranking might place some
+  of `src/core`'s dependents closer to it, shortening the chains that cross
+  everything; or
+- **fewer chains** -- which is a drawing decision rather than a layout one.
+  dot has `concentrate` for exactly this: merge parallel runs into one line
+  and split them at the end. Thirteen edges into one node drawn as one bundle
+  that fans at the last rank would empty the middle ranks completely.
+
+`concentrate` is the honest next step, and it is a feature rather than a
+parity fix -- dot has it, we do not, and on a dependency graph where one
+module is imported by everything it is the difference between a readable
+picture and a bundle of wires.
