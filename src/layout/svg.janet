@@ -138,123 +138,133 @@
   [(+ (p :x) (* ux (+ k extra))) (+ (p :y) (* uy (+ k extra)))])
 
 (defn- path-through
-  ``The `d` of an edge: from the source's boundary, through any bend points
-  the layout gave us, to just short of the target's boundary.
+  ``The `d` of an edge: a straight line when one reaches, the routed
+  polyline when it does not.
 
-  THE FIRST STRETCH IS A CURVE, and that is what keeps an edge off the node
-  beside the one it leaves. An edge to something below and to the side exits
-  its source aimed straight at whatever sits next to it on the same rank:
-  `src/v -> src/layout` left `src/v` heading right and down, and ran thirteen
-  units through the middle of `src/layout/force` on its way. There is no bend
-  to route it around -- bends exist only for edges that span more than one
-  rank, and this one does not.
+  THE SIMPLEST LINE THAT WORKS. An edge that can run straight from its
+  source to its target without touching anything else should do exactly
+  that -- it is the clearest way to say what the edge says. Only when the
+  straight line is blocked does the edge need the bend points the layout
+  reserved for it, and then it uses all of them.
 
-  WHICH WAY IT BOWS DEPENDS ON WHERE THE OBSTACLE IS, and getting that wrong
-  makes things worse rather than better. A quadratic's single control point
-  can sit at either end of the stretch:
+  NEVER BOTH. Curving the first stretch and leaving the rest straight was
+  tried and reads badly: seventeen of the edges on this tool's own graph
+  came out as an arc that suddenly became a polyline, and the join is
+  visible on every one of them. An edge is one kind of line for its whole
+  length.
 
-    at the SOURCE's x -- the edge leaves going straight down and turns late,
-      which dips it below a node standing beside the source. `src/v` needs
-      this: `src/layout/force` is on its own rank, immediately to its right.
-
-    at the FAR end's x -- the edge leaves diagonally and arrives going
-      straight down, which holds it high over a node standing beside the far
-      end. `src/state` needs this: `src/watch` sits on the rank below, beside
-      the bend it is heading for.
-
-  So the stretch is checked against the nodes it actually passes, both ways,
-  and the bow that clears them wins. One control point, one bend, and the
-  direction chosen by what is in the way rather than by a convention that
-  suits half the graph.``
+  `places` and `sizes` are every node's centre and half-size, so the
+  straight line can be checked against the nodes it would pass. Without
+  them -- the force layout does not pass them -- the straight line is used
+  whenever the layout gave no bends, which is what this did before.``
   [a b ra rb bends &opt from to places sizes]
-  (def first-target (if (empty? bends) [(b :x) (b :y)] (first bends)))
-  (def last-source (if (empty? bends) [(a :x) (a :y)] (last bends)))
+
+  (defn hits-anything?
+    ``Does the segment from (x1,y1) to (x2,y2) cut into a node that is
+    neither end of this edge? Sampled: the exact test is a quadratic per
+    ellipse, and this runs over every node for every edge.``
+    [x1 y1 x2 y2]
+    (if (or (nil? places) (nil? sizes))
+      false
+      (do
+        (var hit false)
+        (for k 0 33
+          (def t (/ k 32))
+          (def px (+ x1 (* t (- x2 x1))))
+          (def py (+ y1 (* t (- y2 y1))))
+          (eachp [name p] places
+            (unless (or (= name from) (= name to) hit)
+              (def s (sizes name))
+              (def dx (/ (- px (p :x)) (max 0.001 (s :w))))
+              (def dy (/ (- py (p :y)) (max 0.001 (s :h))))
+              # A whisker inside the ellipse rather than on it, so a line
+              # that merely grazes the outline is not counted as blocked.
+              (when (< (+ (* dx dx) (* dy dy)) 0.94)
+                (set hit true)))))
+        hit)))
+
   # THE ARROW LANDS ON THE NODE. The path runs to the boundary itself, and
   # the marker's refX puts the arrow's TIP at that point rather than its
   # tail -- so the head touches the ellipse the way it does in dot's output.
   # Stopping short by the marker's length, which is what the 9 here used to
   # do, subtracted the arrowhead twice and left every edge floating a
   # visible gap away from the node it points at.
-  # WHERE THE EDGE LEAVES IS PART OF THE PROBLEM. `on-ellipse` aims at the
-  # target, so an edge to something below and to the side leaves out of the
-  # SIDE of its source -- level with whatever sits next to it on the same
-  # rank. `src/v -> src/layout` started at y=192.6, which is inside
-  # `src/layout/force`'s span of 143..225 already, so no amount of curving
-  # afterwards could keep it clear: it began beside the node it had to miss.
-  #
-  # Aiming the exit at a point BELOW the target drops it around the ellipse
-  # toward the bottom, which is where an edge heading down the page should
-  # leave from anyway. The curve then starts under the neighbouring rank
-  # rather than in the middle of it.
-  (def [x2 y2] (on-ellipse b (rb :w) (rb :h) (last-source 0) (last-source 1) 0))
-  # Where the first stretch ends: the first bend, or the target itself.
-  (def [fx0 fy0] (if (empty? bends) [(b :x) (b :y)] [(first-target 0) (first-target 1)]))
-  (def below (- fy0 (a :y)))
-  (def [x1 y1]
-    (if (> below 1)
-      # THE AIM DROPS BY THE WHOLE HORIZONTAL RUN, so an edge going a long way
-      # sideways leaves near the bottom of its source rather than out of the
-      # side. That is the geometry: an edge whose target is far to the right
-      # is the one that grazes its right-hand neighbour, and it is exactly the
-      # one whose exit needs to be lowest. A near-vertical edge has almost no
-      # horizontal run, so its exit barely moves -- which is right, since it
-      # was already leaving from the bottom.
-      (on-ellipse a (ra :w) (ra :h) fx0
-                  (+ fy0 (math/abs (- fx0 (a :x)))) 0)
-      (on-ellipse a (ra :w) (ra :h) fx0 fy0 0)))
-  (def [fx fy] (if (empty? bends) [x2 y2] [fx0 fy0]))
-  (def drop (- fy y1))
-  # ONE BEND, ONE CONTROL POINT. The curve has one thing to say -- leave
-  # downward, come round to the target -- and a quadratic says it. Two
-  # control points is a curve built to bend twice, and using one for the exit
-  # and one for the arrival makes them argue about where the middle goes.
-  #
-  # SUBTLE, because most edges do not need the help and a strong curve on
-  # them is just decoration. The control point sits a fraction of the way
-  # down from the source on its own vertical: enough to lift the line off the
-  # rank it starts on, not so much that a straight run visibly bows. A
-  # stretch that goes UP -- a back edge drawn in its original direction -- or
-  # one with no height to work with keeps the straight segment it had.
-  (def lean (* 0.50 drop))
-  # The two bows: control at the source's x, and at the far end's x.
-  (def early [x1 (+ y1 lean)])
-  (def late [fx (- fy lean)])
-  (defn worst-on
-    ``How far the bow with control `c` cuts into any node it does not touch.
-    Sampled rather than solved: a quadratic against an ellipse has a closed
-    form and this is a handful of points on a handful of curves.``
-    [c]
-    (if (or (nil? places) (nil? sizes))
-      0
-      (do
-        (var worst 0)
-        (for k 0 25
-          (def t (/ k 24))
-          (def u (- 1 t))
-          (def px (+ (* u u x1) (* 2 u t (c 0)) (* t t fx)))
-          (def py (+ (* u u y1) (* 2 u t (c 1)) (* t t fy)))
-          (eachp [name p] places
-            (unless (or (= name from) (= name to))
-              (def s (sizes name))
-              (def dx (/ (- px (p :x)) (max 0.001 (s :w))))
-              (def dy (/ (- py (p :y)) (max 0.001 (s :h))))
-              (def d (+ (* dx dx) (* dy dy)))
-              (when (< d 1)
-                (set worst (max worst (* (s :w) (- 1 (math/sqrt d)))))))))
-        worst)))
-  (def out @[(string/format "M%.1f,%.1f" x1 y1)])
-  (if (> drop 1)
-    (let [c (if (<= (worst-on early) (worst-on late)) early late)]
-      (array/push out (string/format "Q%.1f,%.1f %.1f,%.1f"
-                                     (c 0) (c 1) fx fy)))
-    (array/push out (string/format "L%.1f,%.1f" fx fy)))
-  # Everything after the first stretch is unchanged: the bend chain is a
-  # sequence of straight runs the layout has already made room for.
-  (unless (empty? bends)
-    (each [bx by] (slice bends 1)
-      (array/push out (string/format "L%.1f,%.1f" bx by)))
-    (array/push out (string/format "L%.1f,%.1f" x2 y2)))
-  (string/join out " "))
+  (def straight-from (on-ellipse a (ra :w) (ra :h) (b :x) (b :y) 0))
+  (def straight-to (on-ellipse b (rb :w) (rb :h) (a :x) (a :y) 0))
+
+  (if (not (hits-anything? (straight-from 0) (straight-from 1)
+                           (straight-to 0) (straight-to 1)))
+    # Straight reaches. Say it that way, bends or no bends -- a chain of
+    # bends the edge does not need is a detour drawn for its own sake.
+    (string/format "M%.1f,%.1f L%.1f,%.1f"
+                   (straight-from 0) (straight-from 1)
+                   (straight-to 0) (straight-to 1))
+    (if (empty? bends)
+      # BLOCKED, AND NOTHING TO ROUTE THROUGH. Bends exist only for edges
+      # spanning more than one rank, so an edge to the next rank down has no
+      # reserved column to detour along -- and the layout has already decided
+      # every node's x, so there is nowhere else for the line to go. Straight
+      # is blocked and the polyline IS the straight line.
+      #
+      # A curve is the one thing left, and here it is the whole edge rather
+      # than a first stretch glued to a polyline: there are no bends to mix
+      # with, so nothing to look inconsistent against. One quadratic, source
+      # to target.
+      #
+      # WHICH WAY IT BOWS IS CHOSEN BY WHAT IS IN THE WAY. The control point
+      # can sit above the straight line or below it, and a fixed choice suits
+      # half the graph and hurts the other half: `src/v -> src/layout` has to
+      # dip below `src/layout/force`, which stands beside its source, while
+      # `src/select -> src/v` has to stay above the same node, which stands
+      # beside its target. Both are tried, the one that clears wins, and if
+      # neither clears the shallower one does.
+      (let [[x1 y1] straight-from
+            [x2 y2] straight-to
+            mx (/ (+ x1 x2) 2)
+            my (/ (+ y1 y2) 2)
+            # Perpendicular to the chord, scaled to a fraction of its length:
+            # enough to clear a neighbouring node, gentle enough that the edge
+            # still reads as running from one node to the other.
+            dx (- x2 x1)
+            dy (- y2 y1)
+            len (max 0.001 (math/sqrt (+ (* dx dx) (* dy dy))))
+            bow (* 0.15 len)
+            nx (* (/ (- dy) len) bow)
+            ny (* (/ dx len) bow)
+            one [(+ mx nx) (+ my ny)]
+            other [(- mx nx) (- my ny)]
+            hit (fn [c]
+                  (var worst 0)
+                  (for k 0 25
+                    (def t (/ k 24))
+                    (def u (- 1 t))
+                    (def px (+ (* u u x1) (* 2 u t (c 0)) (* t t x2)))
+                    (def py (+ (* u u y1) (* 2 u t (c 1)) (* t t y2)))
+                    (when (and places sizes)
+                      (eachp [name p] places
+                        (unless (or (= name from) (= name to))
+                          (def s (sizes name))
+                          (def ex (/ (- px (p :x)) (max 0.001 (s :w))))
+                          (def ey (/ (- py (p :y)) (max 0.001 (s :h))))
+                          (def d (+ (* ex ex) (* ey ey)))
+                          (when (< d 1)
+                            (set worst (max worst (* (s :w) (- 1 (math/sqrt d))))))))))
+                  worst)
+            c (if (<= (hit one) (hit other)) one other)]
+        (string/format "M%.1f,%.1f Q%.1f,%.1f %.1f,%.1f"
+                       x1 y1 (c 0) (c 1) x2 y2))
+      # Blocked, and the layout reserved a route: use all of it, straight.
+      (let [first-target (first bends)
+            last-source (last bends)
+            [x1 y1] (on-ellipse a (ra :w) (ra :h)
+                                (first-target 0) (first-target 1) 0)
+            [x2 y2] (on-ellipse b (rb :w) (rb :h)
+                                (last-source 0) (last-source 1) 0)
+            out @[(string/format "M%.1f,%.1f" x1 y1)]]
+        (each [bx by] bends
+          (array/push out (string/format "L%.1f,%.1f" bx by)))
+        (array/push out (string/format "L%.1f,%.1f" x2 y2))
+        (string/join out " ")))))
 
 (defn draw
   ``The graph as SVG, laid out by `places`.
