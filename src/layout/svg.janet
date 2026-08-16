@@ -126,16 +126,55 @@
   The real intersection this time, not the approximation the force layout
   shipped with: with variable-width nodes the error is visible, and the
   parametric solution is three lines.``
-  [p rx ry tx ty extra]
+  [p rx ry tx ty extra &opt turn]
   (def dx (- tx (p :x)))
   (def dy (- ty (p :y)))
   (def d (max 0.0001 (math/sqrt (+ (* dx dx) (* dy dy)))))
-  (def ux (/ dx d))
-  (def uy (/ dy d))
+  # `turn` rotates the approach by a few tenths of a radian, which is how a
+  # fan of edges into one node lands at a spread of points rather than all
+  # at the same one. Zero for an edge with nothing to share the node with.
+  (def angle (+ (math/atan2 dy dx) (or turn 0)))
+  (def ux (math/cos angle))
+  (def uy (math/sin angle))
   # The scale that puts (ux,uy) on the unit circle in ellipse space.
   (def k (/ 1 (max 0.0001 (math/sqrt (+ (/ (* ux ux) (* rx rx))
                                         (/ (* uy uy) (* ry ry)))))))
   [(+ (p :x) (* ux (+ k extra))) (+ (p :y) (* uy (+ k extra)))])
+
+(defn- spline
+  ``An SVG path through every one of `pts`, curved.
+
+  A CURVE THAT PASSES THROUGH ITS POINTS, not near them. Catmull-Rom is the
+  spline with that property, and converting each of its segments to a cubic
+  bezier is how it gets drawn with the two commands SVG has. The conversion
+  is the standard one: for points p0 p1 p2 p3, the segment from p1 to p2
+  has control points p1 + (p2-p0)/6 and p2 - (p3-p1)/6.
+
+  The ends are handled by duplicating the first and last points, so every
+  segment has the two neighbours the formula wants and the curve starts and
+  finishes pointing the way the edge does.``
+  [pts]
+  (if (< (length pts) 2)
+    ""
+    (let [n (length pts)
+          at (fn [i] (pts (min (max i 0) (- n 1))))
+          out @[(string/format "M%.1f,%.1f" ((at 0) 0) ((at 0) 1))]]
+      (for i 0 (- n 1)
+        (def p0 (at (- i 1)))
+        (def p1 (at i))
+        (def p2 (at (+ i 1)))
+        (def p3 (at (+ i 2)))
+        # A sixth is the Catmull-Rom-to-bezier constant; smaller would flatten
+        # the curve toward the polyline it replaces, larger would overshoot
+        # the waypoints it exists to hit.
+        (array/push out
+          (string/format "C%.1f,%.1f %.1f,%.1f %.1f,%.1f"
+                         (+ (p1 0) (/ (- (p2 0) (p0 0)) 6))
+                         (+ (p1 1) (/ (- (p2 1) (p0 1)) 6))
+                         (- (p2 0) (/ (- (p3 0) (p1 0)) 6))
+                         (- (p2 1) (/ (- (p3 1) (p1 1)) 6))
+                         (p2 0) (p2 1))))
+      (string/join out " "))))
 
 (defn- path-through
   ``The `d` of an edge: a straight line when one reaches, the routed
@@ -157,7 +196,7 @@
   straight line can be checked against the nodes it would pass. Without
   them -- the force layout does not pass them -- the straight line is used
   whenever the layout gave no bends, which is what this did before.``
-  [a b ra rb bends &opt from to places sizes box-rects paths]
+  [a b ra rb bends &opt from to places sizes box-rects paths turn]
 
   (defn hits-anything?
     ``Is a straight line from (x1,y1) to (x2,y2) clear of everything it has
@@ -258,7 +297,7 @@
   # do, subtracted the arrowhead twice and left every edge floating a
   # visible gap away from the node it points at.
   (def straight-from (on-ellipse a (ra :w) (ra :h) (b :x) (b :y) 0))
-  (def straight-to (on-ellipse b (rb :w) (rb :h) (a :x) (a :y) 0))
+  (def straight-to (on-ellipse b (rb :w) (rb :h) (a :x) (a :y) 0 turn))
 
   (if (not (hits-anything? (straight-from 0) (straight-from 1)
                            (straight-to 0) (straight-to 1)))
@@ -318,21 +357,49 @@
                           (when (< d 1)
                             (set worst (max worst (* (s :w) (- 1 (math/sqrt d))))))))))
                   worst)
-            c (if (<= (hit one) (hit other)) one other)]
+            # A GENTLE BOW OFTEN IS NOT ENOUGH. Both sides are tried at
+            # increasing depth and the first that clears wins: a neighbour
+            # standing right beside the source needs a wider detour than a
+            # node merely near the line, and settling for the shallower of
+            # two blocked arcs drew an edge straight through something.
+            best (do
+                   (var found nil)
+                   (each scale [1 1.8 2.8 4]
+                     (unless found
+                       (def sx (* nx scale))
+                       (def sy (* ny scale))
+                       (def up [(+ mx sx) (+ my sy)])
+                       (def down [(- mx sx) (- my sy)])
+                       (cond
+                         (zero? (hit up)) (set found up)
+                         (zero? (hit down)) (set found down))))
+                   found)
+            c (or best (if (<= (hit one) (hit other)) one other))]
         (string/format "M%.1f,%.1f Q%.1f,%.1f %.1f,%.1f"
                        x1 y1 (c 0) (c 1) x2 y2))
-      # Blocked, and the layout reserved a route: use all of it, straight.
+      # Blocked, and the layout reserved a route: follow it -- as a CURVE.
+      #
+      # The bends are where the edge must pass, not corners it must turn.
+      # Drawn as line segments they read as plumbing: every multi-rank edge
+      # arrives at its target having visibly changed direction two or three
+      # times, and a reader tracks the kinks instead of the connection. A
+      # curve through the same points says the same thing about where the
+      # edge goes and nothing about corners that are not there.
+      #
+      # CATMULL-ROM CONVERTED TO BEZIER, which is the standard way to get a
+      # curve that actually passes THROUGH its waypoints -- a plain bezier
+      # treats them as magnets and misses, which would undo the routing the
+      # layout worked out. Each segment's control points come from the
+      # neighbouring points' slope, scaled by `tension`; the endpoints are
+      # duplicated so the first and last segments have a neighbour to read.
       (let [first-target (first bends)
             last-source (last bends)
             [x1 y1] (on-ellipse a (ra :w) (ra :h)
                                 (first-target 0) (first-target 1) 0)
             [x2 y2] (on-ellipse b (rb :w) (rb :h)
-                                (last-source 0) (last-source 1) 0)
-            out @[(string/format "M%.1f,%.1f" x1 y1)]]
-        (each [bx by] bends
-          (array/push out (string/format "L%.1f,%.1f" bx by)))
-        (array/push out (string/format "L%.1f,%.1f" x2 y2))
-        (string/join out " ")))))
+                                (last-source 0) (last-source 1) 0 turn)
+            pts (array [x1 y1] ;(map |[($ 0) ($ 1)] bends) [x2 y2])]
+        (spline pts)))))
 
 (defn draw
   ``The graph as SVG, laid out by `places`.
@@ -467,6 +534,37 @@
   # own siblings and was called clear, because straight-to-straight none of
   # the four intersect: their routes swing wide and its straight line went
   # through the space they swung into.
+  # WHERE EACH ARROW LANDS, so a dozen edges into one node do not all arrive
+  # at the same point. Twelve arrowheads stacked on `src/core` read as one
+  # dark smear and say nothing about how many edges there are; spread along
+  # the boundary they are countable.
+  #
+  # The spread is by ARRIVAL ANGLE: edges are sorted by the direction they
+  # come from and given evenly spaced slots within the arc they already
+  # occupy, so an edge never crosses its neighbours to reach its slot and the
+  # fan keeps the order the layout put them in. A node with one or two
+  # incoming edges gets no offset at all -- there is nothing to separate.
+  (def fan @{})
+  (do
+    (def incoming @{})
+    (each [from to] edges
+      (when (and (places from) (places to) (not= from to))
+        (put incoming to (array/push (or (incoming to) @[]) from))))
+    (eachp [to sources] incoming
+      (when (> (length sources) 2)
+        (def b (places to))
+        (def angled
+          (sorted-by (fn [from]
+                       (def a (places from))
+                       (math/atan2 (- (a :y) (b :y)) (- (a :x) (b :x))))
+                     sources))
+        (def n (length angled))
+        # Half a node-width of arc, centred: wide enough to separate the
+        # heads, narrow enough that an edge still points at its target.
+        (def spread (min 1.1 (* 0.16 n)))
+        (eachp [i from] angled
+          (put fan [from to] (- (* spread (/ i (- n 1))) (/ spread 2)))))))
+
   (def paths @[])
   (each [from to] edges
     (def a (places from))
@@ -496,7 +594,8 @@
         (string/format
           `<path d="%s" stroke="var(--edge, #888)" stroke-width="1.2" fill="none" marker-end="url(#arrow)"/>`
           (path-through a b (sizes from) (sizes to) bends
-                        from to places sizes box-rects paths))
+                        from to places sizes box-rects paths
+                        (get fan [from to] 0)))
         `</g>`)))
 
   (each node nodes
