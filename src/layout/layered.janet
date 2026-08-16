@@ -29,7 +29,7 @@
 
 (def- defaults
   {:layer-gap 92       # vertical distance between layers
-   :node-gap 20        # minimum horizontal gap between neighbours
+   :node-gap 14        # minimum horizontal gap between neighbours
    :bend-width 10      # the column a through-edge reserves on a layer it crosses
    :bend-gap 4         # between two bends: parallel lines, not labelled boxes
    :group-inset 0      # how far outside its members a group's box is drawn
