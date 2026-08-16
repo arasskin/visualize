@@ -356,6 +356,72 @@
         (++ total))))
   total)
 
+(defn transpose
+  ``Swap adjacent pairs while it helps: dot's transpose, from mincross.c.
+
+  THE PASS WE DID NOT HAVE. The median sweep decides a whole rank from its
+  neighbours' averages, and sifting tries one node in every slot -- neither
+  asks the cheap exact question "would these two, side by side, be better
+  the other way round?", which is what fixes the local tangles a median
+  cannot see. dot runs it after every sweep; this runs it after the sweeps,
+  which is the same place in the pipeline for a loop that has already
+  converged.
+
+  ONLY STRICT IMPROVEMENTS. dot also takes EQUAL-cost swaps on alternate
+  passes (`c0 > 0 && reverse && c1 == c0` in transpose_step) as a way out of
+  a local minimum, and that is safe there because it keeps the best ordering
+  ever seen and restores it. Without that save-aside, taking ties walks the
+  ranks in circles -- so this takes only what measurably helps, which is the
+  monotone half of dot's rule and cannot make the picture worse.
+
+  Only ranks touched last round are reconsidered: a swap can only change the
+  crossings of the ranks it borders.``
+  [rows up down &opt fixed?]
+  (default fixed? (fn [_] false))
+  (def current (table/clone rows))
+  (def indexes (sort (keys current)))
+  (def candidate @{})
+  (each i indexes (put candidate i true))
+
+  (defn crossings-at [index]
+    (var total 0)
+    (when-let [above (current (- index 1))]
+      (+= total (crossings-between above (current index) up)))
+    (when-let [below (current (+ index 1))]
+      (+= total (crossings-between (current index) below down)))
+    total)
+
+  (var moved true)
+  (var rounds 0)
+  (while (and moved (< rounds 16))
+    (set moved false)
+    (++ rounds)
+    (each index indexes
+      (when (candidate index)
+        (put candidate index false)
+        (def row (current index))
+        (for i 0 (- (length row) 1)
+          (def a ((current index) i))
+          (def b ((current index) (+ i 1)))
+          # A group's members are held still: swapping one past a stranger
+          # breaks the contiguity `cohere` guarantees, and this pass cannot
+          # move the rest of the group with it.
+          (unless (or (fixed? a) (fixed? b))
+            (def before (crossings-at index))
+            (def was (current index))
+            (def swapped (array ;was))
+            (put swapped i b)
+            (put swapped (+ i 1) a)
+            (put current index swapped)
+            (if (< (crossings-at index) before)
+              (do
+                (set moved true)
+                (put candidate index true)
+                (when (current (- index 1)) (put candidate (- index 1) true))
+                (when (current (+ index 1)) (put candidate (+ index 1) true)))
+              (put current index was)))))))
+  current)
+
 (defn sift
   ``Try every node at every position in its layer; keep what crosses least.
 
@@ -1518,7 +1584,14 @@
                         (fn [name] (get up name []))
                         (fn [name] (get down name []))
                         (fn [name] (and group-of (group-of name) true))))
-      (def ordered (if group-of (cohere sifted group-of) sifted))
+      # THEN TRANSPOSE, the exact local question the other two passes do not
+      # ask: is this adjacent pair better swapped? Cheap, and it catches the
+      # tangles a median averages away.
+      (def flipped (transpose sifted
+                              (fn [name] (get up name []))
+                              (fn [name] (get down name []))
+                              (fn [name] (and group-of (group-of name) true))))
+      (def ordered (if group-of (cohere flipped group-of) flipped))
 
       # A dummy is measured as the room its edge needs to pass, which is a
       # narrow column rather than nothing: at zero width the separation pass
