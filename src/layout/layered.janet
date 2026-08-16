@@ -28,10 +28,10 @@
 # anything random, so a watcher redraw never becomes a jump scare.
 
 (def- defaults
-  {:layer-gap 92       # vertical distance between layers
+  {:layer-gap 104      # vertical distance between layers
    :node-gap 14        # minimum horizontal gap between neighbours
-   :bend-width 10      # the column a through-edge reserves on a layer it crosses
-   :bend-gap 4         # between two bends: parallel lines, not labelled boxes
+   :bend-width 8       # the column a through-edge reserves on a layer it crosses
+   :bend-gap 3         # between two bends: parallel lines, not labelled boxes
    :group-inset 0      # how far outside its members a group's box is drawn
    :sweeps 8})         # crossing-reduction passes (down and up count as one)
 
