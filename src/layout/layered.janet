@@ -30,7 +30,8 @@
 (def- defaults
   {:layer-gap 92       # vertical distance between layers
    :node-gap 20        # minimum horizontal gap between neighbours
-   :bend-width 12      # the column a through-edge reserves on a layer it crosses
+   :bend-width 10      # the column a through-edge reserves on a layer it crosses
+   :bend-gap 4         # between two bends: parallel lines, not labelled boxes
    :group-inset 0      # how far outside its members a group's box is drawn
    :sweeps 8})         # crossing-reduction passes (down and up count as one)
 
@@ -488,11 +489,22 @@
   of a group's box. They cannot be desires: a desire is an average, and a
   block merging around a node averages its wish away -- which is exactly how
   a node evicted from a box got pulled back into it by the neighbours it
-  merged with. A bound survives the merge because it moves the whole block.``
+  merged with. A bound survives the merge because it moves the whole block.
+
+  `gap` is the minimum space between neighbours: either a number, or a
+  function of the two names it falls between. TWO BENDS NEED LESS ROOM THAN
+  TWO NODES -- a bend is a line, not a box with a label in it, and the gap
+  that keeps two labelled ellipses legible is far more than two parallel
+  lines need to read as parallel. Given the same gap as everything else, the
+  nine edges converging on `src/core` were spaced 32 units apart and read as
+  a splayed fan rather than a bundle.``
   [names want widths gap &opt fixed floor ceiling]
   (default fixed (fn [_] false))
   (default floor (fn [_] nil))
   (default ceiling (fn [_] nil))
+  # A scalar gap is the same gap everywhere, which is what every caller but
+  # `place-x` wants.
+  (def gap-between (if (function? gap) gap (fn [_ _] gap)))
   (def out @{})
   # Each block: the names in it, where its left edge wants to be, and the
   # total width it needs. `pin` is the position a fixed member demands for
@@ -517,12 +529,16 @@
                          :low (when-let [f (floor name)] (- f half))
                          :high (when-let [c (ceiling name)] (- c half))})
     # Merge backwards while this block starts before the previous one ends.
+    # The gap that matters is the one between the two names in contact --
+    # the last of the block behind and the first of this one.
     (while (and (> (length blocks) 1)
                 (let [b (last blocks)
                       a (blocks (- (length blocks) 2))]
-                  (< (b :left) (+ (a :left) (a :width) gap))))
+                  (< (b :left) (+ (a :left) (a :width)
+                                  (gap-between (last (a :names)) (first (b :names)))))))
       (def b (array/pop blocks))
       (def a (last blocks))
+      (def gap (gap-between (last (a :names)) (first (b :names))))
       # The merged block's left edge: what the two halves wanted, weighted by
       # how many nodes each speaks for, unless one of them is pinned.
       (def a-n (length (a :names)))
@@ -571,10 +587,13 @@
     # Never behind the block before it -- the bounds must not undo the order.
     (when edge (set left (max left edge)))
     (var cursor left)
+    (var previous nil)
     (each name (b :names)
       (def w (widths name))
+      (when previous (set cursor (+ cursor (gap-between previous name))))
       (put out name (+ cursor (/ w 2)))
-      (set cursor (+ cursor w gap)))
+      (set cursor (+ cursor w))
+      (set previous name))
     (set edge cursor))
   out)
 
@@ -852,8 +871,18 @@
   threaded through rather than a real node; `aim` answers the x such a bend
   would sit at if its edge ran perfectly straight; `group-of` answers a
   node's group; `inset` is how far outside its members the renderer draws a
-  group's box, so the layout can clear the rectangle that actually appears.``
+  group's box, so the layout can clear the rectangle that actually appears.
+
+  `gap` is a number, or a function of the two names it falls between -- see
+  `settle`. The bounds and the initial packing below need a single figure to
+  do arithmetic with, and take the one the function gives for a pair of real
+  nodes: those are the ones a bound has to clear.``
   [ordered up down widths gap &opt bend? aim group-of inset]
+  # One number for the arithmetic that cannot ask about a specific pair. The
+  # widest gap is the safe one there: a bound computed with a narrower figure
+  # would let a node sit closer to a group's box than `settle` will allow,
+  # and the two would disagree about where the edge of the box is.
+  (def flat-gap (if (function? gap) (gap :node :node) gap))
   (default bend? (fn [_] false))
   (default aim (fn [_ _] nil))
   (default inset 0)
@@ -865,12 +894,12 @@
   # its first few nodes, so an eighteen-node row over a one-node row came out
   # as a diagonal smear rather than a tree.
   (each index indexes
-    (var span (- gap))
-    (each name (ordered index) (+= span (+ (widths name) gap)))
+    (var span (- flat-gap))
+    (each name (ordered index) (+= span (+ (widths name) flat-gap)))
     (var cursor (/ span -2))
     (each name (ordered index)
       (put x name (+ cursor (/ (widths name) 2)))
-      (set cursor (+ cursor (widths name) gap))))
+      (set cursor (+ cursor (widths name) flat-gap))))
 
   (defn centre-on [names]
     (def known (filter |(x $) names))
@@ -985,8 +1014,8 @@
                            (< (want name) (/ (+ x0 x1) 2))
                            (< i (min ;mates))))
             (if before?
-              (put high name (min (get high name math/inf) (- x0 half gap)))
-              (put low name (max (get low name (- math/inf)) (+ x1 half gap)))))))
+              (put high name (min (get high name math/inf) (- x0 half flat-gap)))
+              (put low name (max (get low name (- math/inf)) (+ x1 half flat-gap)))))))
 
       # A BOX TAKES UP THE ROOM A BOX TAKES UP. `settle` is told each member
       # is `inset` wider on both sides than the node itself, because that is
@@ -1066,8 +1095,8 @@
               (def x1 (+ (e :x1) inset))
               (def mates (seq [[j m] :pairs names :when (= key (group-of m))] j))
               (if (and (not (empty? mates)) (< i (min ;mates)))
-                (put high name (min (get high name math/inf) (- x0 half gap)))
-                (put low name (max (get low name (- math/inf)) (+ x1 half gap))))))))
+                (put high name (min (get high name math/inf) (- x0 half flat-gap)))
+                (put low name (max (get low name (- math/inf)) (+ x1 half flat-gap))))))))
 
       # Both bounds together can be unsatisfiable -- a node ordered between
       # two groups that have closed up around it. The floor wins, because a
@@ -1340,12 +1369,25 @@
         # must not be pulled into somebody's box.
         (when-let [of (opts :group-of)]
           (fn [name] (when (string? name) (of name)))))
+      # TWO BENDS SIT CLOSER THAN TWO NODES. The gap between neighbours is
+      # what keeps two labelled ellipses apart and legible; two bends are
+      # parallel lines and need far less. Given the node's gap they read as a
+      # splayed fan rather than a bundle -- the nine edges converging on
+      # `src/core` were 32 units apart across the last four ranks.
+      #
+      # Only bend-to-bend is narrowed. A bend beside a real node keeps the
+      # full gap, because that gap is what stops the edge grazing the box.
+      (def gap-between
+        (fn [a b]
+          (if (and (bend? a) (bend? b))
+            (tuning :bend-gap)
+            (tuning :node-gap))))
       (defn seat [rows]
         (place-x rows
                  (fn [name] (get up name []))
                  (fn [name] (get down name []))
                  widths
-                 (tuning :node-gap)
+                 gap-between
                  bend?
                  aim
                  bend-group

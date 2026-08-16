@@ -467,6 +467,25 @@
 # pass. The real graph is the reproduction; `crossings` above went from five
 # to four when this landed.
 
+(t/test "two bends sit closer than two nodes"
+  # A BEND IS A LINE, NOT A BOX WITH A LABEL IN IT. The gap that keeps two
+  # ellipses legible is far more room than two parallel edges need, and given
+  # the same gap the nine edges converging on `src/core` sat 32 units apart
+  # and read as a splayed fan rather than a bundle.
+  #
+  # `settle` takes a gap that can depend on the pair it falls between, so
+  # bend-to-bend narrows while a bend beside a real node keeps the full gap
+  # -- that one is what stops the edge grazing the box.
+  (def names ["a" "bend1" "bend2" "b"])
+  (def widths {"a" 60 "bend1" 10 "bend2" 10 "b" 60})
+  (defn bend? [n] (string/has-prefix? "bend" n))
+  (def out (layered/settle names (fn [_] 0) widths
+                           (fn [x y] (if (and (bend? x) (bend? y)) 4 20))))
+  (def between (- (out "bend2") (out "bend1")))
+  (t/is= 14 between "two bends: their widths plus the narrow gap")
+  (def beside (- (out "bend1") (out "a")))
+  (t/is= 55 beside "a bend beside a node keeps the full gap"))
+
 (t/test "the whole picture does not get worse"
   # THE GUARD. A graph shaped like the one this tool draws of itself: a rank
   # of sources, a rank of middles, and a long edge that has to cross the
