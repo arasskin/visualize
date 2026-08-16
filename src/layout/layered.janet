@@ -368,9 +368,11 @@
 
   Clipping is weighted hardest because it is the one that reads as a
   mistake rather than as complexity.``
-  [positions widths edge-paths]
+  [positions widths edge-paths &opt boxes]
+  (default boxes [])
   (var crossings 0)
   (var clipped 0)
+  (var boxed 0)
   (var travel 0)
 
   # Segments, with the edge they belong to, so an edge is not counted
@@ -419,7 +421,25 @@
     (for i 0 (- (length path) 1)
       (+= travel (math/abs (- ((path (+ i 1)) 0) ((path i) 0))))))
 
-  (+ (* 40 clipped) (* 25 crossings) (/ travel 25)))
+  # An edge cutting a group's box, which is the third thing a reader
+  # complains about and the one the search could not previously see.
+  (each b boxes
+    (def [x0 y0 x1 y1 members] b)
+    (eachp [key path] edge-paths
+      (unless (or (find |(= $ (key 0)) members) (find |(= $ (key 1)) members))
+        (var inside false)
+        (for i 0 (- (length path) 1)
+          (def p (path i))
+          (def q (path (+ i 1)))
+          (for s 0 13
+            (def t (/ s 12))
+            (def px (+ (p 0) (* t (- (q 0) (p 0)))))
+            (def py (+ (p 1) (* t (- (q 1) (p 1)))))
+            (when (and (> px x0) (< px x1) (> py y0) (< py y1))
+              (set inside true))))
+        (when inside (++ boxed)))))
+
+  (+ (* 40 clipped) (* 30 boxed) (* 25 crossings) (/ travel 25)))
 
 #
 # 3. Placement.
@@ -1079,9 +1099,37 @@
             (put out name {:x (xs name) :y (* (layer name) (tuning :layer-gap))})))
         out)
 
+      # The boxes as the renderer will draw them, so `cost` can count an
+      # edge cutting one. Same shape the eviction uses: the members' extent
+      # plus the inset the renderer adds.
+      (defn boxes-of [xs]
+        (def out @[])
+        (when group-of
+          (def span @{})
+          (each name names
+            (when-let [key (group-of name)]
+              (when (xs name)
+                (def half (/ (widths name) 2))
+                (def y (* (layer name) (tuning :layer-gap)))
+                (unless (span key)
+                  (put span key @{:x0 math/inf :x1 (- math/inf)
+                                  :y0 math/inf :y1 (- math/inf) :who @[]}))
+                (def e (span key))
+                (put e :x0 (min (e :x0) (- (xs name) half)))
+                (put e :x1 (max (e :x1) (+ (xs name) half)))
+                (put e :y0 (min (e :y0) (- y 40)))
+                (put e :y1 (max (e :y1) (+ y 40)))
+                (array/push (e :who) name))))
+          (eachp [_ e] span
+            (def pad (tuning :group-inset))
+            (array/push out [(- (e :x0) pad) (- (e :y0) pad)
+                             (+ (e :x1) pad) (+ (e :y1) pad)
+                             (e :who)])))
+        out)
+
       (defn score-of [layout]
         (def xs (place-with layout))
-        (cost (positions-of xs) widths (paths-for xs)))
+        (cost (positions-of xs) widths (paths-for xs) (boxes-of xs)))
 
       (def refined (table/clone ordered))
       (eachp [index row] refined (put refined index (array ;row)))
@@ -1104,10 +1152,22 @@
       # candidates are the entities an offending edge touches: the two ends
       # of an edge that clips a node, the node it clips, and the ends of a
       # pair that cross.
+      # EVERY KIND OF DEFECT NOMINATES ITS OWN CANDIDATES. Looking only for
+      # edges through nodes made the pass blind to the other two thirds of
+      # what `cost` measures: `src/json -> src/graph` crossing
+      # `src/state -> src/graph` clips nothing, so neither edge was ever
+      # proposed for a swap, and neither were the edges cutting a group's
+      # box. The score could see those and the search could not reach them.
       (defn troubled [xs]
         (def out @{})
         (def places (positions-of xs))
         (def lines (paths-for xs))
+        (defn blame [key]
+          (put out (key 0) true)
+          (put out (key 1) true))
+
+        # 1. An edge through a node it has nothing to do with -- the node is
+        #    a candidate too, since moving IT is often the cheaper fix.
         (eachp [key path] lines
           (def [from to] key)
           (eachp [name p] places
@@ -1123,7 +1183,65 @@
                   (def dx (/ (- px (p :x)) rx))
                   (def dy (/ (- py (p :y)) 34))
                   (when (< (+ (* dx dx) (* dy dy)) 1)
-                    (put out name true) (put out from true) (put out to true)))))))
+                    (put out name true) (blame key)))))))
+
+        # 2. Two edges that cross each other. Both are candidates: which of
+        #    them should move is exactly what trying the swap settles.
+        (def segs @[])
+        (eachp [key path] lines
+          (for i 0 (- (length path) 1)
+            (array/push segs [(path i) (path (+ i 1)) key])))
+        (defn meets [[p1 p2 _] [p3 p4 _]]
+          (def d (- (* (- (p2 0) (p1 0)) (- (p4 1) (p3 1)))
+                    (* (- (p2 1) (p1 1)) (- (p4 0) (p3 0)))))
+          (if (< (math/abs d) 0.000001)
+            false
+            (let [t (/ (- (* (- (p3 0) (p1 0)) (- (p4 1) (p3 1)))
+                          (* (- (p3 1) (p1 1)) (- (p4 0) (p3 0)))) d)
+                  u (/ (- (* (- (p3 0) (p1 0)) (- (p2 1) (p1 1)))
+                          (* (- (p3 1) (p1 1)) (- (p2 0) (p1 0)))) d)]
+              (and (> t 0.02) (< t 0.98) (> u 0.02) (< u 0.98)))))
+        (for i 0 (length segs)
+          (for j (+ i 1) (length segs)
+            (unless (= ((segs i) 2) ((segs j) 2))
+              (when (meets (segs i) (segs j))
+                (blame ((segs i) 2))
+                (blame ((segs j) 2))))))
+
+        # 3. An edge cutting a group's box. The members are candidates as
+        #    well as the edge, since sliding the group is sometimes what
+        #    opens the lane.
+        (when group-of
+          (def boxes @{})
+          (eachp [name p] places
+            (when-let [key (group-of name)]
+              (def half (/ (widths name) 2))
+              (unless (boxes key)
+                (put boxes key @{:x0 math/inf :x1 (- math/inf)
+                                 :y0 math/inf :y1 (- math/inf) :who @[]}))
+              (def e (boxes key))
+              (put e :x0 (min (e :x0) (- (p :x) half)))
+              (put e :x1 (max (e :x1) (+ (p :x) half)))
+              (put e :y0 (min (e :y0) (- (p :y) 40)))
+              (put e :y1 (max (e :y1) (+ (p :y) 40)))
+              (array/push (e :who) name)))
+          (eachp [key e] boxes
+            (eachp [pair path] lines
+              (unless (or (= key (group-of (pair 0))) (= key (group-of (pair 1))))
+                (var inside false)
+                (for i 0 (- (length path) 1)
+                  (def a (path i))
+                  (def b (path (+ i 1)))
+                  (for s 0 13
+                    (def t (/ s 12))
+                    (def px (+ (a 0) (* t (- (b 0) (a 0)))))
+                    (def py (+ (a 1) (* t (- (b 1) (a 1)))))
+                    (when (and (> px (e :x0)) (< px (e :x1))
+                               (> py (e :y0)) (< py (e :y1)))
+                      (set inside true))))
+                (when inside
+                  (blame pair)
+                  (each m (e :who) (put out m true)))))))
         out)
 
       (when (and (opts :refine)
@@ -1140,7 +1258,12 @@
         # one. The budget is what makes the pass safe to run unconditionally,
         # since it stops when spent and keeps the best ordering it found --
         # which is never worse than the one it started from.
-        (var budget 12)
+        # The budget is in candidate swaps, and each one re-places and
+        # re-scores the whole graph -- so it IS the time this pass costs,
+        # and the cost of one swap grows with the graph. Scaling the budget
+        # down as the graph grows keeps the total roughly flat: a small
+        # graph gets a thorough search, a big one gets what it can afford.
+        (var budget (max 20 (math/floor (/ 2600 (max 1 (length names))))))
         (while (and moved (< rounds 3) (pos? budget))
           (set moved false)
           (++ rounds)
@@ -1156,8 +1279,7 @@
                 (or (hot n)
                     (and (not (string? n)) (or (hot (n 1)) (hot (n 2))))))
               (unless (or (not (pos? budget))
-                          (and group-of (group-of a)) (and group-of (group-of b))
-                          (not (or (implicated a) (implicated b))))
+                          (and group-of (group-of a)) (and group-of (group-of b)))
                 (-- budget)
                 (put row i b)
                 (put row (+ i 1) a)
