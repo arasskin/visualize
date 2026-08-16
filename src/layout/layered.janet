@@ -1,3 +1,4 @@
+(import ./aux)
 # A layered layout: the one that replaces graphviz.
 #
 # THE ALGORITHM IS SUGIYAMA, which is what `dot` runs and what a dependency
@@ -1619,7 +1620,43 @@
                                 [to chain])))
                           bend?
                           cost))
-      (def x (seat untangled))
+      # X, EITHER WAY. The relaxation below is what has always run; the aux
+      # graph is dot's formulation, where separation and straightness are
+      # one weighted optimisation rather than two passes that cannot see
+      # each other. Selected by VISUALIZE_AUX so the two can be measured on
+      # the same graph -- see docs/dotgen-audit.md for why it exists.
+      (def x
+        (if (os/getenv "VISUALIZE_AUX")
+          (let [rows untangled
+                # A GROUP IS A COLUMN, and the aux graph has to be told so
+                # or it scatters the members across their ranks and the box
+                # drawn round them swallows whatever is between. Expressed
+                # as containment edges rather than pins: every member is
+                # tied to the group's own slack node with a heavy weight, so
+                # the optimiser keeps them in line while still being free to
+                # move the whole column.
+                pinned nil
+                solved (aux/solve rows widths
+                                  # Every segment a line is actually drawn
+                                  # along: node to bend, bend to bend, bend
+                                  # to node. These are what straightness is
+                                  # about, not the logical edges.
+                                  (let [segs @[]]
+                                    (eachp [pair chain] chains
+                                      (def [from to] pair)
+                                      (def path (array from ;chain to))
+                                      (for i 0 (- (length path) 1)
+                                        (array/push segs [(path i) (path (+ i 1))])))
+                                    (each [from to] edges
+                                      (unless (chains [from to])
+                                        (array/push segs [from to])))
+                                    segs)
+                                  gap-between bend? pinned
+                                  (when group-of
+                                    (fn [name]
+                                      (when (string? name) (group-of name)))))]
+            (or solved (seat untangled)))
+          (seat untangled)))
 
       (def points @{})
       (each name names
