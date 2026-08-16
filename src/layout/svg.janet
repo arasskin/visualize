@@ -157,17 +157,24 @@
   straight line can be checked against the nodes it would pass. Without
   them -- the force layout does not pass them -- the straight line is used
   whenever the layout gave no bends, which is what this did before.``
-  [a b ra rb bends &opt from to places sizes]
+  [a b ra rb bends &opt from to places sizes box-rects straights]
 
   (defn hits-anything?
-    ``Does the segment from (x1,y1) to (x2,y2) cut into a node that is
-    neither end of this edge? Sampled: the exact test is a quadratic per
-    ellipse, and this runs over every node for every edge.``
+    ``Is a straight line from (x1,y1) to (x2,y2) clear of everything it has
+    no business touching -- nodes, group boxes it is not part of, and the
+    straight lines of other edges?
+
+    ALL THREE ARE THE SAME KIND OF MESS. A line through a node, a line
+    through a box around a group it does not belong to, and two lines
+    crossing in open space all read as the picture failing to keep its
+    subjects apart; a reader notices the last of them first. An edge that
+    would cause any of them takes its reserved route instead, or curves.``
     [x1 y1 x2 y2]
     (if (or (nil? places) (nil? sizes))
       false
       (do
         (var hit false)
+        # Nodes.
         (for k 0 33
           (def t (/ k 32))
           (def px (+ x1 (* t (- x2 x1))))
@@ -180,6 +187,35 @@
               # A whisker inside the ellipse rather than on it, so a line
               # that merely grazes the outline is not counted as blocked.
               (when (< (+ (* dx dx) (* dy dy)) 0.94)
+                (set hit true)))))
+        # Group boxes, unless this edge has an end inside the box -- an edge
+        # that starts or finishes in a group is entitled to be in its box.
+        (unless (or hit (nil? box-rects))
+          (each r box-rects
+            (unless (or hit
+                        (get (r :members) from)
+                        (get (r :members) to))
+              (for k 0 33
+                (def t (/ k 32))
+                (def px (+ x1 (* t (- x2 x1))))
+                (def py (+ y1 (* t (- y2 y1))))
+                (when (and (>= px (r :x0)) (<= px (r :x1))
+                           (>= py (r :y0)) (<= py (r :y1)))
+                  (set hit true))))))
+        # Other edges' straight lines. Edges sharing an endpoint always meet
+        # there and are not crossing in any sense a reader minds.
+        (unless (or hit (nil? straights))
+          (defn side [ax ay bx by cx cy]
+            (- (* (- bx ax) (- cy ay)) (* (- by ay) (- cx ax))))
+          (each o straights
+            (unless (or hit
+                        (= (o :from) from) (= (o :from) to)
+                        (= (o :to) from) (= (o :to) to))
+              (def d1 (side (o :x1) (o :y1) (o :x2) (o :y2) x1 y1))
+              (def d2 (side (o :x1) (o :y1) (o :x2) (o :y2) x2 y2))
+              (def d3 (side x1 y1 x2 y2 (o :x1) (o :y1)))
+              (def d4 (side x1 y1 x2 y2 (o :x2) (o :y2)))
+              (when (and (< (* d1 d2) 0) (< (* d3 d4) 0))
                 (set hit true)))))
         hit)))
 
@@ -305,6 +341,29 @@
   # around a different one.
   (defn group-for [name] (select/group-for name groups ours))
 
+  # THE BOXES, AS RECTANGLES, before anything is drawn. They are drawn below
+  # as part of the picture, but an edge has to be able to ask whether a
+  # straight line would cut through one on its way -- and a box a node is not
+  # in is as much an obstacle as a node, since a line through it reads as
+  # touching a group it has nothing to do with.
+  (def box-rects @[])
+  (when (opts :boxes)
+    (each g groups
+      (def members (filter |(and (places $) (= g (group-for $)))
+                           (map |($ :name) nodes)))
+      (when (not (empty? members))
+        (var minx math/inf) (var maxx (- math/inf))
+        (var miny math/inf) (var maxy (- math/inf))
+        (each name members
+          (def p (places name))
+          (def s (sizes name))
+          (set minx (min minx (- (p :x) (s :w)))) (set maxx (max maxx (+ (p :x) (s :w))))
+          (set miny (min miny (- (p :y) (s :h)))) (set maxy (max maxy (+ (p :y) (s :h)))))
+        (array/push box-rects
+                    {:members (from-pairs (map |[$ true] members))
+                     :x0 (- minx group-inset) :x1 (+ maxx group-inset)
+                     :y0 (- miny group-inset 12) :y1 (+ maxy group-inset)}))))
+
   (def [vx vy vw vh] (bounds places sizes))
   (def out @"")
 
@@ -363,6 +422,24 @@
             (escape (g :color)) (escape (g :prefix))))
         (buffer/push-string out `</g>`))))
 
+  # EVERY EDGE'S STRAIGHT LINE, so each can ask whether going straight would
+  # cross another edge doing the same. Two lines crossing in open space is as
+  # much of a mess as a line through a node, and it is the kind a reader
+  # notices first; an edge that would cause one takes its route instead.
+  #
+  # Against the STRAIGHT versions rather than the finished paths, because the
+  # finished paths are what this loop is deciding. A straight line that would
+  # cross another straight line is the case being ruled out.
+  (def straights @[])
+  (each [from to] edges
+    (def a (places from))
+    (def b (places to))
+    (when (and a b (not= from to))
+      (def p (on-ellipse a ((sizes from) :w) ((sizes from) :h) (b :x) (b :y) 0))
+      (def q (on-ellipse b ((sizes to) :w) ((sizes to) :h) (a :x) (a :y) 0))
+      (array/push straights {:from from :to to
+                             :x1 (p 0) :y1 (p 1) :x2 (q 0) :y2 (q 1)})))
+
   # Edges next, so nodes sit on top of them.
   (each [from to] edges
     (def a (places from))
@@ -375,7 +452,7 @@
         (string/format
           `<path d="%s" stroke="var(--edge, #888)" stroke-width="1.2" fill="none" marker-end="url(#arrow)"/>`
           (path-through a b (sizes from) (sizes to) bends
-                        from to places sizes))
+                        from to places sizes box-rects straights))
         `</g>`)))
 
   (each node nodes
