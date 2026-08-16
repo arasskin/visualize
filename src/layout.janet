@@ -43,9 +43,6 @@
        # knows nothing about SVG and `svg` decides nothing about placement,
        # so the number crosses here rather than being written down twice.
        :group-inset svg/group-inset
-       # Let the layout judge its own ordering by the picture it draws --
-       # see `cost` and the refinement loop in src/layout/layered.janet.
-       :refine true
        # Which group claims a node, so the layout can keep a group's members
        # side by side -- see `cohere`. Nil when nothing is grouped, which
        # skips the pass entirely.

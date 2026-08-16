@@ -192,7 +192,7 @@ in between. Cycles are broken by provisionally reversing the edges that close
 them, so a dependency loop draws as an arrow running back up the page rather
 than being silently rewritten.
 
-Eight things in there are what closed the gap with `dot`, each one measured
+Seven things in there are what closed the gap with `dot`, each one measured
 against `dot`'s own output on this repository's graph:
 
 - **A long edge is threaded through real bend points**, one per layer it
@@ -252,19 +252,6 @@ against `dot`'s own output on this repository's graph:
   the long way round `src/scan` instead of running down beside
   `src/state`'s. Half a position is not a real preference, so the node keeps
   the slot and the edge routes past it on the side its line wants.
-
-- **The ordering is judged by the picture it draws.** Everything above
-  reasons in *ordinal* space — a layer is a list, the median heuristic
-  compares indexes — and everything that actually matters is geometric:
-  whether a diagonal clears an ellipse, whether there is a lane between two
-  nodes wide enough to thread an edge through. The two are not
-  commensurable, and three separate attempts to bridge them with a scalar
-  made the picture worse rather than better. So the sweep keeps its
-  heuristic and a last pass judges the *result*: swap two neighbours, draw
-  it, keep the swap only if the drawing is better. It needs no common unit
-  with the heuristic at all. Only strict improvements are kept, so it can
-  never be worse than the ordering it was handed — which is what makes it
-  safe on a layout that is already close.
 
 Sizes are fitted to what `dot` produced for the same labels rather than
 guessed. That sounds cosmetic and is not: `place-x` separates nodes by their
@@ -497,7 +484,7 @@ pane                type into a pane from a shell, so agent work is visible
 tools/replay.mjs    run a captured session through the emulator, headlessly
 web/term.js         a terminal emulator, in the ~25 sequences agents emit
 web/                the page: vanilla HTML, CSS and JS, no build step
-test/               518 assertions, no framework
+test/               500 assertions, no framework
 bin/janet           the compiled runtime (gitignored build artifact)
 ```
 
@@ -519,7 +506,7 @@ inverts the whole SVG rather than trying to re-colour it.
 ./test/run
 ```
 
-518 assertions (plus 82 for the terminal emulator, under node), no test
+500 assertions (plus 82 for the terminal emulator, under node), no test
 framework — the harness is 70 lines in
 `test/harness.janet`, because a dependency is a dependency. It runs against
 the **vendored** runtime, not whatever `janet` is on PATH: a green run against
