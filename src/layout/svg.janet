@@ -157,7 +157,7 @@
   straight line can be checked against the nodes it would pass. Without
   them -- the force layout does not pass them -- the straight line is used
   whenever the layout gave no bends, which is what this did before.``
-  [a b ra rb bends &opt from to places sizes box-rects straights]
+  [a b ra rb bends &opt from to places sizes box-rects paths]
 
   (defn hits-anything?
     ``Is a straight line from (x1,y1) to (x2,y2) clear of everything it has
@@ -204,19 +204,51 @@
                   (set hit true))))))
         # Other edges' straight lines. Edges sharing an endpoint always meet
         # there and are not crossing in any sense a reader minds.
-        (unless (or hit (nil? straights))
+        (unless (or hit (nil? paths))
           (defn side [ax ay bx by cx cy]
             (- (* (- bx ax) (- cy ay)) (* (- by ay) (- cx ax))))
-          (each o straights
-            (unless (or hit
-                        (= (o :from) from) (= (o :from) to)
-                        (= (o :to) from) (= (o :to) to))
-              (def d1 (side (o :x1) (o :y1) (o :x2) (o :y2) x1 y1))
-              (def d2 (side (o :x1) (o :y1) (o :x2) (o :y2) x2 y2))
-              (def d3 (side x1 y1 x2 y2 (o :x1) (o :y1)))
-              (def d4 (side x1 y1 x2 y2 (o :x2) (o :y2)))
+          (each o paths
+            (def pts (o :points))
+            (for i 0 (- (length pts) 1)
+              (unless hit
+              (def ox1 ((pts i) 0)) (def oy1 ((pts i) 1))
+              (def ox2 ((pts (+ i 1)) 0)) (def oy2 ((pts (+ i 1)) 1))
+              (def d1 (side ox1 oy1 ox2 oy2 x1 y1))
+              (def d2 (side ox1 oy1 ox2 oy2 x2 y2))
+              (def d3 (side x1 y1 x2 y2 ox1 oy1))
+              (def d4 (side x1 y1 x2 y2 ox2 oy2))
               (when (and (< (* d1 d2) 0) (< (* d3 d4) 0))
-                (set hit true)))))
+                # SHARING AN ENDPOINT IS NOT A LICENCE TO CROSS ANYWHERE.
+                # Edges into the same node must meet at that node, and a
+                # crossing in the fan just outside it is what a fan looks
+                # like -- but skipping the pair entirely threw away the
+                # crossings that happen ranks earlier, which are the ones a
+                # reader sees. `src/config -> src/graph` cut across three of
+                # its own siblings on the way down and was still called
+                # clear, because all four end at `src/graph`.
+                #
+                # So the crossing point is found and only ignored when it is
+                # close to the shared node.
+                (def dx (- x2 x1)) (def dy (- y2 y1))
+                (def ox (- ox2 ox1)) (def oy (- oy2 oy1))
+                (def det (- (* dx oy) (* dy ox)))
+                (def t (if (< (math/abs det) 0.000001)
+                         0.5
+                         (/ (- (* (- ox1 x1) oy) (* (- oy1 y1) ox)) det)))
+                (def px (+ x1 (* t dx)))
+                (def py (+ y1 (* t dy)))
+                (var near false)
+                (each end [from to]
+                  (when (and (or (= (o :from) end) (= (o :to) end))
+                             (places end))
+                    (def p (places end))
+                    (def s (sizes end))
+                    # Within about a node's width of where they converge.
+                    (def gx (- px (p :x))) (def gy (- py (p :y)))
+                    (when (< (+ (* gx gx) (* gy gy))
+                             (let [r (+ (* 2.2 (s :w)) (* 2.2 (s :h)))] (* r r)))
+                      (set near true))))
+                (unless near (set hit true)))))))
         hit)))
 
   # THE ARROW LANDS ON THE NODE. The path runs to the boundary itself, and
@@ -422,23 +454,35 @@
             (escape (g :color)) (escape (g :prefix))))
         (buffer/push-string out `</g>`))))
 
-  # EVERY EDGE'S STRAIGHT LINE, so each can ask whether going straight would
-  # cross another edge doing the same. Two lines crossing in open space is as
+  # WHERE EVERY OTHER EDGE IS GOING TO BE, so each can ask whether going
+  # straight would cut across one. Two lines crossing in open space is as
   # much of a mess as a line through a node, and it is the kind a reader
   # notices first; an edge that would cause one takes its route instead.
   #
-  # Against the STRAIGHT versions rather than the finished paths, because the
-  # finished paths are what this loop is deciding. A straight line that would
-  # cross another straight line is the case being ruled out.
-  (def straights @[])
+  # AN EDGE WITH BENDS IS COMPARED AGAINST ITS ROUTE, not against the
+  # straight line it will not be drawn as. The layout reserved those bends
+  # because the edge spans ranks, so the route is what appears -- and
+  # comparing against the straight version misses exactly the crossings that
+  # matter. `src/config -> src/graph` cut across the routes of three of its
+  # own siblings and was called clear, because straight-to-straight none of
+  # the four intersect: their routes swing wide and its straight line went
+  # through the space they swung into.
+  (def paths @[])
   (each [from to] edges
     (def a (places from))
     (def b (places to))
     (when (and a b (not= from to))
-      (def p (on-ellipse a ((sizes from) :w) ((sizes from) :h) (b :x) (b :y) 0))
-      (def q (on-ellipse b ((sizes to) :w) ((sizes to) :h) (a :x) (a :y) 0))
-      (array/push straights {:from from :to to
-                             :x1 (p 0) :y1 (p 1) :x2 (q 0) :y2 (q 1)})))
+      (def bends (or (get routes [from to]) []))
+      (def p (on-ellipse a ((sizes from) :w) ((sizes from) :h)
+                         (if (empty? bends) (b :x) ((first bends) 0))
+                         (if (empty? bends) (b :y) ((first bends) 1)) 0))
+      (def q (on-ellipse b ((sizes to) :w) ((sizes to) :h)
+                         (if (empty? bends) (a :x) ((last bends) 0))
+                         (if (empty? bends) (a :y) ((last bends) 1)) 0))
+      (array/push paths {:from from :to to
+                         :points (array [(p 0) (p 1)]
+                                        ;(map |[($ 0) ($ 1)] bends)
+                                        [(q 0) (q 1)])})))
 
   # Edges next, so nodes sit on top of them.
   (each [from to] edges
@@ -452,7 +496,7 @@
         (string/format
           `<path d="%s" stroke="var(--edge, #888)" stroke-width="1.2" fill="none" marker-end="url(#arrow)"/>`
           (path-through a b (sizes from) (sizes to) bends
-                        from to places sizes box-rects straights))
+                        from to places sizes box-rects paths))
         `</g>`)))
 
   (each node nodes
