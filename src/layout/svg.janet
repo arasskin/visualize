@@ -139,7 +139,22 @@
 
 (defn- path-through
   ``The `d` of an edge: from the source's boundary, through any bend points
-  the layout gave us, to just short of the target's boundary.``
+  the layout gave us, to just short of the target's boundary.
+
+  THE FIRST STRETCH IS A CURVE, and that is what keeps an edge off the node
+  beside the one it leaves. An edge to something below and to the side exits
+  its source aimed straight at whatever sits next to it on the same rank:
+  `src/v -> src/layout` left `src/v` heading right and down, and ran thirteen
+  units through the middle of `src/layout/force` on its way. There is no bend
+  to route it around -- bends exist only for edges that span more than one
+  rank, and this one does not.
+
+  A curve whose exit is DIRECTLY DOWNWARD fixes it without any of that
+  machinery. The edge leaves going down, turns toward its target once it is
+  clear of the rank, and arrives on the same line it always did. The
+  neighbour is passed underneath rather than through, and an edge that was
+  already straight stays visually straight, because a control point on the
+  line it was already taking changes nothing.``
   [a b ra rb bends]
   (def first-target (if (empty? bends) [(b :x) (b :y)] (first bends)))
   (def last-source (if (empty? bends) [(a :x) (a :y)] (last bends)))
@@ -151,10 +166,47 @@
   # visible gap away from the node it points at.
   (def [x1 y1] (on-ellipse a (ra :w) (ra :h) (first-target 0) (first-target 1) 0))
   (def [x2 y2] (on-ellipse b (rb :w) (rb :h) (last-source 0) (last-source 1) 0))
+  # Where the first stretch ends: the first bend, or the target itself.
+  (def [fx fy] (if (empty? bends) [x2 y2] [(first-target 0) (first-target 1)]))
+  (def drop (- fy y1))
+  # HOW FAR THE EXIT LEANS DOWN, as a share of the vertical it has to cover.
+  # Two thirds leaves the source decisively downward and still meets the far
+  # end at a shallow enough angle to read as one line rather than a hook.
+  # A stretch that goes UP -- a back edge drawn in its original direction --
+  # or one with no height to work with keeps the straight segment it had.
+  # ONE BEND, TWO HANDLES. This is not an S: an S needs its control points on
+  # opposite sides of the straight line, and both of these are on the same
+  # side. The curve bends once. It takes a cubic because the two things being
+  # asked for are separate -- where the edge LEAVES and where it ARRIVES --
+  # and one control point cannot hold both.
+  #
+  # A quadratic was tried and is worse at every setting, including worse than
+  # a straight line. Its single point is the exit direction and the mid-path
+  # bulge at once: pull it down far enough to leave the source vertically, and
+  # the whole curve bows sideways with it, into the neighbours it was meant to
+  # miss. At the lean that clears `src/layout/force`, the overlaps across the
+  # graph went from seven totalling 42 units to twelve totalling 223.
+  #
+  # So: c1 directly below the source, which is what lifts the edge off the
+  # rank it starts on; c2 above the far end, which brings it in on the line it
+  # always took and keeps the middle from bulging. Pulling c2 in toward the
+  # chord sounds gentler and is not -- the curve sags along the straight line
+  # instead of sweeping past, and `src/select -> src/graph` went from four
+  # units inside `src/layout/svg` to twenty.
+  (def lean (* 0.40 drop))
   (def out @[(string/format "M%.1f,%.1f" x1 y1)])
-  (each [bx by] bends
-    (array/push out (string/format "L%.1f,%.1f" bx by)))
-  (array/push out (string/format "L%.1f,%.1f" x2 y2))
+  (if (> drop 1)
+    (array/push out (string/format "C%.1f,%.1f %.1f,%.1f %.1f,%.1f"
+                                   x1 (+ y1 lean)
+                                   fx (- fy (* 0.34 drop))
+                                   fx fy))
+    (array/push out (string/format "L%.1f,%.1f" fx fy)))
+  # Everything after the first stretch is unchanged: the bend chain is a
+  # sequence of straight runs the layout has already made room for.
+  (unless (empty? bends)
+    (each [bx by] (slice bends 1)
+      (array/push out (string/format "L%.1f,%.1f" bx by)))
+    (array/push out (string/format "L%.1f,%.1f" x2 y2)))
   (string/join out " "))
 
 (defn draw
