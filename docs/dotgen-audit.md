@@ -259,9 +259,8 @@ concentrate, which was the last item on the "would visibly help" list.
 | multi-edges | parallel edges bowed apart | no -- the scan emits one per pair |
 | ports | attach at a named point on the node | no |
 
-The one item left that would visibly change this graph is **flat edges**, and
-only for projects that have same-rank dependencies. Everything else on the
-"do not have" list is either irrelevant to a dependency graph or cosmetic.
+Nothing left on the "do not have" list would visibly change this graph. See
+the note on flat edges below for the item I previously claimed would.
 
 ## Concentrate: tried, measured well, looked worse, reverted
 
@@ -284,3 +283,31 @@ twelve readable lines for one dense one scored as an improvement. `concentrate`
 may still be right for a graph with genuinely parallel structure -- several
 edges running the same route between the same two regions -- but on a fan into
 one popular node it is exactly the wrong shape.
+
+## Flat edges: why there are none, correcting an earlier claim
+
+I listed flat edges -- both endpoints on one rank -- as the last missing
+feature that would visibly change a real graph. Measured on this repo:
+**0 of 45 edges are flat**, and that is structural rather than luck.
+
+Longest-path ranking assigns `layer(to) = layer(from) + 1`, so every edge it
+processes spans at least one rank by construction. The relaxation that follows
+clamps each node strictly below its parents and strictly above its children,
+so it cannot reintroduce one either. Levelling really does destroy flat edges.
+
+Two things escape that guarantee, and neither is common:
+
+- **Back edges.** Cycle-closing edges are set aside before ranking and drawn
+  afterward, so nothing forces their endpoints onto different ranks. In
+  practice the rest of the cycle pushes them apart.
+- **Unreachable knots.** Nodes the Kahn queue never reaches -- a cycle the
+  back-edge pass did not fully break -- keep their initial rank of 0. Several
+  such nodes share rank 0, and any edge among them is flat.
+
+`dot` has a third source we do not: `rank=same`, an explicit user constraint
+that forces nodes onto one rank. That is most of what `flat.c` exists to
+service.
+
+So flat-edge handling is not worth building here. If flat edges ever appear
+in this tool's output it means the back-edge pass left a knot unbroken, and
+the useful fix is better cycle breaking rather than a flat-edge router.
