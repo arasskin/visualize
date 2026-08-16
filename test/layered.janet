@@ -486,6 +486,36 @@
   (def beside (- (out "bend1") (out "a")))
   (t/is= 55 beside "a bend beside a node keeps the full gap"))
 
+(t/test "a node sits among all its edges, not between two sides"
+  # READING ONE SIDE AT A TIME WEIGHS THE SIDES EQUALLY, however many edges
+  # each holds. `src/layout` has five parents averaging x=-421 and one child,
+  # `src/graph`, at x=-54: the up-sweep saw only the child, the down-sweep
+  # only the parents, and the node settled halfway between at -253 -- a
+  # hundred units right of where five of its six edges wanted it. Its parents
+  # then strung out leftward reaching for it, and the whole `src/layout/*`
+  # cluster leaned away from the nodes it belongs under.
+  #
+  # Reproduced here: `hub` has four parents spread left and one child, and a
+  # second fan beside it gives the child somewhere else to be pulled -- which
+  # is what makes the one downward edge disagree with the four upward ones.
+  (def graph
+    {:nodes (map (fn [n] {:name n})
+                 ["p1" "p2" "p3" "p4" "hub" "mid" "far" "a" "b" "c"])
+     :edges [["p1" "hub"] ["p2" "hub"] ["p3" "hub"] ["p4" "hub"]
+             ["hub" "far"]
+             ["a" "mid"] ["b" "mid"] ["c" "mid"] ["mid" "far"]]})
+  (def points ((layered/place graph {:measure (fn [_] 60)}) :points))
+  (def parents (map |((points $) :x) ["p1" "p2" "p3" "p4"]))
+  (def middle (/ (+ (min ;parents) (max ;parents)) 2))
+  (def hub ((points "hub") :x))
+  # Scored on one side at a time the hub lands at -34 against a parent middle
+  # of -120, dragged there by its single child; reading every edge at once it
+  # sits at -93. Half that distance is the line between the two behaviours.
+  (t/ok (< (math/abs (- hub middle)) 43)
+        (string "the hub sits among its four parents (middle "
+                (math/round middle) "), not out at " (math/round hub)
+                " where its one child wants it")))
+
 (t/test "the whole picture does not get worse"
   # THE GUARD. A graph shaped like the one this tool draws of itself: a rank
   # of sources, a rank of middles, and a long edge that has to cross the

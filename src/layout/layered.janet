@@ -976,12 +976,31 @@
       (each name names
         (def half (/ (widths name) 2))
         # 1. A bend wants the straight line between its edge's two ends; a
-        #    real node wants the middle of its neighbours in the layer the
-        #    sweep is coming from. Either way, failing that, where it is.
+        #    real node wants the middle of EVERYTHING it touches, with the
+        #    layer this sweep comes from counted first.
+        #
+        #    READING ONE SIDE AT A TIME WEIGHS THE SIDES EQUALLY, however
+        #    many edges each holds. `src/layout` has five parents averaging
+        #    x=-421 and one child, `src/graph`, at x=-54: the up-sweep sees
+        #    only the child, the down-sweep only the parents, and the node
+        #    settles halfway between at -253 -- dragged a hundred units right
+        #    of where five of its six edges want it, by the one that does
+        #    not. Its parents then string out to the left reaching for it,
+        #    and the whole `src/layout/*` cluster leans away from the nodes
+        #    it belongs under.
+        #
+        #    EVERY NEIGHBOUR COUNTED ONCE, both sides together. Letting the
+        #    swept side lead keeps the bias, because the sweeps alternate and
+        #    the last one wins: `src/layout` still landed at -268 against a
+        #    centroid of -361, since the final up-sweep reads its one child
+        #    and nothing else. Weighing all six edges equally is the whole
+        #    point, and it makes the answer the same whichever direction the
+        #    sweep is going -- which is what stops the node oscillating
+        #    between two desires and settling in the middle of them.
         (var target
           (or (if (bend? name)
                 (aim name x)
-                (centre-on (if (= pick :down) (up name) (down name))))
+                (centre-on (array ;(up name) ;(down name))))
               (x name)))
         # 2. A group's member wants its group's column, so the box closes
         #    around the members rather than stretching across the picture.
