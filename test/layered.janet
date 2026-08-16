@@ -519,3 +519,54 @@
 # the picture from 1269 to 1204 wide, but every minimal graph tried here places
 # identically with the extension on or off, so a test built on one would assert
 # nothing.
+
+#
+# Refinement -- the ordering judged by the picture it draws.
+#
+
+(t/test "cost counts what a reader would complain about"
+  # THE UNITS ARE THE PICTURE'S. Everything upstream reasons in ordinal
+  # space -- a layer is a list, the median compares indexes -- and what
+  # matters is geometric. `cost` is the seam: it looks only at coordinates.
+  (def widths @{"a" 60 "b" 60 "blocker" 60})
+  # A clean edge: straight down, nothing near it.
+  (def clean (layered/cost @{"a" {:x 0 :y 0} "b" {:x 0 :y 92}} widths
+                   @{["a" "b"] @[[0 0] [0 92]]}))
+  # The same edge with a node sitting on it.
+  (def blocked (layered/cost @{"a" {:x 0 :y 0} "b" {:x 0 :y 92}
+                       "blocker" {:x 0 :y 46}}
+                     widths
+                     @{["a" "b"] @[[0 0] [0 92]]}))
+  (t/ok (> blocked clean) "an edge through a node costs more than one that is clear")
+
+  # Two edges that cross cost more than the same two that do not.
+  (def apart (layered/cost @{"a" {:x 0 :y 0} "b" {:x 0 :y 92}
+                     "c" {:x 200 :y 0} "d" {:x 200 :y 92}}
+                   @{"a" 60 "b" 60 "c" 60 "d" 60}
+                   @{["a" "b"] @[[0 0] [0 92]] ["c" "d"] @[[200 0] [200 92]]}))
+  (def crossed (layered/cost @{"a" {:x 0 :y 0} "b" {:x 200 :y 92}
+                       "c" {:x 200 :y 0} "d" {:x 0 :y 92}}
+                     @{"a" 60 "b" 60 "c" 60 "d" 60}
+                     @{["a" "b"] @[[0 0] [200 92]] ["c" "d"] @[[200 0] [0 92]]}))
+  (t/ok (> crossed apart) "crossing edges cost more than parallel ones"))
+
+(t/test "refinement never makes the picture worse"
+  # It only accepts a swap that scores STRICTLY better, so the worst case is
+  # that it changes nothing. That is what makes it safe to bolt onto a
+  # layout that is already close.
+  (def graph {:nodes (map (fn [i] {:name (string "n" i)}) (range 9))
+              :edges (seq [i :range [0 6]] [(string "n" i) (string "n" (+ i 3))])})
+  (def plain ((layered/place graph {:measure (fn [_] 60)}) :points))
+  (def keen ((layered/place graph {:measure (fn [_] 60) :refine true}) :points))
+  # Both are valid layouts: same nodes, same ranks, nothing overlapping.
+  (t/is= (length (keys plain)) (length (keys keen)))
+  (each name (keys plain)
+    (t/is= ((plain name) :y) ((keen name) :y) "refinement never changes a rank"))
+  (def rows @{})
+  (eachp [name p] keen
+    (put rows (p :y) (array/push (or (rows (p :y)) @[]) (p :x))))
+  (eachp [_ xs] rows
+    (def sorted (sort xs))
+    (for i 0 (- (length sorted) 1)
+      (t/ok (>= (- (sorted (+ i 1)) (sorted i)) 59.9)
+            "and never leaves two nodes on top of each other"))))

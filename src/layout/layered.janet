@@ -32,6 +32,7 @@
    :node-gap 20        # minimum horizontal gap between neighbours
    :bend-width 12      # the column a through-edge reserves on a layer it crosses
    :group-inset 0      # how far outside its members a group's box is drawn
+   :refine-limit 45    # nodes past which refinement is skipped -- see `place`
    :sweeps 8})         # crossing-reduction passes (down and up count as one)
 
 #
@@ -336,6 +337,89 @@
         (put out index
              (array ;(mapcat |($ 1) (sorted-by |($ 0) slots)))))))
   out)
+
+#
+# 2b. Refinement -- ordering judged by the picture it produces.
+#
+
+(defn cost
+  ``What is wrong with a drawing, as a number to be made smaller.
+
+  THE UNITS ARE THE PICTURE'S. Everything upstream of here reasons in
+  ORDINAL space -- a layer is a list, the median heuristic compares indexes
+  -- and everything that actually matters is geometric: whether a diagonal
+  clears an ellipse, whether there is a lane between two nodes wide enough
+  to thread an edge through, how far a bend sits from the line its edge
+  wants. The two are not commensurable, and trying to bridge them with a
+  scalar is what made three separate attempts at the `src/select` corner
+  worse rather than better: a bend's desired position simply cannot be
+  expressed as an index in a layer it is not in.
+
+  So the sweep keeps its heuristic, and this judges the RESULT. An ordering
+  is proposed, placed, and kept only if the picture it draws is better --
+  which needs no common unit with the heuristic at all.
+
+  Three terms, each counting something a reader would complain about:
+
+    crossings   -- edges that cross each other, the classic measure
+    clipping    -- an edge passing through a node it has nothing to do with
+    length      -- total horizontal travel, which stands in for the
+                   diagonal sprawl that makes a graph hard to follow
+
+  Clipping is weighted hardest because it is the one that reads as a
+  mistake rather than as complexity.``
+  [positions widths edge-paths]
+  (var crossings 0)
+  (var clipped 0)
+  (var travel 0)
+
+  # Segments, with the edge they belong to, so an edge is not counted
+  # against itself.
+  (def segs @[])
+  (eachp [key path] edge-paths
+    (for i 0 (- (length path) 1)
+      (array/push segs [(path i) (path (+ i 1)) key])))
+
+  (defn crosses [[p1 p2 _] [p3 p4 _]]
+    (def d (- (* (- (p2 0) (p1 0)) (- (p4 1) (p3 1)))
+              (* (- (p2 1) (p1 1)) (- (p4 0) (p3 0)))))
+    (if (< (math/abs d) 0.000001)
+      false
+      (let [t (/ (- (* (- (p3 0) (p1 0)) (- (p4 1) (p3 1)))
+                    (* (- (p3 1) (p1 1)) (- (p4 0) (p3 0)))) d)
+            u (/ (- (* (- (p3 0) (p1 0)) (- (p2 1) (p1 1)))
+                    (* (- (p3 1) (p1 1)) (- (p2 0) (p1 0)))) d)]
+        (and (> t 0.02) (< t 0.98) (> u 0.02) (< u 0.98)))))
+
+  (for i 0 (length segs)
+    (for j (+ i 1) (length segs)
+      (unless (= ((segs i) 2) ((segs j) 2))
+        (when (crosses (segs i) (segs j)) (++ crossings)))))
+
+  # An edge through a node it does not touch. Sampled along each segment
+  # against each node's ellipse, the same test the renderer's geometry has.
+  (eachp [key path] edge-paths
+    (def [from to] key)
+    (var hit false)
+    (eachp [name p] positions
+      (unless (or hit (= name from) (= name to))
+        (def rx (max 1 (/ (widths name) 2)))
+        (def ry 34)
+        (for i 0 (- (length path) 1)
+          (def a (path i))
+          (def b (path (+ i 1)))
+          (for s 1 12
+            (def t (/ s 12))
+            (def px (+ (a 0) (* t (- (b 0) (a 0)))))
+            (def py (+ (a 1) (* t (- (b 1) (a 1)))))
+            (def dx (/ (- px (p :x)) rx))
+            (def dy (/ (- py (p :y)) ry))
+            (when (< (+ (* dx dx) (* dy dy)) 1) (set hit true))))))
+    (when hit (++ clipped))
+    (for i 0 (- (length path) 1)
+      (+= travel (math/abs (- ((path (+ i 1)) 0) ((path i) 0))))))
+
+  (+ (* 40 clipped) (* 25 crossings) (/ travel 25)))
 
 #
 # 3. Placement.
@@ -944,7 +1028,145 @@
       (def widths (widths-of names measure))
       (eachp [name _] dummy-layer (put widths name (tuning :bend-width)))
 
-      (def x (place-x ordered
+      # REFINE BY THE PICTURE, not by the heuristic. `order` reasons in
+      # ordinal space and cannot see a lane between two nodes or an edge
+      # clipping an ellipse; `cost` sees exactly those and nothing else. So
+      # the sweep's answer is taken as the starting point -- it is a good
+      # one -- and adjacent pairs are swapped only where actually drawing
+      # the result is better.
+      #
+      # STRICTLY BETTER, so this cannot make the picture worse than the
+      # ordering it was handed. That is what makes it safe to bolt onto a
+      # layout that is already close: the worst case is that it changes
+      # nothing.
+      (defn place-with [layout]
+        (place-x layout
+                 (fn [name] (get up name []))
+                 (fn [name] (get down name []))
+                 widths
+                 (tuning :node-gap)
+                 (fn [name] (not (nil? (dummy-layer name))))
+                 (fn [name where]
+                   (when-let [on (dummy-layer name)]
+                     (def [_ from to _] name)
+                     (def a (layer from))
+                     (def b (layer to))
+                     (when (and a b (not= a b) (where from) (where to))
+                       (def t (/ (- on a) (- b a)))
+                       (+ (where from) (* t (- (where to) (where from)))))))
+                 (when-let [of (opts :group-of)]
+                   (fn [name] (when (string? name) (of name))))
+                 (tuning :group-inset)))
+
+      # Every edge as the polyline it will actually be drawn as: its ends
+      # plus whatever bends its chain has, in rank order.
+      (defn paths-for [xs]
+        (def out @{})
+        (each [from to] edges
+          (when (and (xs from) (xs to) (not= from to))
+            (def bends (or (chains [from to]) []))
+            (def line @[[(xs from) (* (layer from) (tuning :layer-gap))]])
+            (each b bends
+              (array/push line [(xs b) (* (dummy-layer b) (tuning :layer-gap))]))
+            (array/push line [(xs to) (* (layer to) (tuning :layer-gap))])
+            (put out [from to] line)))
+        out)
+
+      (defn positions-of [xs]
+        (def out @{})
+        (each name names
+          (when (xs name)
+            (put out name {:x (xs name) :y (* (layer name) (tuning :layer-gap))})))
+        out)
+
+      (defn score-of [layout]
+        (def xs (place-with layout))
+        (cost (positions-of xs) widths (paths-for xs)))
+
+      (def refined (table/clone ordered))
+      (eachp [index row] refined (put refined index (array ;row)))
+      # BOUNDED, because this is the expensive pass. Every candidate swap
+      # re-places the whole graph and re-scores it, and scoring compares
+      # every edge segment with every other -- so the work grows as roughly
+      # the fourth power of the graph. On sixty dense nodes that was
+      # twenty-eight seconds for a picture the sweep draws in twenty
+      # milliseconds.
+      #
+      # A dependency graph a person reads is small; a big one is a wall of
+      # spaghetti no reordering rescues. So refinement is for the graphs it
+      # can help, and anything larger keeps the sweep's answer, which is the
+      # answer this had before the pass existed.
+      # WHERE THE DEFECTS ARE, not every adjacent pair. Trying them all meant
+      # a full re-placement and re-score for each -- a second on twenty
+      # nodes, five on forty -- for a picture the sweep draws in twenty
+      # milliseconds, and this tool redraws on every keystroke in the config.
+      # A swap can only help where something is already wrong, so the
+      # candidates are the entities an offending edge touches: the two ends
+      # of an edge that clips a node, the node it clips, and the ends of a
+      # pair that cross.
+      (defn troubled [xs]
+        (def out @{})
+        (def places (positions-of xs))
+        (def lines (paths-for xs))
+        (eachp [key path] lines
+          (def [from to] key)
+          (eachp [name p] places
+            (unless (or (= name from) (= name to))
+              (def rx (max 1 (/ (widths name) 2)))
+              (for i 0 (- (length path) 1)
+                (def a (path i))
+                (def b (path (+ i 1)))
+                (for s 1 12
+                  (def t (/ s 12))
+                  (def px (+ (a 0) (* t (- (b 0) (a 0)))))
+                  (def py (+ (a 1) (* t (- (b 1) (a 1)))))
+                  (def dx (/ (- px (p :x)) rx))
+                  (def dy (/ (- py (p :y)) 34))
+                  (when (< (+ (* dx dx) (* dy dy)) 1)
+                    (put out name true) (put out from true) (put out to true)))))))
+        out)
+
+      (when (and (opts :refine)
+                 (<= (length names) (tuning :refine-limit)))
+        (var best (score-of refined))
+        (var moved true)
+        (var rounds 0)
+        # A HARD CEILING ON THE WORK, in candidate swaps. Each one re-places
+        # the whole graph and re-scores it -- about fifteen milliseconds on
+        # this tool's own graph -- so the budget IS the time this pass costs.
+        # "Where the defects are" narrows the candidates well on most graphs
+        # and a graph can defeat it: forty-four nodes with groups put most of
+        # the layout in the troubled set and ran for eleven seconds without
+        # one. The budget is what makes the pass safe to run unconditionally,
+        # since it stops when spent and keeps the best ordering it found --
+        # which is never worse than the one it started from.
+        (var budget 12)
+        (while (and moved (< rounds 3) (pos? budget))
+          (set moved false)
+          (++ rounds)
+          (def hot (troubled (place-with refined)))
+          (each index (sort (keys refined))
+            (def row (refined index))
+            (for i 0 (- (length row) 1)
+              # A group's members stay put: their order IS the box, and
+              # `cohere` has already settled it.
+              (def a (row i))
+              (def b (row (+ i 1)))
+              (defn implicated [n]
+                (or (hot n)
+                    (and (not (string? n)) (or (hot (n 1)) (hot (n 2))))))
+              (unless (or (not (pos? budget))
+                          (and group-of (group-of a)) (and group-of (group-of b))
+                          (not (or (implicated a) (implicated b))))
+                (-- budget)
+                (put row i b)
+                (put row (+ i 1) a)
+                (def try (score-of refined))
+                (if (< try (- best 0.0001))
+                  (do (set best try) (set moved true))
+                  (do (put row i a) (put row (+ i 1) b))))))))
+
+      (def x (place-x refined
                       (fn [name] (get up name []))
                       (fn [name] (get down name []))
                       widths
