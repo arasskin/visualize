@@ -124,17 +124,64 @@
           (link s from 0 w)
           (link s to 0 w)))
 
-      # CONTAINMENT, which is dot's contain_nodes in position.c. A group's
-      # members want one column: each is tied to a per-group slack node with
-      # a weight heavy enough to beat the straightness of an ordinary edge,
-      # so the box stays a box while the column as a whole is still free to
-      # move wherever the rest of the graph wants it.
-      (def group-slack @{})
-      (each name names
-        (when-let [key (group-of name)]
-          (unless (group-slack key)
-            (put group-slack key [:group key]))
-          (link (group-slack key) name 0 weight-both)))
+      # CONTAINMENT, and this is the part that has to be a CONSTRAINT rather
+      # than a preference.
+      #
+      # The first attempt tied each member to a shared slack node with a
+      # heavy weight, and it lost: a member has many straightness edges
+      # pulling it toward its own neighbours, and enough of them outvote one
+      # heavy edge however heavy it is. `src.term`'s three members landed at
+      # x=471, 503 and 774, and the box drawn round them swallowed
+      # everything between.
+      #
+      # dot gives every cluster TWO VIRTUAL NODES -- a left wall and a right
+      # wall (`make_lrvn`, then `contain_nodes` in position.c) -- and hangs
+      # hard minimum lengths off them: the left wall is at least half a node
+      # to the left of each rank's leftmost member, each rank's rightmost
+      # member is at least half a node to the left of the right wall. The
+      # box stops being a thing we draw around wherever the members ended up
+      # and becomes an object in the graph with its own position, which the
+      # solver has to respect because a minimum length cannot be traded away.
+      #
+      # KEEPOUT is the other half (`keepout_othernodes`): for each rank, the
+      # nearest non-member on the left is constrained to sit left of the left
+      # wall, and the nearest on the right to sit right of the right wall.
+      # Without it the walls are honoured and strangers walk straight through
+      # them, because nothing said they could not.
+      (def walls @{})
+      (when group-of
+        (def margin (* 2 (gap (first names) (first names))))
+        (each index (sort (keys ordered))
+          (def row (ordered index))
+          # Which slots on this rank belong to which group.
+          (def slots @{})
+          (eachp [i name] row
+            (when-let [key (group-of name)]
+              (put slots key (array/push (or (slots key) @[]) i))))
+          (eachp [key here] slots
+            (unless (walls key)
+              (put walls key {:left [:wall-left key] :right [:wall-right key]}))
+            (def wall (walls key))
+            (def lo (min ;here))
+            (def hi (max ;here))
+            (def leftmost (row lo))
+            (def rightmost (row hi))
+            # The walls bracket the members on every rank the group occupies.
+            (link (wall :left) leftmost (+ (/ (widths leftmost) 2) margin) 0)
+            (link rightmost (wall :right) (+ (/ (widths rightmost) 2) margin) 0)
+            # And strangers stay outside them. Only the NEAREST on each side
+            # needs the constraint: separation already holds the rest in
+            # order behind it.
+            (when (pos? lo)
+              (def outsider (row (- lo 1)))
+              (unless (= key (group-of outsider))
+                (link outsider (wall :left)
+                      (+ (/ (widths outsider) 2) margin) 0)))
+            (when (< hi (- (length row) 1))
+              (def outsider (row (+ hi 1)))
+              (unless (= key (group-of outsider))
+                (link (wall :right) outsider
+                      (+ (/ (widths outsider) 2) margin) 0))))))
 
       # -- solve ---------------------------------------------------------
       # Longest-path for a feasible start: every node at least `min` past
