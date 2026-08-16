@@ -38,11 +38,28 @@ you type, a person sees typed.
     ./vz scan [pattern]    files, sizes, what each depends on
     ./vz faults [n]        what has gone wrong lately, with stacks
     ./vz where             url, root, state directory
-    ./test/run             500+ assertions, no framework
+    ./test/run             510+ assertions, no framework
     ./visualize            start a server (dev mode; ./build runs first)
 
 `vz shot` writes SVG by default because SVG is text -- you can read node names
 and positions straight out of it. Ask for `.png` when you want to look.
+
+### A measurement worth making twice belongs in `vz`
+
+Write new tooling as a `vz` subcommand, not as a script in a scratch
+directory. The scratch version is gone next session and the one after it gets
+written again from nothing -- one session rewrote the same crossing counter
+four times before it occurred to anyone that it was a tool.
+
+The bar is low: `vz` is a shell script that reads a state file or posts to an
+endpoint, and every subcommand in it could be typed by hand. Adding one is a
+case in its `case` and a line in its usage block. If you find yourself
+measuring the same property of the graph a second time -- how many edges
+cross, how far a bend sits from its line, how deep an edge cuts into a node --
+that is the signal.
+
+It also makes the measurement available to the next person rather than to the
+transcript it was buried in, and puts it somewhere a test can call.
 
 ## Traps
 
