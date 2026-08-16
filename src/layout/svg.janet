@@ -296,23 +296,28 @@
   # Stopping short by the marker's length, which is what the 9 here used to
   # do, subtracted the arrowhead twice and left every edge floating a
   # visible gap away from the node it points at.
-    # NO SLIDING ALONG THE CORRIDOR, and the measurement is why.
-    #
-    # The idea was dot's: a corridor says how far a bend may move, so pull
-    # it toward the straight line between the endpoints. Measured, it costs
-    # two edges clipping a node's outline and buys nothing -- because a
-    # corridor is the gap between neighbours ON THE RANK, and a bend sliding
-    # across it passes nodes standing BETWEEN ranks that the box knows
-    # nothing about. Guarding each slid point against those did not help
-    # either: the curve bulges between waypoints that are individually
-    # clear, so the sampling would have to be of the curve rather than the
-    # points, which is the router dot has and we do not.
-    #
-    # The corridors are still computed and still passed in. They are the
-    # right description of the free space, they cost nothing to carry, and
-    # they are what a real spline router would need -- dot's routesplines,
-    # which fits a bezier inside a chain of boxes and is a pathplan problem
-    # rather than a layout one.
+    # SLIDE EACH BEND ALONG ITS CORRIDOR toward the straight line, which
+    # is dot's routing step: the bends say where the edge may pass, the
+    # corridor says how far either way it may move, and the line between
+    # the endpoints says where it would rather be. A bend whose slot sits
+    # far from its line -- because crossing count was indifferent between
+    # that slot and a near one -- can now be drawn near it anyway, as long
+    # as it stays inside the free space its rank actually has.
+    (def bends
+      (if (empty? corridor)
+        bends
+        (let [ax (a :x) ay (a :y) bx (b :x) by (b :y)
+              span (- by ay)]
+          (map (fn [i bend]
+                 (def box (get corridor i))
+                 (if-not box
+                   bend
+                   (let [[left right _] box
+                         # Where the straight line is at this bend's rank.
+                         t (if (zero? span) 0.5 (/ (- (bend 1) ay) span))
+                         wants (+ ax (* t (- bx ax)))]
+                     [(min right (max left wants)) (bend 1)])))
+               (range (length bends)) bends))))
 
   (def straight-from (on-ellipse a (ra :w) (ra :h) (b :x) (b :y) 0))
   (def straight-to (on-ellipse b (rb :w) (rb :h) (a :x) (a :y) 0 turn))

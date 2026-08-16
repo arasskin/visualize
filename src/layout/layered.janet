@@ -1516,30 +1516,6 @@
       # The dummy chains. One per edge spanning more than one layer, each a
       # list of [name layer] the edge is threaded through. The name is a
       # tuple rather than a string so it can never collide with a real node.
-      # CONCENTRATE: chains heading for the same node SHARE their bends.
-      #
-      # This is dot's conc.c, and on a dependency graph it is the difference
-      # between a picture and a bundle of wires. `src/core` here has thirteen
-      # dependents, and twelve of those edges are long enough to need bend
-      # chains -- so rank 3 carried three real nodes and twelve bends, each
-      # bend demanding its own column. The corridors measured eight pixels
-      # wide and no amount of routing could help, because the ranks were full
-      # of edges all going to the same place by twelve separate paths.
-      #
-      # dot merges two virtual nodes when they are adjacent on a rank, each
-      # carries exactly one edge in and one out, and those edges share an
-      # endpoint and run the same direction (`bothupcandidates` /
-      # `bothdowncandidates` in conc.c). The same rule stated over chains:
-      # edges with a common target share one bend per rank for as long as
-      # they are travelling together, and separate at the last rank so each
-      # still arrives on its own line.
-      #
-      # THE LAST RANK IS NOT SHARED, deliberately. Merging all the way to the
-      # target would draw thirteen edges as one line ending in one arrow,
-      # which says something false about the graph. Fanning at the final rank
-      # keeps every edge's arrival visible -- the bundle is a shortcut
-      # through the middle, not a claim that the edges are the same edge.
-      (def concentrate? (not (opts :no-concentrate)))
       (def chains @{})
       (def dummy-layer @{})
       (each [from to] edges
@@ -1549,13 +1525,8 @@
             (def stride (if (pos? span) 1 -1))
             (def chain @[])
             (var at (+ (layer from) stride))
-            (def last-rank (- (layer to) stride))
             (while (not= at (layer to))
-              # Shared while travelling, private on the final approach.
-              (def name
-                (if (and concentrate? (not= at last-rank))
-                  [:bundle to at]
-                  [:bend from to at]))
+              (def name [:bend from to at])
               (put dummy-layer name at)
               (array/push chain name)
               (set at (+ at stride)))
