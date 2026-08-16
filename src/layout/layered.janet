@@ -558,10 +558,17 @@
   lines need to read as parallel. Given the same gap as everything else, the
   nine edges converging on `src/core` were spaced 32 units apart and read as
   a splayed fan rather than a bundle.``
-  [names want widths gap &opt fixed floor ceiling]
+  [names want widths gap &opt fixed floor ceiling weight]
   (default fixed (fn [_] false))
   (default floor (fn [_] nil))
   (default ceiling (fn [_] nil))
+  # HOW HARD EACH NODE ARGUES when a block averages. Graphviz's position
+  # pass calls this priority, and it is why long chains come out straight
+  # there: a bend carrying an edge through a layer has one thing to want
+  # and nothing else holding it, so when it merges with a node that is
+  # already near where it wants to be, the bend should win. Equal weights
+  # let a single well-placed node drag a whole chain sideways.
+  (default weight (fn [_] 1))
   # A scalar gap is the same gap everywhere, which is what every caller but
   # `place-x` wants.
   (def gap-between (if (function? gap) gap (fn [_ _] gap)))
@@ -585,6 +592,7 @@
     # moment two merge, which is why `src/watchdog` sat 33 units inside a box
     # it had a floor against.
     (array/push blocks @{:names @[name] :left left :width w
+                         :weight (weight name)
                          :pin (when (fixed name) left)
                          :low (when-let [f (floor name)] (- f half))
                          :high (when-let [c (ceiling name)] (- c half))})
@@ -601,8 +609,12 @@
       (def gap (gap-between (last (a :names)) (first (b :names))))
       # The merged block's left edge: what the two halves wanted, weighted by
       # how many nodes each speaks for, unless one of them is pinned.
-      (def a-n (length (a :names)))
-      (def b-n (length (b :names)))
+      # By total WEIGHT rather than node count: a chain of bends outvotes a
+      # node that is merely nearby, which is what keeps a long edge straight
+      # through a crowded rank instead of being bent around whatever it
+      # happened to touch.
+      (def a-n (a :weight))
+      (def b-n (b :weight))
       (def b-left-in-a (- (b :left) (+ (a :width) gap)))
       (def merged (/ (+ (* a-n (a :left)) (* b-n b-left-in-a)) (+ a-n b-n)))
       # TWO PINS IN ONE BLOCK ARE AVERAGED, not resolved in favour of the
@@ -630,6 +642,7 @@
       (def high (let [l (a :high) r (shift (b :high))]
                   (if (and l r) (min l r) (or l r))))
       (put a :left (or pin merged))
+      (put a :weight (+ (a :weight) (b :weight)))
       (put a :width (+ (a :width) gap (b :width)))
       (put a :pin pin)
       (put a :low low)
@@ -1158,7 +1171,23 @@
       (defn seat [lo hi]
         (settle names (fn [n] (want n)) padded gap
                 (fn [n] (and group-of (group-of n) true))
-                lo hi))
+                lo hi
+                # PRIORITY, the way graphviz's position pass uses it: a bend
+                # is a point on a line and wants exactly one thing, so when
+                # it comes into contact with a real node it should carry the
+                # argument. A node has a label, neighbours on two sides and
+                # usually somewhere reasonable to be already; a bend pushed
+                # aside puts a visible kink in an edge that spans the
+                # picture.
+                #
+                # TWO TO ONE, MEASURED. Straightness costs width -- the
+                # bends win their arguments and the nodes they displace end
+                # up further out -- and the trade runs 1078, 1102, 1119,
+                # 1126 pixels wide at weights two, three, four and six on
+                # this tool's own graph. Two takes most of the straightening
+                # for half the spread; past four the picture only gets
+                # wider.
+                (fn [n] (if (bend? n) 2 1))))
       (def first-pass (seat (fn [n] (low n)) (fn [n] (high n))))
 
       # THE BOUNDS ARE RE-DERIVED FROM WHERE THE MEMBERS ACTUALLY LANDED.
@@ -1226,13 +1255,58 @@
   # and never converged. Shifting every layer by the same amount cannot
   # change a single relative position, so this costs the layout nothing and
   # makes it settle.
-  (for pass 0 5
+  # RUN UNTIL IT STOPS IMPROVING, rather than a fixed five rounds.
+  #
+  # MEASURED, AND THE HONEST RESULT IS THAT FIVE WAS ALREADY ENOUGH HERE:
+  # this tool's own graph goes 8496, 7795, 7792 and is done at pass three.
+  # So this buys no better picture on the graph it was written against --
+  # what it buys is not guessing. Five is arbitrary on a graph of another
+  # shape: a wide one with long chains may still be straightening at ten,
+  # and a small one finishes at two and spends the rest of the budget
+  # re-centring, which a redraw pays for on every file save.
+  #
+  # The measure is the objective graphviz's position pass uses: total
+  # weighted edge length, where a segment carrying a bend counts double, so
+  # straightening a long chain is worth more than nudging a short edge.
+  #
+  # A round that fails to beat the previous by half a percent is the end:
+  # past that the picture is moving without getting better, and the extra
+  # rounds cost time on every redraw the watcher triggers.
+  (defn total-length []
+    (var sum 0)
+    (eachp [name here] x
+      (each other (down name)
+        (when (x other)
+          # A segment carrying a bend is part of a long edge; weighing it
+          # heavier is what makes the layout spend its effort on the chains
+          # that read worst when they wander.
+          (def weight (if (or (bend? name) (bend? other)) 2 1))
+          (+= sum (* weight (math/abs (- here (x other))))))))
+    sum)
+
+  (var previous math/inf)
+  (var pass 0)
+  (while (< pass 24)
+    (++ pass)
     (round :down)
     (round :up)
     (def all (values x))
     (unless (empty? all)
+      # RE-CENTRED AFTER EACH ROUND, or the picture walks. A block that
+      # cannot have what it wants is placed at the nearest position that
+      # works, and `settle` resolves ties by pushing right -- so every round
+      # nudged the whole drawing further that way and the next measured from
+      # there. The `web` group marched right by about a hundred units per
+      # round and never converged. Shifting every layer by the same amount
+      # cannot change a relative position, so this costs nothing.
       (def drift (/ (+ (min ;all) (max ;all)) 2))
-      (eachp [name at] x (put x name (- at drift)))))
+      (eachp [name at] x (put x name (- at drift))))
+    (def now (total-length))
+    (when (os/getenv "VISUALIZE_LAYOUT_TRACE")
+      (eprintf "  pass %d: length %.0f" pass now))
+    (if (< now (* previous 0.995))
+      (set previous now)
+      (set pass 24)))
   x)
 
 #
