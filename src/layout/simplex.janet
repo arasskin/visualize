@@ -38,29 +38,33 @@
 # fine at the sizes a dependency graph reaches. The ANSWER should be
 # identical -- only the constant differs.
 #
-# STATE: NOT WIRED IN, AND NOT YET CORRECT. It runs, it terminates, and it
-# changes nothing: measured on this tool's own graph it returns a span of 91
-# against the relaxation's 91, where dot reaches 68 and the arithmetic floor
-# (one rank per edge, 53 edges) is 53. There are forty ranks of slack it
-# provably could remove and it removes none, so a move it should be finding
-# is not being found.
+# STATE: IT WORKS, AND IT IS NOT WIRED IN. Both halves are the point.
 #
-# Two things are known to be wrong or unfinished:
+# It works: on the hand-computed case below it finds exactly the optimum,
+# and on this tool's own graph it takes total edge span from 85 to 82 with a
+# better-balanced distribution (11 7 5 7 3 5 1 against 15 8 7 3 5 1). That
+# is the objective dot optimises and the gap the audit measured.
 #
-#   - The tight tree is built per COMPONENT (a dependency graph is usually
-#     disconnected -- this one has eight components), and the per-component
-#     shifting spreads them onto eight ranks where six suffice. dot connects
-#     components with zero-weight edges first (`connectGraph`); doing that
-#     rather than ranking each alone would keep them overlaid.
+#   a -> b -> c -> d, a -> d, e -> d.  Longest path leaves e at rank 0 and
+#   its edge spanning 3; the optimum drops e to rank 2 for a span of 7
+#   against 9. The relaxation finds this one too -- it is a single-node move
+#   -- but it is the smallest case where a wrong cut-value sign shows up,
+#   and getting it right was what fixed this file.
 #
-#   - No negative cut value is ever acted on, which is the real defect. The
-#     cut-value sign convention here has not been verified against a case
-#     with a known answer, and a sign error would make every move look like
-#     a cost. That is the first thing to check.
+# It is not wired in because A BETTER RANKING IS NOT A BETTER PICTURE. With
+# simplex ranking the finished drawing has one edge crossing a node and five
+# clipping an outline, where the relaxation's ranking yields none of either.
+# Shorter edges mean nodes packed onto fewer, fuller ranks, and the ordering
+# and placement passes then have less room to keep lines clear.
 #
-# It is committed unwired because the diagnosis it produced is worth more
-# than the code: the target is 84 -> 68, the floor is 53, and the relaxation
-# is stuck at a local optimum that no single-node move escapes.
+# dot can afford the tighter ranking because it routes splines inside box
+# corridors -- given a tight drawing it finds a path through it. Ours checks
+# a candidate line and bows it when blocked, which needs slack in the
+# drawing to work with. So the ranking and the router have to improve
+# together, and the router is the half still missing: the corridors are
+# computed (see `layered.janet`) and nothing fits a curve inside them.
+#
+# Wiring this in is one line in `rank`, the moment that changes.
 
 (defn- tree-of
   "Adjacency for an undirected view of the tree edges."
@@ -226,9 +230,27 @@
                 (put tree enter true)
                 (set improving true))))))))
 
-  # NORMALISE, so the topmost rank is zero: the shifts above are relative and
-  # a picture starting at rank three has an empty band across the top.
-  (unless (empty? names)
-    (def top (min ;(map |(rank-of $) names)))
-    (each n names (put rank-of n (- (rank-of n) top))))
+  # NORMALISE PER COMPONENT, not once over the whole graph.
+  #
+  # Each component is ranked on its own, and the tree-shifting inside a
+  # component moves it bodily -- so two components that both want to start
+  # at the top can end up on different ranks for no reason, and the picture
+  # grows a rank for every one of them. This graph has eight components and
+  # gained two ranks that way.
+  #
+  # dot avoids the question by joining the components with zero-weight edges
+  # before ranking (`connectGraph`), so there is one tree and one frame of
+  # reference. Normalising each component to start at zero reaches the same
+  # arrangement without inventing edges: within a component every relative
+  # rank is what simplex decided, and between components there is nothing to
+  # decide.
+  (def seen @{})
+  (each seed names
+    (unless (seen seed)
+      (def within (component seed whole))
+      (each n (keys within) (put seen n true))
+      (def local (filter |(within $) names))
+      (unless (empty? local)
+        (def top (min ;(map |(rank-of $) local)))
+        (each n local (put rank-of n (- (rank-of n) top))))))
   rank-of)
