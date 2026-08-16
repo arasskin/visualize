@@ -317,6 +317,181 @@
   (def out (layered/place graph {:measure (fn [_] 60)}))
   (t/ok (empty? (keys (out :routes))) "nothing to route around"))
 
+#
+# Crossings, counted on the whole picture.
+#
+# THE NUMBER `order` OPTIMISES IS NOT THE NUMBER YOU SEE. The median sweep
+# solves one layer pair at a time -- one-sided crossing minimisation, with the
+# layer above held fixed -- and a change that improves one pair can make the
+# drawing worse everywhere else. Minimising crossings across ALL layers at once
+# is a different problem, and a harder one; decisions on one rank move the
+# nodes on every other.
+#
+# That is not a hypothetical. A tiebreak that seated a bend on the straight
+# line between its edge's two ends took rank 2 of this tool's own graph from
+# six crossings to five -- and the whole drawing from six to nineteen, by
+# reordering three ranks nobody was measuring. It looked like an improvement
+# from every angle the sweep can see.
+#
+# So the guard is the total, over the finished geometry: every edge as the
+# polyline it is actually drawn as, bends included, and every pair of segments
+# tested. That is the number a reader counts.
+
+(defn- segments-of
+  "Every drawn edge as a list of [[x y] [x y]] segments, bends included."
+  [graph places]
+  (def points (places :points))
+  (def routes (places :routes))
+  (def out @[])
+  (each [from to] (graph :edges)
+    (def a (points from))
+    (def b (points to))
+    (when (and a b (not= from to))
+      (def path (array [(a :x) (a :y)]
+                       ;(map |[($ 0) ($ 1)] (get routes [from to] []))
+                       [(b :x) (b :y)]))
+      (for i 0 (- (length path) 1)
+        (array/push out [(path i) (path (+ i 1))]))))
+  out)
+
+(defn- crosses?
+  ``Do two segments properly cross?
+
+  Strictly: the endpoints of each must fall on OPPOSITE sides of the other,
+  which is the sign test on the two cross products. Touching at a shared
+  endpoint is not a crossing -- every edge out of one node shares a point with
+  its siblings, and counting those would score a fan as a pile of crossings.``
+  [[[x1 y1] [x2 y2]] [[x3 y3] [x4 y4]]]
+  (defn side [ax ay bx by cx cy]
+    (- (* (- bx ax) (- cy ay)) (* (- by ay) (- cx ax))))
+  (def d1 (side x3 y3 x4 y4 x1 y1))
+  (def d2 (side x3 y3 x4 y4 x2 y2))
+  (def d3 (side x1 y1 x2 y2 x3 y3))
+  (def d4 (side x1 y1 x2 y2 x4 y4))
+  (and (< (* d1 d2) 0) (< (* d3 d4) 0)))
+
+(defn crossings
+  ``How many times the drawn edges cross each other.
+
+  The whole-picture number: what a reader counts, rather than what any one
+  sweep was looking at.``
+  [graph places]
+  (def segs (segments-of graph places))
+  (var total 0)
+  (for i 0 (length segs)
+    (for j (+ i 1) (length segs)
+      (when (crosses? (segs i) (segs j)) (++ total))))
+  total)
+
+(t/test "the crossing counter counts what is drawn"
+  # Two edges that must cross: A and B on top, their targets swapped beneath.
+  (def crossed {:nodes [{:name "A"} {:name "B"} {:name "C"} {:name "D"}]
+                :edges [["A" "D"] ["B" "C"]]})
+  # Ordering will UNCROSS that, which is the whole point of the sweep -- so
+  # the counter is checked against geometry it cannot fix: one layer, placed.
+  (def flat {:nodes [{:name "A"} {:name "B"}] :edges [["A" "B"]]})
+  (t/is= 0 (crossings flat (layered/place flat {:measure (fn [_] 60)}))
+         "one edge crosses nothing")
+  # A hand-built crossing, to prove the test can see one at all.
+  (def places {:points {"A" {:x 0 :y 0} "B" {:x 100 :y 0}
+                        "C" {:x 0 :y 100} "D" {:x 100 :y 100}}
+               :routes @{}})
+  (t/is= 1 (crossings crossed places) "swapped targets cross exactly once"))
+
+(t/test "a bend goes where its edge's line goes"
+  # THE ORDER IS FINE; THE DRAWING WAS WRONG. A bend is not a node -- it is a
+  # column reserved for an edge passing through -- so which side of a cluster
+  # it sits on is a question about the edge's line, not about crossings. The
+  # median sweep scores it like a node anyway, because that is all a median
+  # can do, and `settle` then honours the order it produced.
+  #
+  # On this tool's own graph that stranded the `src/select -> src/layout`
+  # bend to the right of `src/layout/svg` when both ends of its edge sit far
+  # left: the line crosses rank 2 at x=-386, between `src/layout/force` and
+  # `src/layout/layered`, and the bend was pinned at x=-194. The edge swung
+  # right around the cluster and cut back underneath, crossing
+  # `src/color -> src/layout/svg` on the way for no reason at all.
+  #
+  # Reproduced here in miniature: `src` reaches `sink` two ranks down, while
+  # three middles sit between them. The bend belongs among the middles, on
+  # the line between its ends -- not past all of them.
+  (def graph
+    {:nodes (map (fn [n] {:name n}) ["src" "m1" "m2" "m3" "sink" "other"])
+     :edges [["src" "sink"] ["src" "m1"] ["other" "m2"] ["other" "m3"]
+             ["m1" "sink"] ["m2" "sink"] ["m3" "sink"]]})
+  (def places (layered/place graph {:measure (fn [_] 60)}))
+  (def route (get (places :routes) ["src" "sink"]))
+  (t/ok (not (nil? route)) "the long edge got a bend")
+  (def points (places :points))
+  (def a (points "src"))
+  (def b (points "sink"))
+  (each [bx by] route
+    # Where the straight line between the edge's two ends crosses this rank.
+    (def t (/ (- by (a :y)) (- (b :y) (a :y))))
+    (def want (+ (a :x) (* t (- (b :x) (a :x)))))
+    (t/ok (< (math/abs (- bx want)) 60)
+          (string "the bend sits on its edge's line, not out past the rank: "
+                  "it is at " (math/round bx) " and the line wants "
+                  (math/round want)))))
+
+(t/test "a bundle of edges into one node keeps one order"
+  # `untangle-bundles` holds the chains that end at a shared node to a single
+  # left-to-right order, because two of them cross exactly when they swap
+  # sides on the way down. This checks the pass itself rather than a drawing:
+  # given chains deliberately seated in opposite orders on two ranks, it has
+  # to pick one and apply it to both.
+  (def a @[[:bend "a" "z" 1] [:bend "a" "z" 2]])
+  (def b @[[:bend "b" "z" 1] [:bend "b" "z" 2]])
+  (def rows @{1 @[(a 0) (b 0)]        # a before b
+              2 @[(b 1) (a 1)]})      # b before a -- the swap
+  (def chains {["a" "z"] a ["b" "z"] b})
+  (defn chain-of [nm]
+    (when (tuple? nm)
+      (when-let [ch (get chains [(nm 1) (nm 2)])] [(nm 2) ch])))
+  # Cost: count the swaps between the two ranks. Zero when they agree.
+  (defn cost [r]
+    (def i1 (find-index |(= $ (a 0)) (get r 1)))
+    (def j1 (find-index |(= $ (b 0)) (get r 1)))
+    (def i2 (find-index |(= $ (a 1)) (get r 2)))
+    (def j2 (find-index |(= $ (b 1)) (get r 2)))
+    (if (= (< i1 j1) (< i2 j2)) 0 1))
+  (def out (layered/untangle-bundles rows @{} chain-of (fn [n] (tuple? n)) cost))
+  (t/is= 0 (cost out) "the two ranks agree on which chain is on the left"))
+
+# NOT TESTED HERE: that this fixes the `src/json` / `src/state` crossing on
+# this tool's own graph, which is what the pass was written for. Every
+# minimal graph tried reproduced neither the defect nor the fix -- the two
+# chains have to enter at different ranks AND have enough siblings between
+# them for the sweep to order their bends independently, and at that size the
+# whole pipeline (sweep, sift, reseat) reaches a good answer without this
+# pass. The real graph is the reproduction; `crossings` above went from five
+# to four when this landed.
+
+(t/test "the whole picture does not get worse"
+  # THE GUARD. A graph shaped like the one this tool draws of itself: a rank
+  # of sources, a rank of middles, and a long edge that has to cross the
+  # middle rank to reach its target. The exact number matters less than that
+  # it cannot silently rise -- a local improvement that costs the drawing is
+  # the failure this exists to catch.
+  (def graph
+    {:nodes (map (fn [n] {:name n})
+                 ["src" "a" "b" "c" "mid1" "mid2" "mid3" "sink" "far"])
+     :edges [["src" "mid1"] ["src" "mid2"] ["src" "far"]
+             ["a" "mid1"] ["b" "mid2"] ["c" "mid3"]
+             ["mid1" "sink"] ["mid2" "sink"] ["mid3" "sink"]
+             ["a" "sink"] ["b" "far"]]})
+  (def places (layered/place graph {:measure (fn [_] 60)}))
+  (def n (crossings graph places))
+  # PINNED TO WHAT IT ACTUALLY DRAWS, not to a comfortable ceiling. A bound
+  # with slack in it passes through exactly the regression it was written to
+  # catch: this graph crosses itself twice, so `<= 6` would have sat green
+  # while the drawing got three times worse. If a change lowers this, lower
+  # the number with it -- that is the pass working.
+  (t/ok (<= n 2)
+        (string "the drawing crosses itself " n " times, where it has always "
+                "needed two -- a rise means a pass that improved one rank at "
+                "the expense of the rest")))
+
 (t/test "a source drops to meet its children"
   # Longest-path ranking strands every parentless node on layer 0, which put
   # seventeen of this tool's thirty-three nodes in one row and set the width

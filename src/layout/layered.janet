@@ -143,20 +143,33 @@
 #
 
 (defn- median-of
-  ``The median position of a node's neighbours in the adjacent layer.
+  ``Where a node's neighbours in the adjacent layer sit, as one number.
 
   -1 for a node with no neighbours there, which the sort reads as "leave it
-  where it is" rather than moving it to one end.``
+  where it is" rather than moving it to one end.
+
+  THE BARYCENTRE, not the median, despite the name this has always had. The
+  two are the standard pair for one-sided crossing minimisation, and the
+  median is reported the weaker across sparse graphs -- Gacho et al. (WCTP
+  2025) find it worst of the three heuristics they test, at every layer size
+  they try.
+
+  ON THIS TOOL'S OWN GRAPH THE TWO DRAW THE SAME PICTURE: six crossings
+  either way, and the `src/select -> src/layout` bend 192 units off its
+  straight line under both. The change is kept because the reported
+  behaviour on sparse graphs is better and the cost is identical -- both are
+  one pass over the neighbours -- not because it fixed anything here.
+
+  The difference is what each does with a lopsided neighbourhood. A node
+  pulled by four links on the left and one far right has its median sitting
+  among the four, ignoring the fifth entirely; the average feels it and
+  shifts. The median's guarantee -- within three times optimal -- is a bound
+  the average lacks, and it is not the property that draws a good picture.``
   [neighbours positions]
-  (def spots (sort (map |(positions $) (filter |(positions $) neighbours))))
-  (cond
-    (empty? spots) -1
-    (odd? (length spots)) (spots (div (length spots) 2))
-    # The average of the two middles, which is the standard median heuristic
-    # and behaves better than picking either one.
-    (/ (+ (spots (- (div (length spots) 2) 1))
-          (spots (div (length spots) 2)))
-       2)))
+  (def spots (map |(positions $) (filter |(positions $) neighbours)))
+  (if (empty? spots)
+    -1
+    (/ (sum spots) (length spots))))
 
 (defn order
   ``Order each layer to reduce edge crossings.
@@ -254,6 +267,109 @@
     (for pass 0 sweeps
       (sweep (slice indexes 1) :down)
       (sweep (reverse (slice indexes 0 -2)) :up)))
+  current)
+
+(defn- crossings-between
+  ``How many times the edges between two ordered layers cross.
+
+  Every pair of links is checked: two links cross when one starts left of the
+  other and ends right of it. Quadratic in the number of links, which is
+  fine at the sizes `sift` calls it on and is the same counter every
+  crossing-minimisation heuristic is built on.``
+  [above below neighbours-of]
+  (def at @{})
+  (eachp [i name] above (put at name i))
+  (def links @[])
+  (eachp [j name] below
+    (each other (neighbours-of name)
+      (when-let [i (at other)]
+        (array/push links [i j]))))
+  (var total 0)
+  (for a 0 (length links)
+    (for b (+ a 1) (length links)
+      (def [a1 a2] (links a))
+      (def [b1 b2] (links b))
+      (when (or (and (< a1 b1) (> a2 b2))
+                (and (> a1 b1) (< a2 b2)))
+        (++ total))))
+  total)
+
+(defn sift
+  ``Try every node at every position in its layer; keep what crosses least.
+
+  THE MEDIAN SWEEP CANNOT SEE PAST ITS TWO LAYERS, and some orderings only
+  make sense from further away. On this tool's own graph the
+  `src/select -> src/layout` bend has to sit between `src/layout/force` and
+  `src/layout/layered` -- an arrangement that crosses five times where the
+  swept one crosses six -- and no median can find it: force and layered have
+  no parents at all, so a down-sweep scores them both -1, and all four nodes
+  share the single child `src/layout`, so an up-sweep scores them all the
+  same. Both directions are blind here; the ordering falls through to the
+  scan's input order, which means nothing about the picture.
+
+  Sifting does not reason about any of that. It lifts a node out, tries it in
+  every slot, counts the crossings each way, and puts it where the count is
+  lowest -- so it finds the arrangement without needing to know why it is
+  better. That is what makes it safe in a way the tiebreak it replaces was
+  not: a move is kept only when the measured count DROPS, so a pass can
+  improve the picture or leave it alone, never make it worse.
+
+  Local optimisation, so it is a refinement of the sweep rather than a
+  replacement: `order` gets the layer roughly right and this walks it the
+  last step. Reference [7] in Gacho et al. reports it beating barycentre and
+  median on sparse graphs, which is what this draws.
+
+  `fixed?` names nodes that may not be moved -- a group's members, whose
+  contiguity `cohere` has already established and which sifting has no way to
+  preserve.``
+  [ordered up down &opt fixed?]
+  (default fixed? (fn [_] false))
+  (def current (table/clone ordered))
+  (def indexes (sort (keys current)))
+
+  (defn cost-at
+    "Crossings above and below a layer, as it currently stands."
+    [index]
+    (var total 0)
+    (when-let [above (current (- index 1))]
+      (+= total (crossings-between above (current index) (fn [n] (get up n [])))))
+    (when-let [below (current (+ index 1))]
+      (+= total (crossings-between (current index) below (fn [n] (get down n [])))))
+    total)
+
+  (each index indexes
+    (def row (current index))
+    (when (> (length row) 1)
+      (each name row
+        (unless (fixed? name)
+          (def before (current index))
+          (def was (find-index |(= $ name) before))
+          (def without (filter |(not= $ name) before))
+          # THE SLOT IT IS ALREADY IN, which is not slot zero and not `was`
+          # either: pulling the node out shifts everything after it down one,
+          # so re-inserting at `was` puts it back exactly where it started
+          # only because the slice before it is unchanged. Keeping this as
+          # the baseline is what makes a tie a no-op.
+          (var best-at was)
+          (var best-cost nil)
+          (put current index before)
+          (set best-cost (cost-at index))
+          (for slot 0 (+ 1 (length without))
+            (unless (= slot was)
+              (def trial (array ;(slice without 0 slot) name ;(slice without slot)))
+              (put current index trial)
+              (def cost (cost-at index))
+              # STRICTLY BETTER, or the node does not move. A tie is not an
+              # improvement, and taking it anyway walks every node to
+              # whichever end the scan reaches first -- which reversed every
+              # rank of this tool's own graph at an identical crossing count,
+              # and drew a picture with eighty-three crossings where the
+              # ordering it came from had six.
+              (when (< cost best-cost)
+                (set best-cost cost)
+                (set best-at slot))))
+          (def final (array ;(slice without 0 best-at) name ;(slice without best-at)))
+          (put current index final)))))
   current)
 
 (defn cohere
@@ -468,6 +584,250 @@
   (def out @{})
   (each name names (put out name (measure name)))
   out)
+
+(defn- crossing-count
+  ``How many times the drawn lines cross, over the whole picture.
+
+  THE NUMBER A READER COUNTS, which is not the one a sweep optimises. The
+  median works on one layer pair at a time and cannot see what a change costs
+  three ranks away; this measures the finished geometry, so a pass that
+  improves its own rank at the expense of the drawing is caught rather than
+  congratulated.
+
+  Every link between adjacent layers is a segment between two placed points,
+  and two segments cross when each one's ends fall on opposite sides of the
+  other. Sharing an endpoint is not a crossing -- a fan out of one node would
+  otherwise score as a pile of them.``
+  [rows x up]
+  (def y-of @{})
+  (eachp [index row] rows
+    (each name row (put y-of name index)))
+  (def segs @[])
+  (eachp [index row] rows
+    (each name row
+      (each other (up name)
+        (when (and (x name) (x other) (y-of other))
+          (array/push segs [[(x other) (y-of other)] [(x name) index]])))))
+  (defn side [ax ay bx by cx cy]
+    (- (* (- bx ax) (- cy ay)) (* (- by ay) (- cx ax))))
+  (var total 0)
+  (for i 0 (length segs)
+    (for j (+ i 1) (length segs)
+      (def [[x1 y1] [x2 y2]] (segs i))
+      (def [[x3 y3] [x4 y4]] (segs j))
+      (def d1 (side x3 y3 x4 y4 x1 y1))
+      (def d2 (side x3 y3 x4 y4 x2 y2))
+      (def d3 (side x1 y1 x2 y2 x3 y3))
+      (def d4 (side x1 y1 x2 y2 x4 y4))
+      (when (and (< (* d1 d2) 0) (< (* d3 d4) 0))
+        (++ total))))
+  total)
+
+(defn reseat-bends
+  ``Move each bend to the slot its edge's straight line actually points at.
+
+  A BEND'S POSITION IN THE ORDER IS NOT A FACT ABOUT THE GRAPH. A real node
+  is somewhere because of what it connects to; a bend is only there to
+  reserve a column for an edge passing through, and where that column should
+  be is a question about the line, not about the crossing count. The sweep
+  scores a bend like a node anyway, because that is all the median knows how
+  to do, and `settle` then honours the order it produced -- so a bend ordered
+  to the right of a cluster cannot be drawn to the left of it however much
+  its line wants to be there.
+
+  On this tool's own graph that is the `src/select -> src/layout` edge. Both
+  its ends sit left: `src/select` at x=-374 on rank 1, `src/layout` at
+  x=-398 on rank 3, so the line crosses rank 2 at x=-386, between
+  `src/layout/force` (-441) and `src/layout/layered` (-349). The sweep
+  ordered its bend after `src/layout/svg`, which pins it to x=-194 -- 192
+  units out -- and the edge swings right around the whole cluster and cuts
+  back underneath, crossing `src/color -> src/layout/svg` on the way. Moving
+  the bend to where its line wants removes that crossing and adds none: six
+  become five.
+
+  So this reorders BENDS ONLY, by their aim, leaving every real node exactly
+  where the sweep and the sift put it. A bend changing places with another
+  bend cannot change what the picture asserts; it is the same edges through
+  the same ranks, drawn straighter.
+
+  A BEND MAY PASS A REAL NODE DOING IT, and that is the point rather than a
+  side effect: the whole defect is a bend stuck on the wrong side of a
+  cluster its line runs through. What must not change is the order of the
+  real nodes among THEMSELVES -- that is what the sweep decided and what the
+  crossing count rests on -- so they keep their relative sequence exactly,
+  and only the bends are threaded back in where their aim asks.
+
+  ONE BEND AT A TIME, AND ONLY IF IT PAYS. Moving every bend onto its line at
+  once is not the same thing as moving each bend that helps: on this tool's
+  own graph the wholesale version took the drawing from six crossings to
+  twelve, because a bend whose line happens to run through a crowd drags the
+  crowd apart to make room. Moving only the `src/select -> src/layout` bend
+  gives five. So each candidate is tried, the crossings are counted, and the
+  move is kept only when the number DROPS -- which makes this pass unable to
+  make the picture worse, whatever the aims happen to say.
+
+  `aim` answers where a bend's line crosses its layer, in the same units as
+  `positions`; `positions` is where everything currently sits; `cost` counts
+  the crossings of a whole candidate ordering, so the test is the drawing
+  rather than any one rank.``
+  [ordered positions aim bend? cost]
+  (def current (table/clone ordered))
+  (var best (cost current))
+  (each index (sort (keys current))
+    (def bends (filter bend? (current index)))
+    (each name bends
+      (def row (current index))
+      (def was (find-index |(= $ name) row))
+      (def want (aim name))
+      (when want
+        (def without (filter |(not= $ name) row))
+        # Where the aim falls among the nodes that are left: the first slot
+        # whose occupant already sits beyond it.
+        (def slot (or (find-index |(> (get positions $ math/inf) want) without)
+                      (length without)))
+        # A bend already in the slot its line points at has nothing to try,
+        # and trying anyway costs a placement of the whole graph -- which is
+        # what this pass spends its time on. Most bends are already right.
+        (unless (= slot was)
+          (def trial (array ;(slice without 0 slot) name ;(slice without slot)))
+          (put current index trial)
+          (def now (cost current))
+          (if (< now best)
+            (set best now)
+            # No better: put the row back exactly as it was.
+            (put current index row))))))
+  current)
+
+(defn untangle-bundles
+  ``Keep the chains that converge on one node in the order they arrive.
+
+  EDGES THAT END AT THE SAME PLACE SHOULD NOT CROSS EACH OTHER. Five chains
+  reach `src/graph` on this tool's own graph, and two of them crossed --
+  `src/json` and `src/state` -- for no reason a reader could see. Neither
+  node had moved; the bends had simply been ordered rank by rank, each
+  against whatever else happened to share its layer, and nothing kept one
+  chain on one side of another all the way down.
+
+  That is the whole defect. Two chains ending at the same node cross exactly
+  when they swap sides on the way down, so the fix is to pick one order for
+  the bundle and hold it on every rank.
+
+  WHICH ORDER IS FOUND BY MEASURING, not by a rule about where the chains
+  start. Both obvious rules were tried on this graph and both give the
+  ordering that was already there: by the source's x, and by where each chain
+  first appears. The order that actually draws fewest crossings puts
+  `src/json` between `src/scan` and `src/state`, which neither rule predicts
+  -- `src/json` sits furthest right of all five sources and belongs fourth of
+  five. Its chain starts a rank higher than its siblings', so it enters the
+  bundle already on the wrong side of them, and no property of its endpoints
+  says where it should slot in.
+
+  So each chain is lifted out and tried in every position, keeping what
+  measures best -- the same shape as `sift`, one layer up: there the unit is
+  a node in a rank, here it is a whole chain in a bundle.
+
+  `reseat-bends` cannot find this. It moves ONE bend at a time and keeps what
+  measures better, and no single move helps: the chain has to change sides on
+  two ranks together or not at all, and either bend alone draws worse. That
+  is why this is its own pass rather than another aim.
+
+  Only bends move, and only relative to each other -- a real node keeps its
+  slot, so the ordering the sweep and the sift agreed on is untouched.``
+  [ordered positions chain-of bend? cost]
+  (var current (table/clone ordered))
+  # Every chain, grouped by the node it ends at.
+  (def bundles @{})
+  (eachp [_ row] ordered
+    (each name row
+      (when (bend? name)
+        (when-let [[target chain] (chain-of name)]
+          (unless (bundles target) (put bundles target @{}))
+          (put (bundles target) chain true)))))
+
+  # Rewrite every rank so a bundle's chains sit in `wanted` order among the
+  # slots they already hold. Everything else on each rank keeps its place.
+  (defn arrange [rows wanted]
+    (def rank-of @{})
+    (eachp [k chain] wanted
+      (each nm chain (put rank-of nm k)))
+    (def out (table/clone rows))
+    (each index (sort (keys rows))
+      (def row (rows index))
+      (def mine (filter |(rank-of $) row))
+      (when (> (length mine) 1)
+        (def slots (seq [[i n] :pairs row :when (rank-of n)] i))
+        (def in-order (sorted-by |(rank-of $) mine))
+        (def fixed (array ;row))
+        (eachp [k i] slots (put fixed i (in-order k)))
+        (put out index fixed)))
+    out)
+
+  # A BUNDLE ALREADY IN ORDER IS SKIPPED, and most of them are. Chains whose
+  # bends hold the same relative order on every rank they share cannot cross
+  # each other, so there is nothing for the search to find -- and the search
+  # is expensive, since scoring one candidate means placing the whole graph.
+  # Nine chains reach `src/core` on this tool's own graph and never cross;
+  # trying them anyway cost ninety placements and two seconds to confirm what
+  # the order already said.
+  (defn tangled? [members]
+    # Where each chain sits on each rank, as {rank position}.
+    #
+    # THE SOURCE COUNTS AS PART OF THE CHAIN. A chain that starts one rank
+    # lower than its sibling has no bend on the rank where the sibling is
+    # still a NODE, so comparing bends alone finds no rank they disagree on
+    # and reports a tangle that is plainly drawn as untangled. `src/json`
+    # against `src/state` is exactly that: they agree on ranks 2 and 3, and
+    # cross between ranks 1 and 2, where `src/state` is its own node.
+    (def track @[])
+    (each chain members
+      (def seen @{})
+      (each index (sort (keys current))
+        (when-let [at (find-index |(find (fn [b] (= b $)) chain) (current index))]
+          (put seen index at)))
+      # The node the chain leaves from, on the rank it leaves from. A bend's
+      # name carries its own edge, so the source is read off it.
+      (when-let [nm (first chain)]
+        (def from (nm 1))
+        (each index (sort (keys current))
+          (when-let [at (find-index |(= $ from) (current index))]
+            (put seen index at))))
+      (array/push track seen))
+    # Two chains are tangled when they hold opposite relative order on two
+    # ranks they BOTH appear on -- which is a swap, and a swap is a crossing.
+    (var answer false)
+    (for i 0 (length track)
+      (for j (+ i 1) (length track)
+        (def a (track i))
+        (def b (track j))
+        (def shared (filter |(get b $) (sort (keys a))))
+        (when (> (length shared) 1)
+          (def signs (map |(cmp (get a $) (get b $)) shared))
+          (unless (all |(= $ (first signs)) signs)
+            (set answer true)))))
+    answer)
+
+  (eachp [target chains] bundles
+    (def members (keys chains))
+    (when (and (> (length members) 1) (tangled? members))
+      # Start from the order the chains are already in, by where their
+      # deepest bend sits -- so a bundle that is already right is left alone.
+      (defn deepest [chain]
+        (get positions (last chain) 0))
+      (var best (sorted-by deepest members))
+      (var best-cost (cost (arrange current best)))
+      # Each chain, lifted out and tried in every slot. One pass is enough:
+      # a bundle is a handful of chains, and the move that matters is a
+      # single chain crossing the others.
+      (each chain members
+        (def without (filter |(not= $ chain) best))
+        (each slot (range (+ 1 (length without)))
+          (def trial (array ;(slice without 0 slot) chain ;(slice without slot)))
+          (def now (cost (arrange current trial)))
+          (when (< now best-cost)
+            (set best-cost now)
+            (set best trial))))
+      (set current (arrange current best))))
+  current)
 
 (defn place-x
   ``An x for every node, layer by layer.
@@ -935,7 +1295,23 @@
                         (tuning :sweeps)
                         group-of
                         (fn [name] (not (nil? (dummy-layer name))))))
-      (def ordered (if group-of (cohere swept group-of) swept))
+      # THEN SIFT, which is the step the sweep cannot do for itself: it tries
+      # each node in every slot and keeps what measures best, so it finds the
+      # orderings the median is blind to -- the ones where both adjacent
+      # layers say the same thing about every node on the rank. A move is
+      # kept only when the count drops, so this can improve the picture or
+      # leave it alone, never spoil it.
+      #
+      # A GROUP'S MEMBERS ARE HELD STILL. `cohere` below is what guarantees a
+      # group stays contiguous, and sifting moves one node at a time with no
+      # idea that the others have to follow -- so it would pull a member out
+      # of its group and `cohere` would drag it back, undoing the crossing
+      # count sifting had just measured.
+      (def sifted (sift swept
+                        (fn [name] (get up name []))
+                        (fn [name] (get down name []))
+                        (fn [name] (and group-of (group-of name) true))))
+      (def ordered (if group-of (cohere sifted group-of) sifted))
 
       # A dummy is measured as the room its edge needs to pass, which is a
       # narrow column rather than nothing: at zero width the separation pass
@@ -944,35 +1320,87 @@
       (def widths (widths-of names measure))
       (eachp [name _] dummy-layer (put widths name (tuning :bend-width)))
 
-      (def x (place-x ordered
-                      (fn [name] (get up name []))
-                      (fn [name] (get down name []))
-                      widths
-                      (tuning :node-gap)
-                      (fn [name] (not (nil? (dummy-layer name))))
-                      # A bend carries its own edge in its name, so the line
-                      # it should be sitting on is a lerp between where that
-                      # edge's two ends have ended up. `at` is the table of
-                      # positions as they stand, which the pass is still
-                      # moving -- so this is read fresh on every sweep.
-                      (fn [name where]
-                        (when-let [on (dummy-layer name)]
-                          (def [_ from to _] name)
-                          (def a (layer from))
-                          (def b (layer to))
-                          (when (and a b (not= a b) (where from) (where to))
-                            (def t (/ (- on a) (- b a)))
-                            (+ (where from)
-                               (* t (- (where to) (where from)))))))
-                      # Only real nodes belong to a group; a bend is passing
-                      # through and must not be pulled into somebody's box.
-                      (when-let [of (opts :group-of)]
-                        (fn [name] (when (string? name) (of name))))
-                      # How far outside its members the renderer draws the
-                      # box. An option rather than an import: this file
-                      # deliberately knows nothing about SVG, so the seam
-                      # passes it down (see src/layout.janet).
-                      (tuning :group-inset)))
+      # A bend carries its own edge in its name, so the line it should be
+      # sitting on is a lerp between where that edge's two ends have ended
+      # up. `where` is the table of positions as they stand, which the pass
+      # is still moving -- so this is read fresh on every sweep.
+      (def bend? (fn [name] (not (nil? (dummy-layer name)))))
+      (def aim
+        (fn [name where]
+          (when-let [on (dummy-layer name)]
+            (def [_ from to _] name)
+            (def a (layer from))
+            (def b (layer to))
+            (when (and a b (not= a b) (where from) (where to))
+              (def t (/ (- on a) (- b a)))
+              (+ (where from)
+                 (* t (- (where to) (where from))))))))
+      (def bend-group
+        # Only real nodes belong to a group; a bend is passing through and
+        # must not be pulled into somebody's box.
+        (when-let [of (opts :group-of)]
+          (fn [name] (when (string? name) (of name)))))
+      (defn seat [rows]
+        (place-x rows
+                 (fn [name] (get up name []))
+                 (fn [name] (get down name []))
+                 widths
+                 (tuning :node-gap)
+                 bend?
+                 aim
+                 bend-group
+                 # How far outside its members the renderer draws the box. An
+                 # option rather than an import: this file deliberately knows
+                 # nothing about SVG, so the seam passes it down (see
+                 # src/layout.janet).
+                 (tuning :group-inset)))
+
+      # PLACE, THEN LET THE BENDS FIND THEIR LINE, THEN PLACE AGAIN. A bend's
+      # slot in the order came from the median sweep, which scores it like a
+      # node because that is all a median can do -- but a bend is only a
+      # reserved column, and which side of a cluster it belongs on is a
+      # question about its edge's line, not about crossings. `settle` honours
+      # the order it is given, so a bend ordered onto the wrong side stays
+      # there however far its line is from it.
+      #
+      # One placement answers where every line actually runs; `reseat-bends`
+      # threads each bend back in where its line crosses the rank; the second
+      # placement is the picture. Kept only if it draws fewer crossings,
+      # measured on the finished geometry -- see `crossing-count`.
+      (def first-x (seat ordered))
+      (def neighbours-up (fn [name] (get up name [])))
+      # What a candidate ordering actually draws: seat it, then count the
+      # lines. Placement is the whole point -- a bend's slot only matters for
+      # where `settle` can put it -- so a cheaper test that skipped the
+      # re-seat would be measuring an arrangement nobody is going to see.
+      (defn cost [rows]
+        (crossing-count rows (seat rows) neighbours-up))
+      (def reseated (reseat-bends ordered first-x
+                                  (fn [name] (aim name first-x))
+                                  bend?
+                                  cost))
+
+      # THEN UNTANGLE THE BUNDLES. Chains ending at the same node cross each
+      # other exactly when they swap sides on the way down, and `reseat-bends`
+      # cannot fix that: it moves one bend at a time, and a chain that has to
+      # change sides on two ranks together gets no credit for doing half of
+      # it. So the chains into a shared target are ordered once, by where each
+      # enters, and held to it.
+      (def reseated-x (seat reseated))
+      (def untangled
+        (untangle-bundles reseated reseated-x
+                          # A bend's chain: the edge it belongs to, and every
+                          # bend of that edge in rank order. The name carries
+                          # its own edge, so this is a lookup rather than a
+                          # search.
+                          (fn [name]
+                            (when (dummy-layer name)
+                              (def [_ from to _] name)
+                              (when-let [chain (chains [from to])]
+                                [to chain])))
+                          bend?
+                          cost))
+      (def x (seat untangled))
 
       (def points @{})
       (each name names
