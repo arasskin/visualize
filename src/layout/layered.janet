@@ -878,15 +878,39 @@
   do arithmetic with, and take the one the function gives for a pair of real
   nodes: those are the ones a bound has to clear.``
   [ordered up down widths gap &opt bend? aim group-of inset]
-  # One number for the arithmetic that cannot ask about a specific pair. The
-  # widest gap is the safe one there: a bound computed with a narrower figure
-  # would let a node sit closer to a group's box than `settle` will allow,
-  # and the two would disagree about where the edge of the box is.
-  (def flat-gap (if (function? gap) (gap :node :node) gap))
   (default bend? (fn [_] false))
   (default aim (fn [_ _] nil))
   (default inset 0)
   (def indexes (sort (keys ordered)))
+  # One number for the arithmetic that cannot ask about a specific pair. The
+  # widest gap is the safe one there: a bound computed with a narrower figure
+  # would let a node sit closer to a group's box than `settle` will allow,
+  # and the two would disagree about where the edge of the box is.
+  #
+  # PROBED WITH A REAL NODE, not with a stand-in. Asking `(gap :node :node)`
+  # hands two keywords to a function whose whole job is deciding what KIND of
+  # thing is on either side, and it answers only because the lookup it happens
+  # to do tolerates a keyword. An earlier version did arithmetic on them and
+  # took the render down with "could not find method :+ for :bend-gap".
+  #
+  # It has to be a NODE rather than a bend: this figure is what the bounds are
+  # computed with, and a bound has to clear a node's gap, the wider of the two.
+  (def a-node
+    (do
+      (var found nil)
+      (each index indexes
+        (each name (get ordered index [])
+          (when (and (nil? found) (not (bend? name)))
+            (set found name))))
+      found))
+  (def flat-gap
+    (cond
+      (not (function? gap)) gap
+      a-node (gap a-node a-node)
+      # Every name on every rank is a bend, which cannot happen for a real
+      # graph -- a bend exists to carry an edge between two nodes. Nothing
+      # sensible to measure, so nothing is claimed.
+      0))
   (def x @{})
 
   # Start centred on zero rather than packed from the left: packing made the
