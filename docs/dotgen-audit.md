@@ -368,3 +368,77 @@ the cost was already paid upstream.
 because ranking looks wrong, but because everything downstream inherits its
 slack. It is `rank.c` -- feasible tree, cut values, leave/enter edge, balance
 -- and it is the port with a measurable target: 84 down to 68.
+
+---
+
+## Postscript: the conclusion above was tested, and it was wrong
+
+The section that ends this audit says network simplex ranking "is the one
+remaining difference that matters", and gives a chain of reasoning for it:
+relaxation leaves 24% more edge length → more slack → more bends → crowded
+ranks → no room to route → the detour. Every link in that chain is measured
+and each one is true. The conclusion still did not hold.
+
+### What was predicted
+
+Simplex was ported (`src/layout/simplex.janet`) and worked — total edge span
+85 → 82, better-balanced distribution — but the drawing got worse, so it was
+left unwired with a stated reason: dot can afford a tight ranking because it
+fits splines inside box corridors, ours could only check a straight line and
+bow it, so the two had to improve together. That reason was a prediction, and
+`docs/pathplan-scope.md` scoped the router that would test it.
+
+### What happened
+
+The router was built: `funnel.janet` (shortest path through the corridor) and
+`fit.janet` (beziers fitted inside it), about 290 lines against dot's 2,684,
+because every corridor here is a y-monotone stack of axis-aligned boxes.
+
+It works. Sixteen multi-rank edges route through it, near-misses on the
+shipping graph drop from 3 to 1, and it declines nothing.
+
+Simplex ranking is still worse — and **the router is not what fails**. Under
+simplex it fits 13 of 13 corridors and falls back on none. Every curve stays
+inside the box it was handed. The boxes are in the wrong places.
+
+### The four combinations, one graph, one router
+
+| ranking | x-placement | crosses | clips | near |
+|---|---|---|---|---|
+| relaxation | per-rank (default) | **1** | **1** | **1** |
+| relaxation | aux graph (`VISUALIZE_AUX`) | 1 | 3 | 6 |
+| simplex (`VISUALIZE_SIMPLEX`) | per-rank | 3 | 5 | 9 |
+| simplex | aux graph | 5 | 10 | 15 |
+
+Every dot pass added makes this graph worse, monotonically, and the two
+combined are worse than either alone.
+
+### What that actually means
+
+Both ports are correct and both are optimal for what they optimise. Neither
+optimises **legibility on a sparse dependency graph**, which is not the
+objective dot was tuned for — dot's passes were built for graphs that are
+denser and deeper than this one, where packing pays for itself.
+
+This is now the third measurement in the same direction. Concentrate improved
+corridor width and edge count and looked worse. Simplex improved total edge
+span by 24% and looked worse. The aux graph draws 946 wide against 1161 and
+looks worse. **Width, span and corridor count all measure packing. None of
+them measures whether a reader can follow a line**, and on a graph with this
+much whitespace available, packing is the wrong thing to buy.
+
+The honest reading of the whole audit is that parity with dot was the wrong
+goal for the passes that arrange the drawing. Where the port paid off is the
+passes that DRAW it — transpose fixed five tangles, and the router removed
+the wobble from every multi-rank edge — because those improve the picture
+without contesting the space that makes it readable.
+
+### If x-placement is tried next
+
+It is the remaining suspect, since a corridor is only as good as the column
+reserved for it and 20 of 37 were under 20px even with the looser ranking.
+But `VISUALIZE_AUX` is dot's answer to exactly that and measures worse here,
+so the thing to port is probably not the next dot pass. The measurement to
+build first is one that scores **legibility** rather than packing — until
+that exists, every one of these comparisons is decided by looking at the
+picture, which is how the last three were caught.
