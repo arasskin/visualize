@@ -69,6 +69,11 @@
   including strings and comments -- a `#` inside a comment is still a comment
   and a `~` inside a string is still a tilde.
 
+  A COMMENT IS `#`, Janet's own. An earlier version also rewrote a leading
+  `;` into `#`, because the Python tools this replaced took `;` and their
+  config files were full of it. The config is Janet now, in a file called
+  `config.janet`, and a `;` in it means what Janet means: splice.
+
   Returns the rewritten source. Offsets are NOT preserved: a rewritten line is
   longer than the one that produced it. Nothing downstream needs them, because
   errors are reported per LINE and the evaluator rewrites one line at a time.``
@@ -76,19 +81,8 @@
   (def out @"")
   (def n (length source))
   (var i 0)
-  # How deep inside brackets we are, so `;` can be told apart from splice:
-  # at top level it starts a comment, inside a form it is Janet's own.
-  (var depth 0)
   (while (< i n)
     (def c (source i))
-    (case c
-      (chr "(") (++ depth)
-      (chr "[") (++ depth)
-      (chr "{") (++ depth)
-      (chr ")") (-- depth)
-      (chr "]") (-- depth)
-      (chr "}") (-- depth))
-    (when (< depth 0) (set depth 0))
     (cond
       # A string literal: copy it whole, escapes and all, so its contents are
       # never rewritten.
@@ -114,22 +108,6 @@
       # A real comment: copy to end of line untouched.
       (= c (chr "#"))
       (do
-        (while (and (< i n) (not= (source i) (chr "\n")))
-          (buffer/push-byte out (source i))
-          (++ i)))
-
-      # A LISP COMMENT. Janet comments with `#`, but every config these tools
-      # have ever written uses `;` -- it is what the Python reader took, and
-      # the starter file and all the existing .al files are full of it. In
-      # Janet `;` is splice, so `;; note` reads as a splice of a symbol and
-      # produces gibberish rather than nothing.
-      #
-      # Only at the START of a form, never inside one: a `;` in argument
-      # position is a real splice and `(hide ;names)` should keep working.
-      (and (= c (chr ";")) (zero? depth))
-      (do
-        (buffer/push-byte out (chr "#"))
-        (++ i)
         (while (and (< i n) (not= (source i) (chr "\n")))
           (buffer/push-byte out (source i))
           (++ i)))

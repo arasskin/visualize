@@ -304,7 +304,7 @@ function draw() {
   rows.replaceChildren();
   lines.forEach((text, i) => {
     const row = document.createElement('div');
-    const commented = text.trim().startsWith(';') || text.trim().startsWith('#');
+    const commented = text.trim().startsWith('#');
     row.className = 'row' + (commented ? ' comment' : '');
 
     // Only the handle starts a drag, not the whole row -- otherwise text

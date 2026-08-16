@@ -21,17 +21,17 @@
 (import ./json)
 (import ./state)
 
-(def config-name "visualize.conf")
+(def config-name "config.janet")
 
 # Written on first run so there is something to edit rather than a blank pane.
 # Comments survive a round-trip through the editor, so they are worth having.
 (def starter
-  ``;; (group prefix & color), (hide prefix), (show-only prefix)
-;; (fill-color), (show-lines), (show-lines-coloring)
-;; `~` is this project: ~.Sub is the Sub directory. Any other name is literal,
-;; so (group SwiftUI) groups the framework. Comment out with ';'.
-;; colors: red green orange purple blue yellow orange-red teal magenta
-;;         yellow-green pink dark-blue grey
+  ``# (group prefix & color), (hide prefix), (show-only prefix)
+# (fill-color), (show-lines), (show-lines-coloring)
+# `~` is this project: ~.Sub is the Sub directory. Any other name is literal,
+# so (group SwiftUI) groups the framework. Comment out with '#'.
+# colors: red green orange purple blue yellow orange-red teal magenta
+#         yellow-green pink dark-blue grey
 (show-only ~)
 (show-lines)
 ``)

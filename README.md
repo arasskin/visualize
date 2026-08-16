@@ -48,23 +48,23 @@ HTML, CSS and JavaScript. `bin/janet` is a build artifact and is gitignored.
 
 ## The config language
 
-The file is `visualize.conf`, written into whatever directory you point at.
+The file is `config.janet`, written into whatever directory you point at.
 It is created on first run, so there is something to edit rather than a blank
 pane.
 
 ```lisp
-(show-only ~)              ; narrow to our own files — the everyday setting
-(hide ~.Tests)             ; drop it, and every edge touching it
-;;(hide ~.Tests)           ; comment it out to put it back
-(hide ~.Clip.)             ; trailing dot: its contents, not itself
-(group ~.Clip)             ; box its members, next palette colour
-(group ~.Shared #a54a4a)   ; ...or a colour you name
-(fill-color)               ; fill nodes instead of outlining them
-(show-lines)               ; write each file's line count on it
-(show-lines-coloring)      ; ...and shade by size instead of by edges
-(font "Helvetica")         ; draw it in something else
-(harness claude)           ; what the terminal window runs -- or (harness pi)
-(layout force)             ; relatedness instead of direction -- or (layout layered)
+(show-only ~)              # narrow to our own files — the everyday setting
+(hide ~.Tests)             # drop it, and every edge touching it
+#(hide ~.Tests)            # comment it out to put it back
+(hide ~.Clip.)             # trailing dot: its contents, not itself
+(group ~.Clip)             # box its members, next palette colour
+(group ~.Shared #a54a4a)   # ...or a colour you name
+(fill-color)               # fill nodes instead of outlining them
+(show-lines)               # write each file's line count on it
+(show-lines-coloring)      # ...and shade by size instead of by edges
+(font "Helvetica")         # draw it in something else
+(harness claude)           # what the terminal window runs -- or (harness pi)
+(layout force)             # relatedness instead of direction -- or (layout layered)
 ```
 
 `~` **is the project**, the way a shell expands `~` to a home directory:

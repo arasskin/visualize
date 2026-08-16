@@ -23,9 +23,16 @@
   (t/is= `(hide "~.literal")` (tilde/prepare `(hide "~.literal")`)
          "a tilde already inside a string is not rewritten twice")
   (t/is= "# a note with #hash" (tilde/prepare "# a note with #hash"))
-  (t/is= "#; note about ~ and #abc" (tilde/prepare ";; note about ~ and #abc")
-         "a ; comment becomes a # comment rather than a splice")
-  (t/is= `(hide "~.A") #; trailing` (tilde/prepare "(hide ~.A) ;; trailing")))
+  (t/is= "# a note about ~ and #abc" (tilde/prepare "# a note about ~ and #abc")
+         "a comment is passed through whatever is inside it")
+  (t/is= `(hide "~.A") # trailing` (tilde/prepare "(hide ~.A) # trailing")))
+
+(t/test "a semicolon is Janet's own splice, not a comment"
+  # The Python tools this replaced took `;` for a comment, and the rewriter
+  # used to turn a leading one into `#`. The config is Janet now, in a file
+  # called config.janet, so `;` means what Janet means by it.
+  (t/is= "(hide ;names)" (tilde/prepare "(hide ;names)")
+         "a splice in argument position is left exactly as written"))
 
 (t/test "hide and show-only collect prefixes"
   (def state (state-of "(hide ~.Tests)" "(hide WebKit)" "(show-only ~)"))
@@ -90,7 +97,7 @@
   (t/is= ["~.B"] (state :hidden)))
 
 (t/test "a blank line and a comment do nothing at all"
-  (def [state problems] (run "" "   " ";; just a note" "# also a note"))
+  (def [state problems] (run "" "   " "# just a note" "# also a note"))
   (t/is= @{} problems)
   (t/is= [] (state :hidden)))
 

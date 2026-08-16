@@ -5,7 +5,7 @@
 #     janet src/core.janet [directory]
 #
 # Opens a browser on the first free port at or above 8770. How the graph is
-# drawn lives in `visualize.conf` in the directory being scanned -- a few
+# drawn lives in `config.janet` in the directory being scanned -- a few
 # s-expressions, edited through the page itself:
 #
 #     (hide ~.Tests)          drop it, and every edge touching it
