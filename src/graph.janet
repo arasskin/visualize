@@ -22,6 +22,11 @@
 
 (def config-name "config.janet")
 
+# What the panel calls itself. The FILE is config.janet -- Janet is what the
+# config language is -- but the panel is the only config there is, so the
+# extension on its title bar is noise the reader has to skip.
+(def config-title "config")
+
 # Written on first run so there is something to edit rather than a blank pane.
 # Comments survive a round-trip through the editor, so they are worth having.
 (def starter
@@ -160,7 +165,7 @@
   (def template (slurp (string web-dir "/index.html")))
   (var out (->> template
                 (string/replace "{{TITLE}}" title)
-                (string/replace "{{CONFIG_NAME}}" config-name)
+                (string/replace "{{CONFIG_NAME}}" config-title)
                 (string/replace "{{CONFIG_LINES}}" (json/encode lines))
                 (string/replace "{{CONFIG_PROBLEMS}}" (json/encode problems))))
   (eachp [key value] fill

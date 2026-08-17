@@ -1,4 +1,38 @@
+/* Vanilla CSS, no build step, no framework. Edit it and reload.
+ *
+ * Everything themeable is a custom property at the top. The rest of the file
+ * refers to those and to nothing else, so a new theme is a new :root block
+ * rather than a hunt through the rules. */
 
+:root {
+  color-scheme: light dark;
+
+  /* -- the theme -------------------------------------------------------- */
+  --font-ui: -apple-system, system-ui, sans-serif;
+  /* The config editor's face, and the GRAPH's. Deliberately informal: this is
+     a scratchpad you poke at, not a settings dialog. graphviz names the font
+     in the SVG but cannot embed it, so the page is what actually resolves it
+     -- see the #graph svg rule below, without which every label falls back to
+     the browser's default and the drawing stops looking like itself. */
+  --font-config: "Comic Sans MS", "Chalkboard SE", cursive;
+
+  /* Node ink and group colours are baked into the SVG by src/layout.janet,
+     which computes them from the palette and cannot know the page's theme --
+     so a dark canvas restates them instead. See the dark block below. */
+  --canvas: #fbfbfa;
+  --ink: #222;
+
+  --line: #8883;
+  --line-strong: #8886;
+  --wash: #8881;
+  --wash-strong: #8883;
+
+  --bad: #b3403a;
+  --bad-line: #b3403a55;
+  --bad-wash: #b3403a14;
+
+  /* The colour a hovered dependency lights up in. */
+  --lit: #c04040;
 
   --shadow: 0 6px 18px #0004;
 }
@@ -66,6 +100,15 @@ button:disabled { opacity: .5; cursor: progress; }
 #graph svg {
   display: block; transform-origin: 0 0; will-change: transform;
   max-width: none;
+  /* GRAPHVIZ NAMES THE FONT, THE PAGE RESOLVES IT. dot writes
+     font-family="Comic Sans MS" on every label because src/layout.janet tells
+     it to -- and it sizes each ellipse from that font's metrics -- but an SVG
+     carries no font, so whether the label is DRAWN in it is the browser's
+     business. Without this the drawing fell back to a default face whose
+     glyphs are wider than the ones the ellipses were sized for, which reads
+     as labels crowding their outlines. Restated here rather than left to the
+     attribute so the whole page has one answer about its face. */
+  font-family: var(--font-config);
 }
 /* -- hovering a dependency ------------------------------------------------
    Every edge carries a <title>, so the browser shows a native tooltip
@@ -119,7 +162,7 @@ button:disabled { opacity: .5; cursor: progress; }
    different contents. */
 .panel {
   position: absolute; z-index: 5; display: flex; flex-direction: column;
-  border: 1px solid var(--line-strong); background: Canvas;
+  border: 1px solid var(--line-strong); background: var(--canvas);
   font: 13px/1.5 var(--font-config);
   touch-action: none;  /* dragging the bar must not also pan the graph */
   --gutter: .5rem;     /* one gutter for the bar and the rows below it, so a
@@ -147,11 +190,11 @@ button:disabled { opacity: .5; cursor: progress; }
 .bar {
   display: flex; align-items: center; gap: .3rem; flex: none;
   padding: .4rem var(--gutter); cursor: grab; user-select: none;
-  background: Canvas;
+  background: var(--canvas);
   border: 1px solid var(--line-strong);
   /* Sits ON the body's top edge and erases the line between them, the way a
      tab merges into its folder rather than being a box stacked on one. */
-  border-bottom-color: Canvas;
+  border-bottom-color: var(--canvas);
   margin-bottom: -1px; position: relative; z-index: 1;
 }
 .panel.shut .bar { border-bottom: 1px solid var(--line-strong); margin-bottom: 0; }
@@ -164,7 +207,7 @@ button:disabled { opacity: .5; cursor: progress; }
 .panel-body {
   flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
   padding: .4rem var(--gutter);
-  background: Canvas;
+  background: var(--canvas);
   border: 1px solid var(--line-strong);
 }
 
@@ -199,7 +242,7 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 /* The row being carried: a real copy of it, following the pointer. */
 .slot.ghost {
   position: fixed; z-index: 50; pointer-events: none; margin: 0;
-  background: Canvas; border: 1px solid var(--line-strong);
+  background: var(--canvas); border: 1px solid var(--line-strong);
   box-shadow: var(--shadow); opacity: .95;
   transform: rotate(-.5deg) scale(1.02);
 }
