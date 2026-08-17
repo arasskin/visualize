@@ -72,71 +72,17 @@
   (set at (+ found 16))
   (set found (string/find `<g class="edge">` svg at)))
 
-# Sample each path and count points that land inside an unrelated ellipse.
-(defn points-of [d]
-  (def nums @[])
-  (each piece (string/split " " d)
-    (each part (string/split "," (string/slice piece (if (peg/match ~(range "AZ") piece) 1 0)))
-      (when-let [n (scan-number part)] (array/push nums n))))
-  (partition 2 nums))
-
-(var hits 0)
-(var grazes 0)
-(var nears 0)
-(var checked 0)
-# Named, not just counted: "1 cross a node" starts an investigation that
-# opening the picture and squinting used to finish. The title says which.
-(def offenders @[])
-(defn own-ellipses [pts]
-  # The ellipses this edge is entitled to touch: the ones its ends sit on.
-  (def ends [(first pts) (last pts)])
-  (def mine @{})
-  (each e ellipses
-    (each end ends
-      (def dx (/ (- (end 0) (e :x)) (max 0.001 (e :rx))))
-      (def dy (/ (- (end 1) (e :y)) (max 0.001 (e :ry))))
-      # On or just outside the outline is where an arrow lands.
-      (when (< (+ (* dx dx) (* dy dy)) 1.6) (put mine e true))))
-  mine)
-
-(each p paths
-  (def pts (points-of (p :d)))
-  (when (>= (length pts) 2)
-    (def mine (own-ellipses pts))
-    (++ checked)
-    (var bad false)
-    (var grazed false)
-    (var near false)
-    # Walk the polyline through its control points -- close enough to the
-    # curve for counting, and it never reports a hit the curve avoids.
-    (for i 0 (- (length pts) 1)
-      (def a (pts i)) (def b (pts (+ i 1)))
-      (for k 0 21
-        (def t (/ k 20))
-        (def px (+ (a 0) (* t (- (b 0) (a 0)))))
-        (def py (+ (a 1) (* t (- (b 1) (a 1)))))
-        (each e ellipses
-          (unless (mine e)
-          (def dx (/ (- px (e :x)) (max 0.001 (e :rx))))
-          (def dy (/ (- py (e :y)) (max 0.001 (e :ry))))
-          # Well inside, so touching an endpoint's own ellipse is not a hit.
-          (def d2 (+ (* dx dx) (* dy dy)))
-          (when (< d2 0.55) (set bad true))
-          (when (< d2 1.0) (set grazed true))
-          (when (< d2 1.44) (set near true))))))
-    (when bad (++ hits) (array/push offenders (p :title)))
-    (when grazed (++ grazes))
-    (when near (++ nears))))
-# -- crossings, between the curves as drawn --------------------------------
-#
-# The control-point polyline above is fine for "did it enter this ellipse"
-# but wrong for crossings: a bezier's control polygon crosses things the
-# curve does not. So each path is flattened properly -- M/L/Q/C/S walked
-# with the real curve arithmetic, sampled densely -- and crossings are
-# segment intersections between the flattened curves of two edges that
-# share no endpoint node. Edges meeting at a node always touch there and a
-# reader does not count that as a crossing; nor does this.
-
+# THE REAL CURVES, NOT THE CONTROL POLYGON. The first version of the
+# overlap walk read every number out of the `d` as a vertex and walked the
+# polyline through them, with a comment claiming that was conservative --
+# "it never reports a hit the curve avoids". For a bezier that is false in
+# both directions: the polygon through a Q's control point dips where the
+# curve does not, and this tool ACCUSED `src/layout -> src/graph` of
+# crossing a node its drawn curve only grazed at 95% of the radius. A
+# scorer that indicts the wrong edge sends whoever reads it to fix the
+# wrong code, which is worse than no scorer. So every path is flattened by
+# walking M/L/Q/C/S with the actual curve arithmetic, and both the overlap
+# counts and the crossing counts below read from that.
 (defn- flatten-d
   "The path as a dense polyline of [x y], following the actual curves."
   [d]
@@ -185,6 +131,57 @@
               (set cx ex) (set cy ey))))
         (++ i))))
   out)
+
+(var hits 0)
+(var grazes 0)
+(var nears 0)
+(var checked 0)
+# Named, not just counted: "1 cross a node" starts an investigation that
+# opening the picture and squinting used to finish. The title says which.
+(def offenders @[])
+(defn own-ellipses [pts]
+  # The ellipses this edge is entitled to touch: the ones its ends sit on.
+  (def ends [(first pts) (last pts)])
+  (def mine @{})
+  (each e ellipses
+    (each end ends
+      (def dx (/ (- (end 0) (e :x)) (max 0.001 (e :rx))))
+      (def dy (/ (- (end 1) (e :y)) (max 0.001 (e :ry))))
+      # On or just outside the outline is where an arrow lands.
+      (when (< (+ (* dx dx) (* dy dy)) 1.6) (put mine e true))))
+  mine)
+
+(each p paths
+  (def pts (flatten-d (p :d)))
+  (when (>= (length pts) 2)
+    (def mine (own-ellipses pts))
+    (++ checked)
+    (var bad false)
+    (var grazed false)
+    (var near false)
+    (for i 0 (- (length pts) 1)
+      (def a (pts i)) (def b (pts (+ i 1)))
+      (for k 0 21
+        (def t (/ k 20))
+        (def px (+ (a 0) (* t (- (b 0) (a 0)))))
+        (def py (+ (a 1) (* t (- (b 1) (a 1)))))
+        (each e ellipses
+          (unless (mine e)
+          (def dx (/ (- px (e :x)) (max 0.001 (e :rx))))
+          (def dy (/ (- py (e :y)) (max 0.001 (e :ry))))
+          # Well inside, so touching an endpoint's own ellipse is not a hit.
+          (def d2 (+ (* dx dx) (* dy dy)))
+          (when (< d2 0.55) (set bad true))
+          (when (< d2 1.0) (set grazed true))
+          (when (< d2 1.44) (set near true))))))
+    (when bad (++ hits) (array/push offenders (p :title)))
+    (when grazed (++ grazes))
+    (when near (++ nears))))
+# -- crossings, between the curves as drawn --------------------------------
+#
+# Segment intersections between the flattened curves of two edges that
+# share no endpoint node. Edges meeting at a node always touch there and a
+# reader does not count that as a crossing; nor does this.
 
 (defn- ends-of
   "The two node names an edge's title joins, [from to]."

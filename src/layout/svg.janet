@@ -398,7 +398,33 @@
                          (zero? (hit up)) (set found up)
                          (zero? (hit down)) (set found down))))
                    found)
-            c (or best (if (<= (hit one) (hit other)) one other))]
+            # NOTHING CLEARS: least NODE-penetration wins, straight line
+            # included. "Blocked" and "through a node" are different
+            # verdicts -- the straight line is refused for crossing another
+            # edge's line or a group box as readily as for a node, and the
+            # old fallback (shallower of the two gentlest bows) threw that
+            # distinction away: `color -> config` had a straight line that
+            # entered NO node, and drew a bow through `layout/layered`
+            # instead, because the straight line's reason for rejection was
+            # never consulted. A crossing in open space is a blemish; a
+            # line through a node is a lie about the graph. So every
+            # candidate -- the straight line (a Q with its control on the
+            # chord) and both sides at every depth -- is scored by how
+            # deeply it enters nodes, and the least wins. Order breaks
+            # ties: straight first, then shallow before deep, so the edge
+            # never bends more than the least-bad answer requires.
+            c (or best
+                  (do
+                    (def candidates @[[mx my]])
+                    (each scale [1 1.8 2.8 4]
+                      (array/push candidates [(+ mx (* nx scale)) (+ my (* ny scale))])
+                      (array/push candidates [(- mx (* nx scale)) (- my (* ny scale))]))
+                    (var pick (first candidates))
+                    (var least math/inf)
+                    (each cand candidates
+                      (def h (hit cand))
+                      (when (< h least) (set least h) (set pick cand)))
+                    pick))]
         (string/format "M%.1f,%.1f Q%.1f,%.1f %.1f,%.1f"
                        x1 y1 (c 0) (c 1) x2 y2))
       # Blocked, and the layout reserved a route: follow it -- as a CURVE.

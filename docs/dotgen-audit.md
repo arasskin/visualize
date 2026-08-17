@@ -279,16 +279,35 @@ document rests on.
 
 ---
 
-## 5. Where it stands, and the open defects
+## 5. Where it stands
 
-At this tree (48 edges), default path: **2 cross a node, 2 clip, 4 near, 8
-edge-pair crossings, 1152×796** — with the group shapes right, which the
-strip showed is the thing the counts cannot see. The two crossers are
-named by the scorer: `src_color → src_config` and `src_layout →
-src_graph`, both left-side edges through crowded ranks; neither existed
-before the tie-break fix widened the term box's rank, and they are the
-current trade for the recovered shape. They are the next thing to look
-at — by rendering, not by objective.
+At this tree (48 edges), default path: **0 cross a node, 0 clip, 4 near,
+9 edge-pair crossings, 1152×796** — with the group shapes right, which
+the strip showed is the thing the counts cannot see.
+
+The audit first shipped with two named crossers, and resolving them split
+cleanly along the line this document keeps drawing:
+
+- `src_color → src_config` was **real**, and the defect was a conflation:
+  the bow fallback for a blocked one-rank edge compared only its two
+  gentlest arcs, never noticing that the straight line it had rejected
+  entered *no node at all* — it was refused for crossing another edge's
+  line, a different and lesser sin. The fallback now scores every
+  candidate, straight line included, by node-penetration alone, and the
+  least wins. A crossing in open space is a blemish; a line through a
+  node is a lie about the graph.
+
+- `src_layout → src_graph` was a **phantom**: the scorer's overlap walk
+  read a bezier's control polygon as the curve, and the polygon dips
+  where the curve does not. The drawn edge grazed `dev` at 95% of its
+  radius — touching, legal — and was indicted for crossing it. The scorer
+  now flattens the real curves for every count. (Overlap columns in the
+  §1 strip predate that fix and can over-report on curved edges; the
+  strip's verdict rests on box ranks and crossings, which were always
+  honest.)
+
+A scorer that indicts the wrong edge sends whoever reads it to fix the
+wrong code. Half of this fix was fixing the instrument.
 
 The two flagged ports stay flagged. The audit's productive direction is
 unchanged from §1: improvements to how edges are **drawn** keep paying;
