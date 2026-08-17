@@ -606,40 +606,36 @@
                              :y0 (- (p :y) (s :h)) :y1 (+ (p :y) (s :h))})))))
     out)
 
-  (defn set-route
-    ``The interval-set tier: free space by subtraction, passage chosen
-    jointly, run ONLY on edges the side model leaves dirty.
+  (defn slab-route
+    ``The slab tier: free space as horizontal bands, segments bounded
+    everywhere, run only on edges the side model leaves dirty.
 
-    No sides, no coins: the free space at each station height is the
-    full line minus every obstacle's padded span -- an interval SET,
-    which is what "between these two" needs and a side can never say. A
-    cheap dynamic program then chooses one interval per gate to minimise
-    total sideways travel from start to goal, deciding every side and
-    every between at once; the funnel and fitter receive the resolved
-    single-interval gates and know nothing of any of it.
+    THE Y-GATE FAMILY'S SHARED BLINDNESS was that every variant -- side
+    clips, enumerated sides, interval sets -- constrained where a path
+    crosses chosen heights and said nothing about the segments BETWEEN
+    them; the residual edges crossed nodes exactly there. Slabs are
+    dot's model, and they bound segments: the edge's whole y-span is cut
+    into bands at every obstacle edge and lane-gate height, each band
+    knows its free intervals, and a path that picks an interval per band
+    is inside free space at EVERY height, because the bands tile.
 
-    A FALLBACK TIER BY DESIGN, not the router. This model was first
-    integrated as a wholesale replacement and reverted the same day: it
-    re-decided routes that were already clean and had to reproduce every
-    behaviour the side model got right before fixing the one it got
-    wrong. As a tier it earns acceptance one edge at a time, and only by
-    coming back clean. The obstacle discovery below deliberately mirrors
-    with-overhangs rather than sharing its code: the tier exists to give
-    a second, independent opinion, and independence is the point --
-    unify them when the tier has earned trust, not before.
+    One interval per band is chosen by a dynamic program whose
+    transitions demand OVERLAP -- a portal -- between consecutive
+    choices, intersected with the lane gate where a band boundary
+    carries one. The chosen portals are handed to the ordinary funnel as
+    gates, and the fitter's channel check is conservative by
+    construction: the lerp between two portals stays inside the band
+    both portals border. Funnel and fitter unchanged, blindness gone.
 
-    LEDGER, 2026-08-17, the day it was built: on this tool's own graph
-    the tier never fires -- both residual edges under VISUALIZE_SIMPLEX
-    decline it too, with the lane and without. Their blocker is not the
-    interval model but the FAMILY's shared blindness: every y-gate
-    variant constrains where a path crosses chosen heights and says
-    nothing about the segments BETWEEN them, and those edges cross nodes
-    between stations. The next idea has to bound segments, not heights
-    -- dot's slab boxes do exactly that, which is the argument for a
-    slab tier ported whole rather than a fourth gate variant. Until a
-    graph arrives where a residue IS expressible in intervals, this tier
-    is insurance: correct, tested by the modes staying at their
-    baselines to the digit, and dormant.``
+    A FALLBACK TIER, accepted only when clean, run once with the lane
+    folded in and once without -- the lane is advice about where the
+    bundle would like this edge, and not crossing a node is law. The
+    obstacle discovery deliberately mirrors with-overhangs rather than
+    sharing code: the tier is a second, independent opinion, and
+    independence is the point. (Its predecessor here was the interval-
+    set tier, same discipline, dominated by this one and removed: sets
+    fixed "between these two" at a height and stayed blind between
+    heights; slabs fix both.)``
     [start goal gates extra]
     (def [sx sy] start)
     (def [gx gy] goal)
@@ -682,77 +678,99 @@
             (do (when (< l a) (array/push out [l a]))
                 (when (< b r) (array/push out [b r])))))
         out)
-      (defn free-at [y]
-        (var spans @[[-2000 2000]])
-        (each o rects
-          (when (and (<= (o :y0) y) (<= y (o :y1)))
-            (set spans (subtract-span spans
-                                      (- (o :x0) pad)
-                                      (+ (o :x1) pad)))))
-        # A sliver is not a passage: the resolver prices only sideways
-        # travel and would thread a crack the fit then bulldozes through
-        # both walls of.
-        (filter (fn [[l r]] (>= (- r l) 14)) spans))
-      (defn intersect-sets [as bs]
-        (def out @[])
-        (each [al ar] as
-          (each [bl br] bs
-            (def il (max al bl))
-            (def ir (min ar br))
-            (when (< il ir) (array/push out [il ir]))))
-        out)
-      (def stations @[])
+      # Band boundaries: every obstacle edge and every lane-gate height
+      # inside the span. Bands between them have constant free space.
+      (def evs @[])
       (each o rects
-        (def y0c (max (o :y0) (+ sy 0.5)))
-        (def y1c (min (o :y1) (- gy 0.5)))
-        (each [y on-edge?] [[(- y0c 1) false] [y0c true]
-                            [y1c true] [(+ y1c 1) false]]
-          (when (and (> y sy) (< y gy) (<= y0c y1c))
-            (def spans (free-at y))
-            (def carried
-              (when on-edge?
-                (when-let [ch (funnel/channel gates y)]
-                  (def inter (intersect-sets spans [ch]))
-                  (when (not (empty? inter)) inter))))
-            (def use (or carried spans))
-            (when (not (empty? use))
-              (array/push stations [use y])))))
-      (def entries (array ;(map (fn [[l r y]] [@[[l r]] y 0]) gates)
-                          ;(map (fn [[sp y]] [sp y 1]) stations)))
-      (def merged @[])
-      (each [spans y kind]
-        (sorted entries (fn [a b] (if (= (a 1) (b 1))
-                                    (< (a 2) (b 2))
-                                    (< (a 1) (b 1)))))
-        (if (and (not (empty? merged)) (= ((last merged) 1) y))
-          (let [[ps _] (last merged)
-                inter (intersect-sets ps spans)]
-            (when (not (empty? inter))
-              (put merged (- (length merged) 1) [inter y])))
-          (array/push merged [spans y])))
-      # One interval per gate, chosen jointly: cheapest total sideways
-      # travel from start to goal, each state one interval of the
-      # current gate, the trail remembering the choices.
-      (var prev @[[0 sx @[]]])
-      (each [spans y] merged
-        (def nxt @[])
-        (each [l r] spans
-          (var best nil)
-          (each [c px trail] prev
-            (def nx (min r (max l px)))
-            (def nc (+ c (math/abs (- nx px))))
-            (when (or (nil? best) (< nc (best 0)))
-              (set best [nc nx (array ;trail [l r y])])))
-          (when best (array/push nxt best)))
-        (when (not (empty? nxt)) (set prev nxt)))
-      (var final nil)
-      (each [c px trail] prev
-        (def nc (+ c (math/abs (- gx px))))
-        (when (or (nil? final) (< nc (final 0)))
-          (set final [nc px trail])))
-      (when (and final (not (empty? (final 2))))
-        (when-let [p (funnel/path start goal (final 2))]
-          (fit/rounded p (final 2) bend-radius)))))
+        (each y [(o :y0) (o :y1)]
+          (when (and (> y sy) (< y gy)) (array/push evs y))))
+      (each [l r y] gates
+        (when (and (> y sy) (< y gy)) (array/push evs y)))
+      (def cuts (sorted (distinct (array sy ;evs gy))))
+      (def bands @[])
+      (for i 0 (- (length cuts) 1)
+        (def y0 (cuts i))
+        (def y1 (cuts (+ i 1)))
+        (when (> (- y1 y0) 0.01)
+          (def mid (/ (+ y0 y1) 2))
+          (var spans @[[-2000 2000]])
+          (each o rects
+            (when (and (<= (o :y0) mid) (<= mid (o :y1)))
+              (set spans (subtract-span spans
+                                        (- (o :x0) pad)
+                                        (+ (o :x1) pad)))))
+          # A sliver is not a passage.
+          (array/push bands
+                      [y0 y1 (filter (fn [[l r]] (>= (- r l) 14)) spans)])))
+      (def gate-at @{})
+      (each [l r y] gates (put gate-at y [l r]))
+      (when (not (empty? bands))
+        # One interval per band, chosen jointly: transitions demand a
+        # portal, cost is sideways travel, the trail keeps the portals.
+        (var prev @[])
+        (def [_ _ fspans] (first bands))
+        (each [l r] fspans
+          (when (and (<= l sx) (<= sx r))
+            (array/push prev [0 sx [l r] @[]])))
+        (def tracing (= (os/getenv "VISUALIZE_ROUTE_TRACE")
+                        (string from "->" to)))
+        (when (and tracing (empty? prev))
+          (eprintf "  slab: start x=%d in no first-band interval %j"
+                   (math/round sx) (get (first bands) 2)))
+        (var ok (not (empty? prev)))
+        (for k 1 (length bands)
+          (when ok
+            (def [by0 _ bspans] (bands k))
+            (def gate (gate-at by0))
+            (def nxt @[])
+            (each [l r] bspans
+              (var best nil)
+              (each [c px prev-span trail] prev
+                (def [pl pr] prev-span)
+                (var il (max l pl))
+                (var ir (min r pr))
+                (when gate
+                  (set il (max il (gate 0)))
+                  (set ir (min ir (gate 1))))
+                (when (>= (- ir il) 6)
+                  (def nx (min ir (max il px)))
+                  (def nc (+ c (math/abs (- nx px))))
+                  (when (or (nil? best) (< nc (best 0)))
+                    (set best [nc nx [l r] (array ;trail [il ir by0])]))))
+              (when best (array/push nxt best)))
+            (if (empty? nxt)
+              (do
+                (when tracing
+                  (eprintf "  slab: dead at band y=%d spans=%j gate=%j"
+                           (math/round by0) bspans gate))
+                (set ok false))
+              (set prev nxt))))
+        (when ok
+          (var final nil)
+          (each [c px last-span trail] prev
+            (def [l r] last-span)
+            (when (and (<= l gx) (<= gx r))
+              (def nc (+ c (math/abs (- gx px))))
+              (when (or (nil? final) (< nc (final 0)))
+                (set final [nc trail]))))
+          (when (and tracing (nil? final))
+            (eprintf "  slab: goal x=%d in no last-band interval %j"
+                     (math/round gx)
+                     (map (fn [[_ _ sp _]] sp) prev)))
+          (when final
+            (def out-gates (final 1))
+            (def p (funnel/path start goal out-gates))
+            (when (and tracing (nil? p))
+              (eprintf "  slab: funnel refused %d portals" (length out-gates)))
+            (def segs (when p (fit/rounded p out-gates bend-radius)))
+            (when (and tracing p (nil? segs))
+              (eprintf "  slab: fit refused"))
+            (when (and tracing segs)
+              (eprintf "  slab: routed, %d segments through %d portals: %j"
+                       (length segs) (length out-gates)
+                       (map (fn [[l r y]] [(math/round l) (math/round r) (math/round y)])
+                            out-gates)))
+            segs)))))
 
   (defn route-dodging
     ``Route start to goal through `gates`, iterating obstacle discovery.
@@ -875,32 +893,44 @@
           (eprintf "dodge: %s->%s pass-between cleaned it (%d assignments tried)"
                    (string from) (string to) (blshift 1 n)))
         (set accepted best)))
-    # THE SET TIER, last. Everything above works in single intervals and
-    # sides; where all of it leaves the route dirty, the edge is re-run
-    # under interval sets, and the tier's answer is taken only if it
-    # comes back CLEAN -- a dirty answer from the stronger model does not
-    # displace a dirty answer from the weaker one, it just costs more.
-    (when (nil? accepted)
-      (when-let [segs (set-route start goal gates extra)]
-        (when (empty? (invaded-by start segs))
-          (when (os/getenv "VISUALIZE_ROUTE_DEBUG")
-            (eprintf "dodge: %s->%s interval-set tier cleaned it"
-                     (string from) (string to)))
-          (set accepted segs))))
-    # AND WITHOUT THE LANE, very last. The lane is advice about where the
-    # bundle would like this edge; not crossing a node is law. When even
-    # the set tier cannot satisfy both, the lane is dropped and the edge
-    # routed on obstacles alone -- under the packed ranking,
-    # `stamp -> core`'s lane sits at x=600 while both its endpoints stand
-    # at x=96, and no router loyal to that lane can also stay out of what
-    # stands between.
-    (when (nil? accepted)
-      (when-let [segs (set-route start goal [] extra)]
-        (when (empty? (invaded-by start segs))
-          (when (os/getenv "VISUALIZE_ROUTE_DEBUG")
-            (eprintf "dodge: %s->%s laneless set tier cleaned it"
-                     (string from) (string to)))
-          (set accepted segs))))
+    # THE SLAB TIER, last. Everything above works at chosen heights;
+    # where all of it leaves the route dirty, the edge is re-run under
+    # slabs, which bound the segments between heights too. Once with the
+    # lane folded into the portals, once without -- the lane is advice
+    # about where the bundle would like this edge, and not crossing a
+    # node is law. The tier's answer is taken only if it comes back
+    # CLEAN: a dirty answer from the stronger model does not displace a
+    # dirty answer from the weaker one, it just costs more.
+    # Each slab rung iterates like the main loop: the tier's route can
+    # wander far from the raw path the proximity vote was taken along --
+    # the laneless rung sent `stamp -> core` down the picture's left edge,
+    # where nothing had ever been collected as an obstacle -- so invaders
+    # found in its result are added and the rung re-run until clean or
+    # out of tries.
+    (defn slab-tier [tier-gates label]
+      (when (nil? accepted)
+        (def slab-extra (array ;extra))
+        (defn keep [v]
+          (unless (some (fn [e] (and (= (e :x0) (v :x0)) (= (e :y0) (v :y0))))
+                        slab-extra)
+            (array/push slab-extra v)))
+        (var stries 0)
+        (while (and (nil? accepted) (< stries 3))
+          (++ stries)
+          (def segs (slab-route start goal tier-gates slab-extra))
+          (if (nil? segs)
+            (set stries 3)
+            (do
+              (def inv (invaded-by start segs))
+              (if (empty? inv)
+                (do
+                  (when (os/getenv "VISUALIZE_ROUTE_DEBUG")
+                    (eprintf "dodge: %s->%s %s cleaned it (try %d)"
+                             (string from) (string to) label stries))
+                  (set accepted segs))
+                (each v inv (keep v))))))))
+    (slab-tier gates "slab tier")
+    (slab-tier [] "laneless slab tier")
     (or accepted candidate))
 
   (defn emit-run [start segs]
