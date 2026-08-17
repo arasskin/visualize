@@ -1804,16 +1804,55 @@
       # measured on the finished geometry -- see `crossing-count`.
       (def first-x (seat ordered))
       (def neighbours-up (fn [name] (get up name [])))
+      # VISUALIZE_ORDER_DEBUG dumps each rank's row at every stage that can
+      # move a bend's slot, with bends as *from>to. Which pass stranded a
+      # bend used to take an afternoon of elimination; this answers it in
+      # one render.
+      (defn dump-rows [stage rows]
+        (when (os/getenv "VISUALIZE_ORDER_DEBUG")
+          (eprintf "-- %s --" stage)
+          (each index (sorted (keys rows))
+            (eprin "  r" index ": ")
+            (each name (rows index)
+              (if (bend? name)
+                (let [[_ f t _] name]
+                  (eprin "*" (string/slice (string f) 4) ">"
+                         (string/slice (string t) 4) " "))
+                (eprin (string/slice (string name) 4) " ")))
+            (eprin "\n"))))
+      (dump-rows "ordered" ordered)
       # What a candidate ordering actually draws: seat it, then count the
       # lines. Placement is the whole point -- a bend's slot only matters for
       # where `settle` can put it -- so a cheaper test that skipped the
       # re-seat would be measuring an arrangement nobody is going to see.
+      # TWO FAILED IDEAS ARE BURIED HERE, for whoever tries the third.
+      #
+      # Under VISUALIZE_SIMPLEX, `stamp -> core` runs from x=0 through
+      # bends at x=800: the chain's slots are STRANDED, and the stage dump
+      # (VISUALIZE_ORDER_DEBUG) shows they arrive stranded from the
+      # crossing sweeps themselves -- reseat and untangle faithfully keep
+      # an arrangement that is already wrong. The chain is BISTABLE:
+      # all-left and all-right are both stable under the adjacent swaps
+      # every pass here uses, and the sweeps happened to land right.
+      #
+      # Attempt one re-threaded the bends against the final coordinates
+      # and re-solved; the crossing count vetoed every improvement,
+      # because it genuinely scores the stranded chain no worse. Attempt
+      # two priced stray into this cost -- bend distance from its own
+      # line, per rank-gap -- and at every weight tried it either changed
+      # nothing or handed the CLEAN default a node crossing by winning
+      # ties it had no business in. The mechanism both attempts lacked is
+      # a MOVE, not a price: something that relocates an entire chain to
+      # the other side of what it straddles and compares the two whole
+      # pictures. Adjacent swaps cannot walk there; a cost term cannot
+      # steer them there. A chain-sift would.
       (defn cost [rows]
         (crossing-count rows (seat rows) neighbours-up))
       (def reseated (reseat-bends ordered first-x
                                   (fn [name] (aim name first-x))
                                   bend?
                                   cost))
+      (dump-rows "reseated" reseated)
 
       # THEN UNTANGLE THE BUNDLES. Chains ending at the same node cross each
       # other exactly when they swap sides on the way down, and `reseat-bends`
@@ -1835,6 +1874,7 @@
                                 [to chain])))
                           bend?
                           cost))
+      (dump-rows "untangled" untangled)
       # X, EITHER WAY -- AND THE AUX GRAPH IS NOW THE DEFAULT. It is dot's
       # formulation: separation and straightness as one weighted
       # optimisation rather than two passes that cannot see each other,
