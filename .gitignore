@@ -7,6 +7,6 @@ bin/
 # visualize is pointed at its own repo.
 config.janet
 
-# Per-project state: the scan cache and the fault log.
-.visualize/
+# Scratch scripts. The scanner skips dot-directories, so a probe here is not
+# a node in the graph it is measuring -- which a file in the repo root is.
 .probe/
