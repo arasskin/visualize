@@ -1237,6 +1237,35 @@
           (set target (column key)))
         (put want name target))
 
+      # 2b. A CONFLUENCE TRAVELS AS A BUNDLE. Bends on this rank whose
+      #     edges share a TARGET are heading to the same place; each one's
+      #     own aim is its own chord, and chords from scattered sources
+      #     cross a rank far apart -- `stamp -> core`'s aim sat pinned
+      #     against the term box while `watchdog -> core`'s sat at its own
+      #     diagonal, so two edges telling the same story ran as strangers
+      #     and only met at the arrival. Blending each member's desire
+      #     toward the flock's mean pulls the lanes adjacent from the
+      #     first rank: the exit angles converge, the first turn happens
+      #     right after the source, and the long middle runs as one
+      #     parallel band. Two parts flock to one part own aim -- enough
+      #     to bundle, while the residual own-aim keeps the bundle's
+      #     ORDER stretched in the direction its members' sources lie,
+      #     so settle has no ties to break. Shared SOURCES are not
+      #     bundled: those edges are a fan opening toward different
+      #     places, and squeezing a fan shut says something false.
+      (def flock @{})
+      (each name names
+        (when (bend? name)
+          (def [_ _ to _] name)
+          (put flock to (array/push (or (flock to) @[]) name))))
+      (eachp [_ members] flock
+        (when (> (length members) 1)
+          (var sum 0)
+          (each m members (+= sum (want m)))
+          (def mid (/ sum (length members)))
+          (each m members
+            (put want m (/ (+ (want m) (* 2 mid)) 3)))))
+
       # 3. STAYING OUT OF A BOX IS A BOUND, NOT A WISH. A wish is an average,
       #    and a block of nodes pushed into contact places itself at the
       #    average of what its members wanted -- so a node that wished itself
