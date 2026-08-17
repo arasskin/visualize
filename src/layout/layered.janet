@@ -1657,13 +1657,16 @@
       # each restarted the down/up alternation is what made an earlier
       # attempt at this loop draw five crossings where two is normal.
       #
-      # WITHOUT dot's TIE-TAKING, and that was measured rather than assumed.
-      # dot lets alternate passes accept equal-cost transpositions as a way
-      # out of a local minimum. Enabled here it narrows the drawing by
-      # thirteen pixels and puts an edge through a node's outline -- 1149
-      # wide with one clip against 1162 with none. Thirteen pixels is not
-      # worth a clip, so the flag stays off; the loop around it is the part
-      # that pays.
+      # WITHOUT dot's TIE-TAKING, measured twice now. First measurement:
+      # thirteen pixels narrower and one clip, not worth it. Re-measured
+      # 2026-08-17 on the theory that this loop's keep-best is the
+      # save-aside dot says makes ties safe: worse on every mode and
+      # every count -- ordering cost 9 -> 14 on the default, 11 -> 33
+      # under the packed ranking, drawn crossings up by a third. The
+      # keep-best guards within a trajectory; ties scramble the
+      # TRAJECTORY, and the scrambled walk's best is worse than the
+      # monotone walk's best on this family of graphs. The flag stays
+      # off, now with two dated reasons.
       (def bend-name? (fn [name] (not (nil? (dummy-layer name)))))
       (def held-still (fn [name] (and group-of (group-of name) true)))
       # THE SCORE HAS TO SEE THE EDGES. `crossings-between` asks a node for
@@ -1684,6 +1687,16 @@
                                            (fn [n] (get up n []))))))
           total))
 
+      # (SEEDED RESTARTS were tried here 2026-08-17 and removed: four
+      # shuffled starts converged to the same costs on every mode, to the
+      # digit. The plateau is the landscape, not the luck -- this family
+      # of passes is at or near its instance's floor, and the per-pair
+      # breakdown below confirms the residue is spread thin rather than
+      # concentrated. The crossing gap to dot on the same tree is the
+      # RANK STRUCTURE, not ordering skill: dot's balance pass spreads
+      # nodes across equal-cost ranks, thinning the parallel chains that
+      # set the floor, and it is the one rank.c feature simplex.janet
+      # never ported.)
       (var current (table/clone layers))
       (var best (table/clone layers))
       (var best-cross math/inf)
@@ -1911,6 +1924,24 @@
                   (set rows candidate)))))
           rows))
       (dump-rows "sifted" sifted)
+      (when (os/getenv "VISUALIZE_ORDER_DEBUG")
+        (eprintf "order cost: untangled %d, sifted %d"
+                 (math/round (cost untangled)) (math/round (cost sifted)))
+        # Where the crossings actually live, pair by pair, on the seated
+        # geometry -- a total spread thin across every pair reads as an
+        # instance near its floor; a total concentrated in one pair names
+        # the place to stare at.
+        (def sx (seat sifted))
+        (def ranks (sort (keys sifted)))
+        (each i ranks
+          (def below (get sifted (+ i 1)))
+          (when (and below (indexed? below) (indexed? (sifted i)))
+            (def n (crossing-count
+                     (table i (sifted i) (+ i 1) below)
+                     sx
+                     (fn [name] (get up name []))))
+            (when (pos? n)
+              (eprintf "  pair %d->%d: %d" i (+ i 1) (math/round n))))))
 
       # X, EITHER WAY -- AND THE AUX GRAPH IS NOW THE DEFAULT. It is dot's
       # formulation: separation and straightness as one weighted
