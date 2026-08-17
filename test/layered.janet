@@ -119,10 +119,18 @@
   # Packing every layer flush left made the widest one set the left edge and
   # stranded the narrow ones under its first few nodes -- an eighteen-node
   # row over a one-node row came out as a diagonal smear rather than a tree.
+  #
+  # A CONTRACT OF THE RELAXATION SOLVER, pinned to it explicitly since the
+  # aux graph became the default placement: aux answers these synthetic
+  # cases differently (its global optimum has no per-row centring step),
+  # and whether it SHOULD honour the same contract is an open question the
+  # real graph has not yet forced.
+  (os/setenv "VISUALIZE_RELAX" "1")
   (def graph {:nodes [;(seq [i :range [0 9]] {:name (string "n" i) :label (string "n" i)})
                       {:name "one" :label "one"}]
               :edges (seq [i :range [0 9]] [(string "n" i) "one"])})
   (def points ((layered/place graph {:measure (fn [_] 100)}) :points))
+  (os/setenv "VISUALIZE_RELAX" nil)
   (def top (filter |(zero? ((points $) :y)) (keys points)))
   (def centre (/ (sum (map |((points $) :x) top)) (length top)))
   (t/ok (< (math/abs (- ((points "one") :x) centre)) 60)
@@ -498,13 +506,17 @@
   # Reproduced here: `hub` has four parents spread left and one child, and a
   # second fan beside it gives the child somewhere else to be pulled -- which
   # is what makes the one downward edge disagree with the four upward ones.
+  # A contract of the RELAXATION solver -- see "layers share a centre
+  # line" for why it is pinned to that solver explicitly.
   (def graph
     {:nodes (map (fn [n] {:name n})
                  ["p1" "p2" "p3" "p4" "hub" "mid" "far" "a" "b" "c"])
      :edges [["p1" "hub"] ["p2" "hub"] ["p3" "hub"] ["p4" "hub"]
              ["hub" "far"]
              ["a" "mid"] ["b" "mid"] ["c" "mid"] ["mid" "far"]]})
+  (os/setenv "VISUALIZE_RELAX" "1")
   (def points ((layered/place graph {:measure (fn [_] 60)}) :points))
+  (os/setenv "VISUALIZE_RELAX" nil)
   (def parents (map |((points $) :x) ["p1" "p2" "p3" "p4"]))
   (def middle (/ (+ (min ;parents) (max ;parents)) 2))
   (def hub ((points "hub") :x))

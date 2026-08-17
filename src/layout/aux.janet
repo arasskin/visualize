@@ -34,22 +34,17 @@
 # group box by the ordering, because the shove would stretch two weighted
 # edges and the optimiser would rather move the box.
 #
-# STATE: NOT THE DEFAULT, AND NOT YET GOOD ENOUGH TO BE. Set VISUALIZE_AUX to
-# use it. On this tool's own graph it draws 946 wide against the relaxation's
-# 1161 -- the compaction dot's formulation is known for -- and it is worse
-# where it matters: three edges cross a node against none, because group
-# containment does not hold. `src.term`'s members land at x=471, 503 and 774,
-# so the box drawn round them sprawls three hundred units and swallows
-# whatever is between.
-#
-# The cause is the weights. Containment here is one heavy edge per member to
-# a shared slack node, which loses to the many straightness edges pulling
-# each member toward its own neighbours. dot does not do it this way: it adds
-# LR constraint edges between a cluster's bounding nodes (`contain_nodes`,
-# `keepout_othernodes`, `separate_subclust` in position.c), so containment is
-# a hard minimum length rather than a preference that can be outvoted. Until
-# those go in, this file is a demonstration that the formulation ports, not a
-# replacement for the pass that ships.
+# STATE: THE DEFAULT, as of 2026-08. It spent its first weeks flagged off
+# and measurably worse -- three edges through nodes, containment broken --
+# and each of those fell to work elsewhere: the cluster walls below made
+# containment a hard constraint rather than an outvotable preference, and
+# the router (funnel, fit, obstacle gates, and their iterating dodging in
+# svg.janet) learned to draw the tighter arrangement this formulation
+# produces without touching anything. When it finally measured clean the
+# user compared the pictures and chose the lobes. The relaxation remains
+# behind VISUALIZE_RELAX for comparison runs; docs/dotgen-audit.md carries
+# the full history, including the era when this file's own header called
+# it not good enough.
 
 # Weights, from dot's position.c. An edge between two real nodes matters
 # least; an edge with one bend in it matters more, because a kink in a long

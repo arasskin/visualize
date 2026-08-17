@@ -1835,13 +1835,17 @@
                                 [to chain])))
                           bend?
                           cost))
-      # X, EITHER WAY. The relaxation below is what has always run; the aux
-      # graph is dot's formulation, where separation and straightness are
-      # one weighted optimisation rather than two passes that cannot see
-      # each other. Selected by VISUALIZE_AUX so the two can be measured on
-      # the same graph -- see docs/dotgen-audit.md for why it exists.
+      # X, EITHER WAY -- AND THE AUX GRAPH IS NOW THE DEFAULT. It is dot's
+      # formulation: separation and straightness as one weighted
+      # optimisation rather than two passes that cannot see each other,
+      # which is what gathers each subsystem into its own lobe. It spent
+      # most of its life behind VISUALIZE_AUX, measurably worse than the
+      # relaxation, until the router matured enough to draw its tighter
+      # arrangement cleanly (docs/dotgen-audit.md tells that story); as of
+      # 2026-08 it measures clean and reads better, and the user chose it.
+      # The relaxation stays behind VISUALIZE_RELAX for comparison runs.
       (def x
-        (if (os/getenv "VISUALIZE_AUX")
+        (if (not (os/getenv "VISUALIZE_RELAX"))
           (let [# Every segment a line is actually drawn along: node to
                 # bend, bend to bend, bend to node. These are what
                 # straightness is about, not the logical edges.
