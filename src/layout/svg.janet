@@ -442,6 +442,23 @@
                      [(min right (max left wants)) (bend 1)])))
                (range (length bends)) bends))))
 
+  # THE LANE IS THE SLID BEND, NOT THE WHOLE SLOT. Routing through the
+  # full corridor lets every edge straighten independently, and a bundle
+  # then reads as a CONVERGING FAN: each member cuts its own corners, the
+  # gaps between them breathe in and out, and nothing looks parallel even
+  # though the layout laid the lanes evenly. The gates the router gets are
+  # therefore the corridor pinched to a few units around each slid bend --
+  # the lane's centre line, which `cohere` aligned across ranks and the
+  # bundle ordering pitched evenly. Members then hold a CONSTANT offset
+  # from each other, which is what a reader calls parallel. A solo edge
+  # loses nothing: the slide just put its bend on its own straight line,
+  # so its pinched lane IS that line.
+  (def lanes
+    (seq [i :range [0 (length bends)] :when (get corridor i)]
+      (def [l r y] (corridor i))
+      (def bx ((bends i) 0))
+      [(max l (- bx 4)) (min r (+ bx 4)) y]))
+
   (def straight-from (on-ellipse a (ra :w) (ra :h) (b :x) (b :y) 0))
   (def straight-to (on-ellipse b (rb :w) (rb :h) (a :x) (a :y) 0 turn))
 
@@ -458,7 +475,7 @@
   # pass pulls its lane onto its own straight line, so its routed curve is
   # the straight line, give or take nothing a reader can see.
   (def routed
-    (when (and (not (empty? bends)) corridor (>= (length corridor) 2))
+    (when (and (not (empty? bends)) (>= (length lanes) 2))
       (def first-target (first bends))
       (def last-source (last bends))
       (def [x1 y1] (on-ellipse a (ra :w) (ra :h)
@@ -468,7 +485,7 @@
       # The gate model runs downward; a back edge's drawn direction does
       # not, and gets its spline as before.
       (when (< y1 y2)
-        (def augmented (with-overhangs [x1 y1] [x2 y2] corridor))
+        (def augmented (with-overhangs [x1 y1] [x2 y2] lanes))
         (def out (fit/route [x1 y1] [x2 y2] augmented
                             [(- (first-target 0) x1) (- (first-target 1) y1)]
                             [(- x2 (last-source 0)) (- y2 (last-source 1))]))
