@@ -8,6 +8,7 @@
 #     vz eval '(expr)'      evaluate in the running server's own image
 #     vz pane repl 'text'   type into a pane, where a person can watch
 #     vz shot [file]        the graph as it looks right now (SVG, or .png)
+#     vz dot [file]         the same graph through graphviz, for comparison
 #     vz state [name]       list or print the facts on disk
 #     vz where              this run's url, token file, state directory
 #
@@ -229,6 +230,37 @@ PY
     echo "$out"
     ;;
 
+  dot)
+    # THE SAME GRAPH THROUGH GRAPHVIZ, for comparison. The layout here
+    # replaced graphviz, and every argument about whether a change moved
+    # toward or away from it deserves a picture on each side --
+    # tools/dot.janet exports exactly what the page draws (same scan,
+    # config, groups, labels), so the only variable is the algorithm.
+    # A .dot file skips graphviz entirely; .svg or .png (the default)
+    # need `dot` on PATH, which is not a dependency of visualize --
+    # that is the point -- so its absence is reported, not required.
+    out=${1:-$(mktemp -t visualize-dot).png}
+    dotfile=$(mktemp -t visualize-dot).dot
+    (cd "$root" && ./bin/janet tools/dot.janet) > "$dotfile"
+    case "$out" in
+      *.dot)
+        mv "$dotfile" "$out"
+        ;;
+      *)
+        if ! command -v dot >/dev/null 2>&1; then
+          echo "graphviz is not installed; the DOT file is at $dotfile" >&2
+          exit 1
+        fi
+        case "$out" in
+          *.svg) dot -Tsvg "$dotfile" -o "$out" ;;
+          *)     dot -Tpng -Gdpi=110 "$dotfile" -o "$out" ;;
+        esac
+        rm -f "$dotfile"
+        ;;
+    esac
+    echo "$out"
+    ;;
+
   state)
     if [ -z "${1:-}" ]; then
       ls -1 "$state" 2>/dev/null || echo "no state yet"
@@ -245,6 +277,6 @@ PY
     ;;
 
   help|*)
-    sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,18p' "$0" | sed 's/^# \{0,1\}//'
     ;;
 esac
