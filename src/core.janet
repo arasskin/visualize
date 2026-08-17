@@ -143,8 +143,6 @@
   # means "since the server started" rather than "ever".
   (def page-born (os/time))
 
-  # Where this run advertises its url and token for local tooling (dev only).
-  (var endpoint-path nil)
 
   (defn permitted?
     ``May this request drive the terminal?
@@ -284,24 +282,7 @@
     (http/serve default-port port-tries handler))
   (def url (string "http://127.0.0.1:" bound))
 
-  # WHERE AN AGENT FINDS THE DOOR. The terminal endpoints need this run's
-  # token, and until now the only copy lived in the served HTML -- so an
-  # agent working on this tool had to scrape the page for it, which is
-  # precisely what one did before driving `start` at the wrong port and
-  # replacing its own session. A dev-mode file says where the server is and
-  # what the token is, so ./pane can post like the page does. Dev-only and
-  # 0600: the token is the whole gate on a socket that runs a program.
-  (when dev?
-    (set endpoint-path (socket-for root ".endpoint.json"))
-    (spit endpoint-path (json/encode {"url" url "token" token
-                                      }))
-    (os/chmod endpoint-path 8r600))
-  # Ctrl-c tidies up after itself: the endpoint file names a server that is
-  # about to stop existing.
-  (os/sigaction :int (fn []
-                       (print)
-                       (when endpoint-path (try (os/rm endpoint-path) ([_] nil)))
-                       (os/exit 0)))
+  (os/sigaction :int (fn [] (print) (os/exit 0)))
 
   (defn align-word
     [word to]
