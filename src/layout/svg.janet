@@ -438,8 +438,23 @@
                    (let [[left right _] box
                          # Where the straight line is at this bend's rank.
                          t (if (zero? span) 0.5 (/ (- (bend 1) ay) span))
-                         wants (+ ax (* t (- bx ax)))]
-                     [(min right (max left wants)) (bend 1)])))
+                         wants (+ ax (* t (- bx ax)))
+                         # THE SLIDE SPENDS ONLY THE SLOT'S SPARE WIDTH. A
+                         # narrow slot means bundle neighbours close on both
+                         # sides, and the pitch between lanes is what makes
+                         # the bundle read as one; sliding each member toward
+                         # its OWN chord broke that -- `stamp -> core` ran
+                         # pinched against `watchdog -> core` at the top,
+                         # then drifted over to hug `host -> core` as the
+                         # three chords fanned, trading partners mid-flight.
+                         # A wide slot means open space, where straightening
+                         # toward the chord is pure gain. So the budget is
+                         # the width beyond two lane-pitches, halved: zero
+                         # in a packed bundle, generous in the open.
+                         budget (max 0 (/ (- right left 24) 2))
+                         low (max left (- (bend 0) budget))
+                         high (min right (+ (bend 0) budget))]
+                     [(min high (max low wants)) (bend 1)])))
                (range (length bends)) bends))))
 
   # THE LANE IS THE SLID BEND, NOT THE WHOLE SLOT. Routing through the
@@ -457,7 +472,7 @@
     (seq [i :range [0 (length bends)] :when (get corridor i)]
       (def [l r y] (corridor i))
       (def bx ((bends i) 0))
-      [(max l (- bx 4)) (min r (+ bx 4)) y]))
+      [(max l (- bx 10)) (min r (+ bx 10)) y]))
 
   (def straight-from (on-ellipse a (ra :w) (ra :h) (b :x) (b :y) 0))
   (def straight-to (on-ellipse b (rb :w) (rb :h) (a :x) (a :y) 0 turn))
