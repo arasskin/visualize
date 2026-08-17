@@ -181,7 +181,7 @@
       # reads as a hook. At 0.55 the reach is about a sixth of the chord.
       # The longer scales still follow for curves that genuinely need
       # swing, and the flattest remain the escape valve for tight pinches.
-      (each k [0.15 0.55 0.85 1.3 0.3 0.15]
+      (each k [0.55 0.85 1.3 0.3 0.15]
         (unless fitted
           (def [c1 c2] (fit-one p0 p3 t0 t1 k))
           (def worst (inside? p0 c1 c2 p3 boxes))
