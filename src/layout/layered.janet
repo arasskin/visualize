@@ -162,32 +162,47 @@
                        math/int-max
                        (- (min ;(map |(layer $) down)) 1)))
         (when (<= floor ceiling)
-          # Where its edges would rather it sat: the median of everything it
-          # touches, which is the point minimising the sum of distances.
+          # Where its edges would rather it sat -- and for a sum of absolute
+          # distances that is an INTERVAL, not a point. Every rank between
+          # the two middle neighbours costs exactly the same total edge
+          # length: a node with one parent at rank 0 and one child at rank 6
+          # is indifferent across all of 0..6. Snapping to one end of that
+          # interval is a choice the objective does not care about and the
+          # picture does.
+          #
+          # This code used to take the upper median -- `(neighbours (div n
+          # 2))` -- and that tie-break was measured to be the origin of the
+          # long-edge detour six later ports failed to fix: it moved
+          # `src/term/client` from beside its sibling to a rank below it,
+          # for zero gain in edge length, and the group box grew from two
+          # ranks to three. Every long edge on that side has detoured
+          # around the taller box since, and the commit that did it showed
+          # IMPROVED metrics, because a box is not an ellipse and edges
+          # routed around it cross nothing a scorer counts.
+          #
+          # So: within the interval the edges leave free, do not drift.
+          # A node stays where it is unless staying costs actual length; a
+          # group member spends the freedom on its siblings instead, which
+          # is what keeps a box short without paying a rank of edge for it.
           (def neighbours (sorted (map |(layer $) [;up ;down])))
-          (def want (neighbours (div (length neighbours) 2)))
-          # A GROUP PULLS ITS MEMBERS TOGETHER. Minimising edge length alone
-          # sent `src/term/client` eight ranks from its two siblings, and the
-          # box drawn around the three of them became a ribbon down the whole
-          # picture -- a box that large says nothing about the group and
-          # blocks everything it crosses. The group's own span counts as a
-          # neighbour, so a member is pulled toward its siblings with about
-          # the weight of one edge: enough to keep a group compact, not
-          # enough to drag a node through an edge it would invert.
+          (def n (length neighbours))
+          (def zone-lo (neighbours (div (- n 1) 2)))
+          (def zone-hi (neighbours (div n 2)))
           (def key (group-of name))
-          (def pull
+          (def ideal
             (if-let [mates (and key (filter |(and (not= $ name) (= key (group-of $)))
                                             names))]
-              (if (empty? mates) want
+              (if (empty? mates) (layer name)
+                # The median of the siblings: where the box would like this
+                # member. (The earlier blend that paid up to a rank of edge
+                # length for compactness -- the `src/term/client` eight-
+                # ranks-away note -- existed to fight the drift above; with
+                # the drift gone, free movement inside the zone is enough.)
                 (let [ranks (sorted (map |(layer $) mates))]
                   (ranks (div (length ranks) 2))))
-              want))
-          # Weighted toward the group when there is one: a member follows
-          # its siblings unless an edge forbids it, since the box is drawn
-          # around whatever spread remains and a tall box crosses more than
-          # a short edge costs.
-          (def blended (if key (/ (+ want (* 2 pull)) 3) want))
-          (def target (min ceiling (max floor (math/round blended))))
+              (layer name)))
+          (def want (min zone-hi (max zone-lo ideal)))
+          (def target (min ceiling (max floor want)))
           (unless (= target (layer name))
             (put layer name target)
             (set moved true))))))
