@@ -1198,6 +1198,68 @@
     (eachp [key s] span
       (put column key (/ (+ (s :x0) (s :x1)) 2)))
 
+    # LANES WITHIN A FLOCK FOLLOW ENTRY GEOMETRY. The spine makes row
+    # order BE lane assignment -- every member asks for the same x, so
+    # settle deals lanes in row order -- and row order was chosen by the
+    # crossing pass before placement, blind to where each member's entry
+    # actually comes from. `state -> core` entered from the left of
+    # `json -> core`'s lane but was dealt the lane to its right, and its
+    # entry segment cut straight across the band.
+    #
+    # THE BAND'S ORDER IS BUILT LIKE A MERGING RIVER, top rank down: a
+    # member already in the band keeps its position for its whole run --
+    # reordering mid-band is a weave by definition -- and a NEW entrant
+    # joins on the side it arrives from, judged against the band's centre
+    # at that rank. (A global sort by source x got this wrong at once:
+    # `faults` has the rightmost SOURCE of its three, but the whole band
+    # sits right of every source by then, so faults arrives from the
+    # LEFT like everyone else and must join on the left. Which side is a
+    # fact about the entrant and the band's position, not about the
+    # entrant and its siblings.) Within a row, only the flock's own
+    # contiguous block is re-dealt -- the members are interchangeable to
+    # everyone else, and a block interrupted by a stranger is somebody
+    # else's crossing count.
+    (def band @{})
+    (each index indexes
+      (def present @{})
+      (each name (get ordered index [])
+        (when (bend? name)
+          (def [_ from to _] name)
+          (put present to (array/push (or (present to) @[]) name))))
+      (eachp [to members] present
+        (unless (band to) (put band to @[]))
+        (def order (band to))
+        (var mean 0)
+        (each m members (+= mean (or (aim m x) 0)))
+        (set mean (/ mean (length members)))
+        (each m (sorted-by (fn [b] (or (x (b 1)) 0)) members)
+          (def from (m 1))
+          (unless (find |(= $ from) order)
+            (if (< (or (x from) 0) mean)
+              (array/insert order 0 from)
+              (array/push order from))))))
+    (defn band-rank [to from]
+      (or (find-index |(= $ from) (get band to [])) 0))
+    (each index indexes
+      (def row (ordered index))
+      (var i 0)
+      (while (< i (length row))
+        (def name (row i))
+        (if-not (bend? name)
+          (++ i)
+          (do
+            (def [_ _ to _] name)
+            (var j i)
+            (while (and (< (+ j 1) (length row))
+                        (bend? (row (+ j 1)))
+                        (= to (get (row (+ j 1)) 2)))
+              (++ j))
+            (when (> j i)
+              (def block (sorted-by (fn [b] (band-rank to (b 1)))
+                                    (array/slice row i (+ j 1))))
+              (eachp [k b] block (put row (+ i k) b)))
+            (set i (+ j 1))))))
+
     # THE FLOCK'S SPINE IS A STRAIGHT LINE, computed before any row seats.
     # The first bundling pass averaged each rank's members separately, and
     # the band WANDERED: every time an edge joined the flock -- host and
