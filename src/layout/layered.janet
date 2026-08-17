@@ -1198,6 +1198,40 @@
     (eachp [key s] span
       (put column key (/ (+ (s :x0) (s :x1)) 2)))
 
+    # THE FLOCK'S SPINE IS A STRAIGHT LINE, computed before any row seats.
+    # The first bundling pass averaged each rank's members separately, and
+    # the band WANDERED: every time an edge joined the flock -- host and
+    # client enter a rank below stamp and watchdog -- the mean jolted
+    # sideways, and every lane picked up a slope change at every rank
+    # where membership changed. Parallel, but crooked, where the old
+    # unbundled picture had been straight fans. So the spine is fixed per
+    # target for the whole round: the per-rank means of the members' own
+    # chords, then a straight line through the first and last of them.
+    # Every bend of the flock asks for the spine at its rank; settle packs
+    # the members around it at even pitch. A target with ONE edge gets a
+    # spine identical to that edge's chord, so solo edges are straight by
+    # the same rule that makes bundles straight -- one mechanism, no
+    # special case.
+    (def flock-points @{})
+    (each index indexes
+      (def sums @{})
+      (each name (get ordered index [])
+        (when (bend? name)
+          (def [_ _ to _] name)
+          (when-let [a (aim name x)]
+            (put sums to (array/push (or (sums to) @[]) a)))))
+      (eachp [to vals] sums
+        (put flock-points to
+             (array/push (or (flock-points to) @[])
+                         [index (/ (sum vals) (length vals))]))))
+    (defn spine-at [to index]
+      (when-let [pts (flock-points to)]
+        (def [i0 m0] (first pts))
+        (def [i1 m1] (last pts))
+        (if (= i0 i1)
+          m0
+          (+ m0 (* (- m1 m0) (/ (- index i0) (- i1 i0)))))))
+
     (each index (if (= pick :down) indexes (reverse indexes))
       (def names (ordered index))
       (def here (get claims index []))
@@ -1237,42 +1271,24 @@
           (set target (column key)))
         (put want name target))
 
-      # 2b. A CONFLUENCE TRAVELS AS A BUNDLE. Bends on this rank whose
-      #     edges share a TARGET are heading to the same place; each one's
-      #     own aim is its own chord, and chords from scattered sources
-      #     cross a rank far apart -- `stamp -> core`'s aim sat pinned
-      #     against the term box while `watchdog -> core`'s sat at its own
-      #     diagonal, so two edges telling the same story ran as strangers
-      #     and only met at the arrival. Blending each member's desire
-      #     toward the flock's mean pulls the lanes adjacent from the
-      #     first rank: the exit angles converge, the first turn happens
-      #     right after the source, and the long middle runs as one
-      #     parallel band.
-      #
-      #     THE WHOLE DESIRE IS THE FLOCK'S MEAN, no own-aim residue. The
-      #     first version kept one part own aim in three "to stretch the
-      #     order", and the stretch was spacing proportional to how far
-      #     apart the SOURCES sit -- `stamp -> core` rode 22 units from
-      #     `host -> core` and 34 from `watchdog -> core`, pairing off
-      #     with whichever source stood nearest instead of holding the
-      #     band's pitch. With every member asking for the same x, settle
-      #     packs them in the crossing pass's order at even gaps, which
-      #     is what a bundle IS: uniform pitch, membership decided by
-      #     destination, not by where each edge happens to come from.
+      # 2b. A CONFLUENCE TRAVELS AS A BUNDLE, along its straight spine.
+      #     Bends whose edges share a TARGET all ask for the spine's x at
+      #     their rank -- one value, so settle packs them at even pitch in
+      #     the crossing pass's order: uniform pitch, membership decided
+      #     by destination, straightness guaranteed by the spine being a
+      #     line. (History, briefly: own-chord desires ran siblings as
+      #     strangers meeting at the arrival; blending toward a per-rank
+      #     mean bundled them but paired members off by source distance;
+      #     the full per-rank mean held pitch but jolted sideways at every
+      #     membership change. The straight spine is the fourth draft.)
       #     Shared SOURCES are not bundled: those edges are a fan opening
       #     toward different places, and squeezing a fan shut says
       #     something false.
-      (def flock @{})
       (each name names
         (when (bend? name)
           (def [_ _ to _] name)
-          (put flock to (array/push (or (flock to) @[]) name))))
-      (eachp [_ members] flock
-        (when (> (length members) 1)
-          (var sum 0)
-          (each m members (+= sum (want m)))
-          (def mid (/ sum (length members)))
-          (each m members (put want m mid))))
+          (when-let [s (spine-at to index)]
+            (put want name s))))
 
       # 3. STAYING OUT OF A BOX IS A BOUND, NOT A WISH. A wish is an average,
       #    and a block of nodes pushed into contact places itself at the
