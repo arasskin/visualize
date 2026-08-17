@@ -62,7 +62,14 @@
   (def out @[])
   (array/push out "digraph G {")
   (array/push out "  rankdir=TB;")
-  (array/push out (string "  graph [fontname=\"" (quoted font) "\", fontsize=10];"))
+  # TRANSPARENT, so the PAGE decides the background. dot paints an opaque
+  # white rectangle over the whole drawing by default, which lands as a
+  # white slab on a canvas that is #fbfbfa in light mode and #171715 in
+  # dark -- visible as a seam in the first, and as a glaring panel in the
+  # second. With no background of its own the SVG floats on `--canvas` and
+  # follows the theme for free.
+  (array/push out (string "  graph [bgcolor=\"transparent\", fontname=\""
+                          (quoted font) "\", fontsize=10];"))
   (array/push out
               (string "  node [shape=ellipse, fontname=\"" (quoted font)
                       "\", fontsize=11, penwidth=1.2];"))

@@ -401,3 +401,30 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   padding: .3rem .5rem 0; color: var(--bad); white-space: pre-wrap;
 }
 #problems:empty { display: none; }
+
+/* THE GRAPH IS DRAWN FOR A WHITE PAGE, and this rescues it on a dark one.
+   graphviz gets no background of its own (bgcolor=transparent in
+   src/layout.janet), so the SVG floats on --canvas and follows the theme --
+   but the INK inside it was chosen by color/ink-on-page, which deepens each
+   hue until it clears 4.5:1 against WHITE. Measured against the dark
+   canvas those same inks come back at 2.1 to 3.1, which is a muddy label
+   on a dark field.
+
+   The server cannot pick per theme -- it never learns which one the browser
+   is in, as the :root block above says -- so the correction belongs here.
+   Each deepened ink maps back to the hue it was deepened from, and those
+   hues clear the bar on the dark canvas as they are: 7.1, 5.6 and 9.1.
+   Three rules because there are exactly three hues in the palette; if a
+   fourth is ever added to src/color.janet, it needs a line here. */
+@media (prefers-color-scheme: dark) {
+  #graph svg [fill="#455c6c"] { fill: #7ea8c4; }
+  #graph svg [stroke="#455c6c"] { stroke: #7ea8c4; }
+  #graph svg [fill="#8c2a3c"] { fill: #ff4d6d; }
+  #graph svg [stroke="#8c2a3c"] { stroke: #ff4d6d; }
+  #graph svg [fill="#20715f"] { fill: #3bceac; }
+  #graph svg [stroke="#20715f"] { stroke: #3bceac; }
+  /* The edges, drawn mid-grey for a white page, want to be lighter than
+     the canvas rather than darker. */
+  #graph svg [stroke="#8a8a8a"] { stroke: #6f6f6b; }
+  #graph svg [fill="#8a8a8a"] { fill: #6f6f6b; }
+}
