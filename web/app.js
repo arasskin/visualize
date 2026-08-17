@@ -140,9 +140,13 @@ function moduleNames(svg) {
   for (const node of svg.querySelectorAll('g.node')) {
     const key = node.querySelector('title');
     if (!key) continue;
-    const text = node.querySelector('text');
-    const spans = text ? [...text.querySelectorAll('tspan')] : [];
-    const runs = (spans.length ? spans : text ? [text] : [])
+    // A label's lines arrive one of two ways: as tspans inside a single
+    // <text>, or as sibling <text> elements -- graphviz writes the second,
+    // one element per line at its own y. Take every <text> in the group and
+    // every tspan within them, so both shapes read the same.
+    const texts = [...node.querySelectorAll('text')];
+    const spans = texts.flatMap(t => [...t.querySelectorAll('tspan')]);
+    const runs = (spans.length ? spans : texts)
       .map(t => t.textContent.trim());
     // The show-lines view appends a count as its own run. Only a run that is
     // ALL digits goes -- a file could legitimately end in a number.

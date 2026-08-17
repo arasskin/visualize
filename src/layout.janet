@@ -1,100 +1,167 @@
-# Which layout draws the graph.
+# The graph, drawn by graphviz.
 #
-# THE SEAM. A layout is a function from a graph to a picture, and this is
-# the table of the ones that exist. `(layout force)` in the config picks
-# one; nothing else in the tree knows which is in use, which is what makes
-# adding another one a file and a line here rather than a change to the
-# renderer, the routes or the page.
+# WHAT THIS IS. `graph.janet` hands over a parsed graph and the config's
+# decisions -- groups, colours, font, whether nodes are filled -- and gets
+# back [ok svg]. Everything between is DOT: this file writes the graph as a
+# DOT document, runs `dot -Tsvg`, and returns what comes out.
 #
-# LAYERED IS THE DEFAULT, and it is ours: nodes sit on ranks so every arrow
-# points the same way down the page, which is what a dependency graph is
-# for. It replaced graphviz, and with it went the last thing this tool
-# needed installed -- see src/layout/layered.janet for the algorithm and
-# src/v.janet for the language the graph is written in on the way here.
+# WHY DOT AND NOT THE LAYOUT THAT WAS HERE. This project spent a long time
+# on its own Sugiyama implementation -- ranking by relaxation and by network
+# simplex, an aux-graph coordinate pass, mincross with transpose and sift,
+# a funnel-and-slab spline router -- and got it to zero edges through nodes
+# and zero clipped outlines on this tool's own graph. It never got to dot's
+# crossing count: measured with the same scorer on the same tree, dot drew 2
+# edge crossings where the custom layout drew 12, and the last measurable
+# step toward closing that gap made the picture visibly worse. Six thousand
+# lines of layout for a number that stayed behind the thing already
+# installed on the machine. That is the whole argument; the history is in
+# git if the trade ever needs re-examining.
 #
-# EVERY LAYOUT GOES THROUGH V. `draw` renders the graph to v text and parses
-# it back before laying anything out. That looks like a detour and is not:
-# it means the language is on the ONLY path to a picture, so it cannot rot
-# the way a debug-only serialisation does, and it means `vz graph` showing
-# you v text is showing you exactly what the renderer saw.
+# THE COST, STATED PLAINLY. `dot` is now a hard runtime dependency -- no
+# graph renders without it. That reverses a deliberate property of this
+# program (a vendored Janet and nothing else), and it is the price of
+# deleting the layout.
 #
-# WHAT COMES BACK IS THE SAME TABLE it always was -- {:nodes :edges :sizes
-# :ours :groups} -- even though the text behind it is now triples rather than
-# nested forms. That was the point of keeping the shape: nothing below this
-# line knows the language changed.
+# THE PAGE CONTRACT SURVIVES. web/app.js reads `g.node` with a `<title>`
+# naming the node and `g.edge` with a `<title>` of "from->to" for its
+# panning, highlighting and labelling. graphviz emits exactly that shape --
+# it is where the convention came from -- except that it encodes the arrow
+# as `-&#45;&gt;`, which `graph.janet` normalises on the way out.
 
-(import ./v)
+(import ./color)
 (import ./select)
-(import ./layout/force)
-(import ./layout/layered)
-(import ./layout/svg)
+(import ./v)
 
-(defn- with-layered [graph opts]
+(defn- quoted
+  "A DOT string literal: quotes and backslashes escaped, newlines as \\n."
+  [text]
+  (->> (string text)
+       (string/replace-all "\\" "\\\\")
+       (string/replace-all "\"" "\\\"")
+       (string/replace-all "\n" "\\n")))
+
+(defn- attrs
+  "An attribute list from pairs, or the empty string when there are none."
+  [pairs]
+  (if (empty? pairs)
+    ""
+    (string " [" (string/join (map (fn [[k v]] (string k "=\"" v "\"")) pairs) ", ") "]")))
+
+(defn to-dot
+  ``The graph as a DOT document.
+
+  Exported because it is worth reading on its own -- `vz dot` writes it to
+  a file, and a DOT file is the one artefact both this program and every
+  other graphviz tool understand.``
+  [graph opts]
   (def groups (or (opts :groups) []))
   (def ours (or (graph :ours) {}))
-  (def places
-    (layered/place
-      graph
-      {:measure (fn [name]
-                  (svg/width-of (or (get (get opts :labels {}) name) name)))
-       # The renderer draws a group's box outside its members, so the layout
-       # has to keep strangers out of THAT rectangle rather than out of the
-       # members' extent -- see svg/group-inset. This is the seam: `layered`
-       # knows nothing about SVG and `svg` decides nothing about placement,
-       # so the number crosses here rather than being written down twice.
-       :group-inset svg/group-inset
-       # Which group claims a node, so the layout can keep a group's members
-       # side by side -- see `cohere`. Nil when nothing is grouped, which
-       # skips the pass entirely.
-       :group-of (when (not (empty? groups))
-                   (fn [name]
-                     (when-let [g (select/group-for name groups ours)]
-                       (g :prefix))))}))
-  [true (svg/draw graph (places :points)
-                  (merge (table ;(kvs opts))
-                         {:routes (places :routes)
-                          :corridors (places :corridors)
-                          # A layered layout keeps a group's members near each
-                          # other, so a box around them means something.
-                          :boxes true}))])
+  (def weights (or (opts :weights) {}))
+  (def filled (opts :filled))
+  (def font (or (opts :font) "Comic Sans MS"))
+  (def out @[])
+  (array/push out "digraph G {")
+  (array/push out "  rankdir=TB;")
+  (array/push out (string "  graph [fontname=\"" (quoted font) "\", fontsize=10];"))
+  (array/push out
+              (string "  node [shape=ellipse, fontname=\"" (quoted font)
+                      "\", fontsize=11, penwidth=1.2];"))
+  (array/push out "  edge [arrowsize=0.7, color=\"#8a8a8a\"];")
 
-(defn- with-force [graph opts]
-  # Layout parameters ride in the same opts table the renderer reads, so a
-  # config line can reach them without a second channel.
-  [true (svg/draw graph (force/place graph (get opts :tuning {}))
-                  (merge (table ;(kvs opts))
-                         # No boxes: a force layout has no reason to keep a
-                         # group contiguous, and a box drawn around scattered
-                         # members would claim a structure the picture does
-                         # not have.
-                         {:boxes false}))])
+  # A node's colour is the group's hue tinted by its weight, which is what
+  # the custom renderer did and what the config's ramp expects. `filled`
+  # decides whether that colour goes inside the ellipse or only on its line.
+  (defn node-line [node indent]
+    (def name (node :name))
+    (def claimed (select/group-for name groups ours))
+    (def hue (if claimed (claimed :color) color/ungrouped))
+    (def weight (get weights name 0))
+    (def fill (color/tint hue weight))
+    (array/push out
+                (string indent "\"" (quoted name) "\""
+                        (attrs [["label" (quoted (node :label))]
+                                ["fillcolor" (if filled fill "none")]
+                                ["style" (if filled "filled" "solid")]
+                                ["color" (color/ink-on-page hue)]
+                                ["fontcolor" (if filled
+                                               (color/ink fill)
+                                               (color/ink-on-page hue))]])
+                        ";")))
 
-(def layouts
-  "Every layout, by the name a config uses."
-  {"layered" with-layered
-   "force" with-force})
+  # GROUPS BECOME CLUSTERS, which is what a group has always meant here: a
+  # dashed box around members that belong together, labelled with the
+  # prefix. graphviz keeps a cluster's members contiguous by construction,
+  # which is the guarantee the custom layout had to work for.
+  (def in-group @{})
+  (each node (get graph :nodes [])
+    (when-let [claimed (select/group-for (node :name) groups ours)]
+      (put in-group (node :name) (claimed :prefix))))
+  (def by-group @{})
+  (each node (get graph :nodes [])
+    (when-let [key (in-group (node :name))]
+      (put by-group key (array/push (or (by-group key) @[]) node))))
+
+  (eachp [key members] by-group
+    (def claimed (select/group-for ((first members) :name) groups ours))
+    (array/push out (string "  subgraph \"cluster_" (quoted key) "\" {"))
+    (array/push out (string "    label=\"" (quoted key) "\"; style=dashed;"
+                            " color=\"" (if claimed (claimed :color) color/ungrouped) "\";"
+                            " fontcolor=\"" (if claimed (claimed :color) color/ungrouped) "\";"
+                            " fontsize=10;"))
+    (each node members (node-line node "    "))
+    (array/push out "  }"))
+
+  (each node (get graph :nodes [])
+    (unless (in-group (node :name))
+      (node-line node "  ")))
+
+  (each [from to] (get graph :edges [])
+    (array/push out (string "  \"" (quoted from) "\" -> \"" (quoted to) "\";")))
+
+  (array/push out "}")
+  (string/join out "\n"))
+
+(defn- trimmed-svg
+  ``graphviz's output, ready to inline into the page.
+
+  dot writes a standalone document -- XML prolog, DOCTYPE, a comment naming
+  its version -- and the page drops the SVG straight into HTML, where a
+  prolog partway down the body is invalid and a DOCTYPE is worse. Everything
+  before the opening <svg is dropped.
+
+  The `-&#45;&gt;` in edge titles becomes `-&gt;`: dot escapes the hyphen
+  because a `--` inside an XML comment is illegal, and web/app.js matches
+  edge titles as "from->to" when it highlights an edge's endpoints.``
+  [text]
+  (def at (string/find "<svg" text))
+  (def body (if at (string/slice text at) text))
+  (string/replace-all "&#45;&gt;" "-&gt;" body))
 
 (defn draw
-  ``Draw `graph` with the layout named in `opts`, defaulting to layered.
-  Returns [ok svg-or-error], the same shape every caller already handles.
+  ``Draw `graph` with graphviz. Returns [ok svg-or-error], the shape every
+  caller already handles.
 
   The graph makes the round trip through v on the way: `render` writes it,
-  `parse` reads it back, and the layout sees what came out. See the note at
-  the top of this file for why that is not a detour.``
+  `parse` reads it back, and the DOT is written from what came out -- so
+  what is drawn is what the text says, and a bug in either direction shows
+  up as a picture rather than as a silent disagreement.``
   [graph &opt opts]
   (default opts {})
-  (def wanted (string (or (opts :layout) "layered")))
-  (if-let [chosen (layouts wanted)]
-    (let [text (v/render graph opts)
-          [ok parsed] (v/parse text)]
-      (if-not ok
-        [false parsed]
-        # The parsed graph carries nodes, edges, sizes and ours; the groups
-        # come from the config, which knows the colours it assigned.
-        (chosen parsed (merge (table ;(kvs opts))
-                              {:labels (let [out @{}]
-                                         (each node (parsed :nodes)
-                                           (put out (node :name) (node :label)))
-                                         out)}))))
-    [false (string "unknown layout '" wanted "' -- try one of "
-                   (string/join (sorted (keys layouts)) ", "))]))
+  (def text (v/render graph opts))
+  (def [ok parsed] (v/parse text))
+  (if-not ok
+    [false parsed]
+    (let [dot (to-dot parsed opts)]
+      (try
+        (let [proc (os/spawn ["dot" "-Tsvg"] :px {:in :pipe :out :pipe})]
+          (:write (proc :in) dot)
+          (:close (proc :in))
+          (def svg (:read (proc :out) :all))
+          (def status (os/proc-wait proc))
+          (if (zero? status)
+            [true (trimmed-svg (string svg))]
+            [false "graphviz failed to draw this graph"]))
+        ([err]
+          [false (string "graphviz is required to draw the graph, and running "
+                         "`dot` failed: " err
+                         ". Install it with `brew install graphviz`.")])))))

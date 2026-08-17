@@ -70,7 +70,7 @@ transcript it was buried in, and puts it somewhere a test can call.
   expression evaluates in the wrong environment and the next reload will look
   like it worked. `(quit)` leaves -- once per level, and they nest.
 - **Reload innermost first.** A module that imports another holds bindings
-  from it, so reloading `layout/layered` alone leaves `layout.janet` and
+  from it, so reloading `select` alone leaves `layout.janet` and
   `graph.janet` calling the version they compiled against. `vz reload` orders
   by path depth for this reason; if you reload by hand, follow it.
 - **The tests do not need the server**, and the server does not notice the
@@ -78,19 +78,27 @@ transcript it was buried in, and puts it somewhere a test can call.
 
 ## Layout work specifically
 
-The algorithm is `src/layout/layered.janet`: Sugiyama, four passes (rank,
-order, place, route), with the commitment that **placement is one constraint
-solve** -- passes state what they want and `settle` decides, so non-overlap is
-a property of the output rather than of the order passes ran in. Add a desire
-or a bound; do not add a sweep that fixes up a previous sweep.
+**graphviz draws the graph.** `src/layout.janet` writes the graph as DOT --
+groups become clusters, the config's colours become node attributes -- runs
+`dot -Tsvg`, and strips the XML prolog so the result can be inlined into the
+page. That file is the whole layout; there is nothing else to read.
 
-Crossings are counted two different ways and they disagree, which matters:
+`dot` is therefore a **hard runtime dependency**. Nothing renders without it,
+and the error a caller sees when it is missing names the install command.
 
-- `order` optimises **one layer pair at a time** (the median heuristic).
-- `crossings` in `test/layered.janet` counts **the whole drawn picture**.
+**The page contract is graphviz's own**: `g.node` with a `<title>`, `g.edge`
+with a `<title>` of `from->to`. Two details differ from what a hand-rolled
+renderer would emit, and both are handled -- dot escapes the arrow as
+`-&#45;&gt;` (normalised in `layout.janet`), and it writes a multi-line label
+as sibling `<text>` elements rather than `<tspan>`s (handled in
+`web/app.js`'s `moduleNames`, which reads both shapes).
 
-A change can improve the first and wreck the second -- a tiebreak that took
-one rank from six crossings to five once took the drawing from six to
-nineteen. `test/layered.janet` guards the whole-picture number and is pinned
-to what the graph actually draws, with no slack. If a change lowers it, lower
-the pin with it.
+**There was a custom layout here** -- about six thousand lines of Sugiyama:
+two rankers, two coordinate passes, mincross with transpose and sift, and a
+funnel-and-slab spline router. It reached zero edges through nodes and zero
+clipped outlines, and never reached dot's crossing count (12 against 2,
+measured with the same scorer on the same tree). It was deleted deliberately.
+If you are tempted to write another one, read that history in git first --
+`docs/dotgen-audit.md` and the commits around 2026-08-17 record what was
+tried, what each attempt measured, and which of them made the picture worse
+while improving the numbers.

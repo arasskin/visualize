@@ -1,58 +1,62 @@
-# The graph as a DOT file, for rendering with graphviz.
+# The graph as a DOT file.
 #
 #     ./bin/janet tools/dot.janet > graph.dot
-#     ./bin/janet tools/dot.janet | dot -Tpng -o graphviz.png
+#     ./bin/janet tools/dot.janet | dot -Tpng -o graph.png
 #
-# THE COMPARISON THIS EXISTS FOR. This tool's layout replaced graphviz, and
-# every argument about whether that was wise deserves a picture on each
-# side. The export mirrors what the page draws -- same scan, same config,
-# same trimming, same groups, line counts in the labels when (show-lines)
-# is on -- so the only variable left is the layout algorithm. `vz dot`
-# wraps this and runs graphviz on the result.
+# THE SAME DOT THE PAGE DRAWS FROM. `src/layout.janet` writes this document
+# and pipes it to `dot -Tsvg`; this prints it instead, so the exact input
+# graphviz receives can be read, diffed, or fed to another engine (`neato`,
+# `fdp`, `sfdp`) without touching the program.
 #
-# The audit (docs/dotgen-audit.md) records what the comparison has shown
-# each time it was made: dot packs tighter and spends width and scenic
-# detours to do it; this layout keeps a vertical funnel and a shelf. Run
-# it again whenever that conclusion deserves re-testing -- the graph it
-# was last true of is not the graph you have now.
-(import ../src/scan) (import ../src/parsers) (import ../src/config)
+# It was once the other half of a comparison -- this program had its own
+# layout, and `vz dot` existed to put the two pictures side by side. The
+# custom layout is gone and graphviz draws everything now, so what remains
+# is the ability to see the DOT.
+(import ../src/graph)
+(import ../src/parsers)
+(import ../src/scan)
+(import ../src/config)
 (import ../src/select)
+(import ../src/layout)
+(import ../src/v)
 
 (def specs (parsers/load "./src/parsers"))
 (def graph (scan/scan "." specs))
 (def [state _] (config/run (string/split "\n" (string/trimr (slurp "config.janet")))))
 (def trimmed (select/drop-nodes (select/keep graph (state :only)) (state :hidden)))
-(def ours (or (trimmed :ours) {}))
-(def groups (state :groups))
 
-(defn- label [n]
-  (def lines (string/replace-all "\n" "\\n" (n :label)))
-  (if-let [size (and (state :sized) (get (graph :sizes) (n :name)))]
-    (string lines "\\n" size)
-    lines))
+# The label carries the line count when (show-lines) asked for it, and the
+# weights decide the shading -- both are graph.janet's work on the way to a
+# render, repeated here so the DOT matches what the page draws.
+(def weights
+  (if (state :sized-coloring)
+    (let [here @{}]
+      (each node (trimmed :nodes)
+        (when-let [size (get (graph :sizes) (node :name))]
+          (put here (node :name) size)))
+      (select/ramp-of here))
+    (select/weights-for trimmed)))
 
-(def in-group @{})
-(each n (trimmed :nodes)
-  (when-let [g (select/group-for (n :name) groups ours)]
-    (put in-group (n :name) (g :prefix))))
-(def by-group @{})
-(eachp [name g] in-group
-  (put by-group g (array/push (or (by-group g) @[]) name)))
+(def labelled
+  (if (state :sized)
+    (merge trimmed
+           {:nodes (map (fn [node]
+                          (if-let [size (get (graph :sizes) (node :name))]
+                            (merge node {:label (string (node :label) "\n"
+                                                        (select/thousands size))})
+                            node))
+                        (trimmed :nodes))})
+    trimmed))
 
-(print "digraph G {")
-(print "  rankdir=TB;")
-(print "  node [shape=ellipse, fontname=\"Comic Sans MS\", fontsize=11];")
-(print "  edge [arrowsize=0.7];")
-(eachp [g members] by-group
-  (print "  subgraph \"cluster_" g "\" {")
-  (print "    label=\"" g "\"; style=dashed; color=\"#ff4d6d\";")
-  (each m members
-    (def node (find |(= ($ :name) m) (trimmed :nodes)))
-    (print "    \"" m "\" [label=\"" (label node) "\"];"))
-  (print "  }"))
-(each n (trimmed :nodes)
-  (unless (in-group (n :name))
-    (print "  \"" (n :name) "\" [label=\"" (label n) "\"];")))
-(each [from to] (trimmed :edges)
-  (print "  \"" from "\" -> \"" to "\";"))
-(print "}")
+(def opts {:groups (state :groups)
+           :sized (state :sized)
+           :filled (state :filled)
+           :font (state :font)
+           :weights weights})
+
+# Through v and back, exactly as `layout/draw` does it: the DOT is written
+# from what the text says, not from the scan directly.
+(def [ok parsed] (v/parse (v/render labelled opts)))
+(if ok
+  (print (layout/to-dot parsed opts))
+  (do (eprint "could not render the graph: " parsed) (os/exit 1)))
