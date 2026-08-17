@@ -164,10 +164,9 @@
 
 
 (defn page
-  ``The HTML for a rendered graph. `fill` is what the CORE knows -- token,
-  stamp, harness name, whether a repl exists -- supplied as a table, so this
-  app does not reach into the server for it and the server does not know
-  what a graph is.``
+  ``The HTML for a rendered graph. `fill` is what the CORE knows -- the
+  token, so far -- supplied as a table, so this app does not reach into the
+  server for it and the server does not know what a graph is.``
   [web-dir title lines problems svg fill]
   # `->>`, not `->`: string/replace takes the subject LAST, and threading it
   # first quietly produced a page that was the replacement value alone.
@@ -193,14 +192,6 @@
   (def [state problems] (config/run lines))
   (def [ok result] (render-svg root specs state))
   [lines problems ok result])
-
-(defn harness-argv
-  ``What the config says to run in the terminal, or nil for the default.
-  Read per request, so editing the config and pressing start does the new
-  thing without a restart.``
-  [config-path]
-  (def [state _] (config/run (read-config config-path)))
-  (state :harness))
 
 (defn forget-scan
   "Drop the cached scan, so the next draw re-reads the source tree."

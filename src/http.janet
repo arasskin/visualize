@@ -8,7 +8,6 @@
 # Bound to 127.0.0.1 rather than 0.0.0.0, deliberately: the server reads the
 # filesystem and runs a config, and neither belongs on the network.
 
-(import ./faults)
 
 (defn- header-end
   "Where the headers stop and the body begins, or nil if they have not."
@@ -231,12 +230,6 @@
                      (def where (or (dyn :serving) "before-respond"))
                      (eprintf "request failed (%s): %s" where (string err))
                      (debug/stacktrace fib err "  ")
-                     # AND INTO THE RING, where the agent working on this
-                     # tool can find it without watching a terminal it
-                     # cannot see. See src/faults.janet.
-                     (def trace @"")
-                     (with-dyns [*err* trace] (debug/stacktrace fib err "  "))
-                     (faults/record :request where (string err) (string trace))
                      (try
                        (respond conn "500 Internal Server Error" "text/plain"
                                 (string err))

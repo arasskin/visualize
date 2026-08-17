@@ -48,17 +48,11 @@
 
 (import ./http)
 (import ./json)
-(import ./term/client :as term)
-(import ./term/host :as term-host)
-(import ./dev)
-(import ./faults)
 (import ./state)
 # The first app built on this core. See the note at the top of graph.janet:
 # it is a consumer, not a component -- delete it and the server still runs.
 (import ./graph)
 (import ./watch)
-(import ./stamp)
-(import ./watchdog)
 
 # The env the dev repl evaluates in protos to THIS one, captured at load so
 # a connection sees the same names this file sees -- every module above,
@@ -70,11 +64,6 @@
 # window, and "address already in use" leaves you to go find out who has it.
 (def default-port 8770)
 (def port-tries 20)
-
-# What the terminal window runs when the config does not say. Claude Code
-# because it is the harness this was built against; `(harness pi)` in the
-# config picks another, and nothing below this line knows the difference.
-(def default-harness ["claude"])
 
 (defn- query
   ``The query string of a path, as a table. Enough for `?k=secret`.``
@@ -132,21 +121,6 @@
   (string base "/visualize-" (string/format "%08x" digest) tag))
 
 (defn main [& args]
-  # ONE PROGRAM, TWO ROLES. Run plainly, this is the web server. Run with
-  # --supervise it is the process that owns the terminal, spawned by the
-  # server's own client half and outliving it -- see src/term/host.janet
-  # for why the pty cannot live here. Orchestrating both roles from this one
-  # entry point means there is exactly one program to install, one to spawn,
-  # and one place that knows how the pieces fit.
-  (when (= (get args 1) "--supervise")
-    (def path (or (get args 2) (error "usage: visualize --supervise <socket-path>")))
-    # The tools live beside this file's checkout, and the host puts them on
-    # the harness's PATH -- see ./vz. Computed here rather than read from
-    # `here` below, which this branch runs before.
-    (term-host/tools-at (os/realpath (string (dyn :current-file) "/../..")))
-    (term-host/host path)
-    (os/exit 0))
-
   # The dev flags were consumed at load (they had to be -- see the top of
   # this file); here they just must not be mistaken for the directory.
   (def args (filter |(not (index-of $ ["--dev" "--no-dev"])) args))
@@ -165,47 +139,11 @@
 
   # Faults go to this project's state directory from here on, so a crash
   # that takes the server down is still readable afterwards.
-  (faults/logging-to root)
-
   (def token (make-token))
   # When this run began. Faults are counted from here, so the page's number
   # means "since the server started" rather than "ever".
   (def page-born (os/time))
 
-  # The terminal lives in another process, so that this one can be restarted
-  # without killing the agent -- see src/term/client.janet. Told where to find
-  # it and how to start one, both of which only this function knows.
-  #
-  # ONE CLIENT PER PANE, BUILT THE SAME WAY. The two panes differ in their
-  # socket and in what their pty runs; everything else -- the backlog, the
-  # reattach dance, the framing, the connection discipline -- is the same
-  # code twice, which is the point. Registered by name so the repl's
-  # equipment can ask about either without holding a client.
-  #
-  # The socket path is computed ONCE and passed twice per pane: the address
-  # we look on and the address we tell a new host to bind have to be the same
-  # string, and two calls is two chances for that to stop being true.
-  (defn pane-for [socket]
-    (term/make-client socket
-                             [(string here "/bin/janet")
-                              (string here "/src/core.janet")
-                              "--supervise" socket]))
-
-  (def agent-socket (socket-for root))
-  (def agent-client (term/register "harness" (pane-for agent-socket)))
-
-  # The repl window's pty, behind a SECOND host. What it runs is ./repl,
-  # which is nc against this server's own repl socket: the page gets a
-  # cooked-mode terminal into the live image, exactly what a person at a
-  # shell gets. Dev-only, because the socket it would connect to only exists
-  # in dev mode.
-  (def replterm-socket (socket-for root ".replterm.sock"))
-  (def repl-client
-    (when dev?
-      (term/register "repl" (pane-for replterm-socket))))
-  # Where this run's dev repl listens. Named after the port, so it is only
-  # knowable once the server has bound one -- set below, read per request.
-  (var repl-socket nil)
   # Where this run advertises its url and token for local tooling (dev only).
   (var endpoint-path nil)
 
@@ -239,14 +177,9 @@
     (def path (without-query (request :path)))
     (def method (request :method))
 
-    # Which harness the config asked for, re-read per request so editing the
-    # config and pressing start does the new thing without a restart.
-    (defn harness-argv []
-      (or (graph/harness-argv config-path) default-harness))
-
     (defn guarded [reply]
-      # One shape for every terminal endpoint: prove you are the page this run
-      # served, or get nothing. See `permitted?`.
+      # One shape for every endpoint that writes: prove you are the page this
+      # run served, or get nothing. See `permitted?`.
       (if (permitted? request)
         (reply)
         ["403 Forbidden" "application/json"
@@ -281,8 +214,7 @@
           # many faults the server has recorded since this page loaded, so
           # the pane can say so rather than leaving them on a stderr nobody
           # is watching.
-          {"serverStamp" stamp/born
-           "faults" (faults/count-since page-born)}))])
+          {}))])
 
     (cond
       (and (= method "GET") (= path "/"))
@@ -295,114 +227,13 @@
                      # What only the core knows, handed over rather than
                      # reached for: the app fills its own template holes and
                      # this fills the server's.
-                     {"TOKEN" (json/encode token)
-                      "HARNESS_NAME" (string/join (harness-argv) " ")
-                      "DEV" (json/encode dev?)
-                      "STAMP" (json/encode stamp/born)})])
-
-      # -- the harness ------------------------------------------------------
-      # Polled rather than streamed over SSE. A terminal is a request/response
-      # shape anyway -- the page has to send keystrokes regardless -- and one
-      # endpoint that returns "everything since chunk N" is both the catch-up
-      # path for a reload and the live path for a running session. SSE would
-      # need a second mechanism for input and a way to resume a dropped
-      # stream, which is this endpoint again with more parts.
-      (and (= method "POST") (= path "/pane/harness/start"))
-      (guarded (fn []
-                 (def sent (json/decode (request :body)))
-                 (def rows (math/floor (or (get sent "rows") 24)))
-                 (def cols (math/floor (or (get sent "cols") 100)))
-                 ["200 OK" "application/json"
-                  (json/encode (:start agent-client (harness-argv) root rows cols))]))
-
-      (and (= method "POST") (= path "/pane/harness/stop"))
-      (guarded (fn [] ["200 OK" "application/json"
-                       (json/encode (:stop agent-client))]))
-
-      (and (= method "POST") (= path "/pane/harness/input"))
-      (guarded (fn []
-                 (def sent (json/decode (request :body)))
-                 # `at` turns this into "type, and tell me what came back" --
-                 # one round trip for a keystroke and its echo. See `send`.
-                 (def echo (:send agent-client (string (get sent "text" ""))
-                                         (when-let [a (get sent "at")]
-                                           (math/floor a))
-                                         (truthy? (get sent "quiet"))))
-                 ["200 OK" "application/json"
-                  (json/encode (or echo {"ok" true}))]))
-
-      (and (= method "POST") (= path "/pane/harness/redraw"))
-      (guarded (fn []
-                 (:redraw agent-client)
-                 ["200 OK" "application/json" (json/encode {"ok" true})]))
-
-      (and (= method "POST") (= path "/pane/harness/resize"))
-      (guarded (fn []
-                 (def sent (json/decode (request :body)))
-                 (:resize agent-client (math/floor (or (get sent "rows") 24))
-                           (math/floor (or (get sent "cols") 100)))
-                 ["200 OK" "application/json" (json/encode {"ok" true})]))
-
-      (and (= method "POST") (= path "/pane/harness/poll"))
-      (guarded (fn [] (poll-answer (fn [at gen wait] (:poll agent-client at gen wait))
-                                   (request :body))))
-
-      # -- the repl window --------------------------------------------------
-      # The harness endpoints again, one per one, against the second
-      # supervisor. The page drives both panes with the same code and only
-      # the prefix differs, which is the point: nothing below this comment
-      # knows it is a repl rather than an agent. Guarded by `dev?` first, so
-      # without dev mode these fall through to the 404 like any other
-      # unserved path.
-      (and dev? (= method "POST") (= path "/pane/repl/start"))
-      (guarded (fn []
-                 (def sent (json/decode (request :body)))
-                 ["200 OK" "application/json"
-                  (json/encode
-                    (:start repl-client
-                            [(string here "/repl") repl-socket]
-                            root
-                            (math/floor (or (get sent "rows") 24))
-                            (math/floor (or (get sent "cols") 100))))]))
-
-      (and dev? (= method "POST") (= path "/pane/repl/stop"))
-      (guarded (fn [] ["200 OK" "application/json"
-                       (json/encode (:stop repl-client))]))
-
-      (and dev? (= method "POST") (= path "/pane/repl/input"))
-      (guarded (fn []
-                 (def sent (json/decode (request :body)))
-                 (def echo (:send repl-client
-                                  (string (get sent "text" ""))
-                                  (when-let [a (get sent "at")]
-                                    (math/floor a))
-                                  (truthy? (get sent "quiet"))))
-                 ["200 OK" "application/json"
-                  (json/encode (or echo {"ok" true}))]))
-
-      (and dev? (= method "POST") (= path "/pane/repl/redraw"))
-      (guarded (fn []
-                 (:redraw repl-client)
-                 ["200 OK" "application/json" (json/encode {"ok" true})]))
-
-      (and dev? (= method "POST") (= path "/pane/repl/resize"))
-      (guarded (fn []
-                 (def sent (json/decode (request :body)))
-                 (:resize repl-client
-                          (math/floor (or (get sent "rows") 24))
-                          (math/floor (or (get sent "cols") 100)))
-                 ["200 OK" "application/json" (json/encode {"ok" true})]))
-
-      (and dev? (= method "POST") (= path "/pane/repl/poll"))
-      (guarded (fn []
-                 (poll-answer (fn [at gen wait] (:poll repl-client at gen wait))
-                              (request :body))))
+                     {"TOKEN" (json/encode token)})])
 
       # THE WATCH: park until the source changes, so an edit on disk redraws
       # the page without anyone pressing anything. Parked rather than
-      # polled for the same reason the panes are -- see the note on `wait`
-      # in term/host.janet -- with a bounded hold so a proxy or a sleeping
-      # laptop cannot leave the request hanging forever.
+      # polled so that an idle page costs one held connection rather
+      # than a request a second -- with a bounded hold so a proxy or a
+      # sleeping laptop cannot leave the request hanging forever.
       (and (= method "POST") (= path "/watch"))
       (guarded (fn []
                  (def sent (try (json/decode (request :body)) ([_] {})))
@@ -427,27 +258,6 @@
                    ["200 OK" "image/svg+xml" result]
                    ["500 Internal Server Error" "text/plain" result])))
 
-      # WHICH TREE THIS RUN SERVES. The harness tools need the state
-      # directory, and an agent's working directory is not a reliable
-      # guide -- it may have cd'd anywhere. Cheap, and it means `vz` never
-      # guesses.
-      (and (= method "GET") (= path "/root"))
-      (guarded (fn [] ["200 OK" "application/json"
-                       (json/encode {"root" root "stamp" stamp/born})]))
-
-      # WHAT HAS GONE WRONG LATELY, for the page's state line and for an
-      # agent asking the tool about itself. Guarded like the terminal
-      # endpoints because a stack trace names paths and code: the same
-      # reasoning as `permitted?`, and no reason to be laxer.
-      (and (= method "POST") (= path "/faults"))
-      (guarded (fn []
-                 (def sent (try (json/decode (request :body)) ([_] {})))
-                 (def since (math/floor (or (get sent "since") 0)))
-                 ["200 OK" "application/json"
-                  (json/encode {"faults" (faults/recent
-                                           (math/floor (or (get sent "limit") 10)))
-                                "since" (faults/count-since since)
-                                "now" (os/time)})]))
 
       # Anything else in web/, served by name rather than by a route per file.
       #
@@ -471,21 +281,9 @@
 
       ["404 Not Found" "text/plain" "not found"]))
 
-  # In dev mode every request runs under the watcher, so a crash is a fiber
-  # in dev/crashed and a breakpoint parks the request instead of losing it.
   (def [server bound accept-loop]
-    (http/serve default-port port-tries (if dev? (dev/watched handler) handler)))
+    (http/serve default-port port-tries handler))
   (def url (string "http://127.0.0.1:" bound))
-
-  # The dev repl: this process's own image on a unix socket, evaluating in an
-  # env that sees everything this file sees. It runs whatever connects -- see
-  # the security note on dev/serve. Now that every run hosts one, the name is
-  # keyed to the BOUND PORT as well as the root: the live server and a sandbox
-  # developing it share a root, and a name both computed from the root alone
-  # would be stolen by whichever bound last -- dev/serve deletes and rebinds a
-  # taken name on purpose. The port is the one thing the walk just made
-  # unique, which is why this waits until after the bind.
-  (when dev? (set repl-socket (socket-for root (string ".repl." bound ".sock"))))
 
   # WHERE AN AGENT FINDS THE DOOR. The terminal endpoints need this run's
   # token, and until now the only copy lived in the served HTML -- so an
@@ -497,41 +295,12 @@
   (when dev?
     (set endpoint-path (socket-for root ".endpoint.json"))
     (spit endpoint-path (json/encode {"url" url "token" token
-                                      "stamp" stamp/born}))
+                                      }))
     (os/chmod endpoint-path 8r600))
-  # The repl advertises the session tools without importing them: harness
-  # writes the lines, core hands them over, dev prints whatever it is given.
-  # The repl advertises the session tools without importing them: harness
-  # writes the lines, core hands them over, dev prints whatever it is given.
-  (when dev?
-    (dev/serve repl-socket this-env "visualize"
-               (string term/equipment
-                       "faults:   (faults/print-recent) what has gone wrong lately\n")))
-
-  # CTRL-C TAKES THE AGENT WITH IT, and this is the only thing that does.
-  #
-  # The terminal now lives in another process precisely so the server can die
-  # and come back -- but that must not turn quitting into "the agent silently
-  # keeps running". So the two exits are told apart by who caused them:
-  # ctrl-c says `shutdown` and the supervisor kills the pty exactly as the old
-  # single process did, while a restart under --watch closes its socket and
-  # says nothing.
-  #
-  # Explicit rather than relying on the signal reaching the supervisor. SIGINT
-  # goes to the process group, which would usually include it -- but it was
-  # spawned detached, and "usually" is not a lifetime guarantee.
+  # Ctrl-c tidies up after itself: the endpoint file names a server that is
+  # about to stop existing.
   (os/sigaction :int (fn []
                        (print)
-                       (print "visualize: stopping the harness")
-                       (try (:shutdown agent-client) ([_] nil))
-                       # The repl window's supervisor goes the same way: its
-                       # nc is talking to a socket about to be removed, so
-                       # there is nothing there worth outliving us.
-                       (when repl-client (try (:shutdown repl-client) ([_] nil)))
-                       # The repl socket dies with its server, so its name
-                       # should too: every run mints one now, and the port in
-                       # the name means a restart rarely reclaims yesterday's.
-                       (when repl-socket (try (os/rm repl-socket) ([_] nil)))
                        (when endpoint-path (try (os/rm endpoint-path) ([_] nil)))
                        (os/exit 0)))
 
@@ -542,12 +311,7 @@
   (print "visualize: " root " on " url)
   (print (align-word "config: " "visualize: ") config-path)
   (print (align-word "parsers: " "visualize: ") (string/join (graph/spec-names specs) ", "))
-  (when dev? (print (align-word "repl: " "visualize: ") "nc -U " repl-socket))
   (print "ctrl-c to stop")
-  # The loop's own witness: a thread that names event-loop stalls on stderr,
-  # from the one vantage point a stall cannot silence.
-  (watchdog/start "server")
-
   # WATCH THE SOURCE. An edit anywhere under the root drops the scan cache
   # and bumps the generation; the page is parked on /watch and redraws. This
   # is what the Regenerate button used to do by hand, and the reason it is

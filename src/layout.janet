@@ -30,7 +30,6 @@
 
 (import ./color)
 (import ./select)
-(import ./v)
 
 (defn- quoted
   "A DOT string literal: quotes and backslashes escaped, newlines as \\n."
@@ -148,27 +147,26 @@
   ``Draw `graph` with graphviz. Returns [ok svg-or-error], the shape every
   caller already handles.
 
-  The graph makes the round trip through v on the way: `render` writes it,
-  `parse` reads it back, and the DOT is written from what came out -- so
-  what is drawn is what the text says, and a bug in either direction shows
-  up as a picture rather than as a silent disagreement.``
+  STRAIGHT TO DOT. The graph used to make a round trip through `v` on the
+  way here -- rendered to text, parsed back, drawn from what came out --
+  so that a disagreement between the writer and the reader showed up as a
+  picture. That was worth its weight when the layout was ours and the text
+  format was how a graph was described; with graphviz drawing and the
+  format gone, it was four hundred lines of detour between a table and a
+  DOT document.``
   [graph &opt opts]
   (default opts {})
-  (def text (v/render graph opts))
-  (def [ok parsed] (v/parse text))
-  (if-not ok
-    [false parsed]
-    (let [dot (to-dot parsed opts)]
-      (try
-        (let [proc (os/spawn ["dot" "-Tsvg"] :px {:in :pipe :out :pipe})]
-          (:write (proc :in) dot)
-          (:close (proc :in))
-          (def svg (:read (proc :out) :all))
-          (def status (os/proc-wait proc))
-          (if (zero? status)
-            [true (trimmed-svg (string svg))]
-            [false "graphviz failed to draw this graph"]))
-        ([err]
-          [false (string "graphviz is required to draw the graph, and running "
-                         "`dot` failed: " err
-                         ". Install it with `brew install graphviz`.")])))))
+  (def dot (to-dot graph opts))
+  (try
+    (let [proc (os/spawn ["dot" "-Tsvg"] :px {:in :pipe :out :pipe})]
+      (:write (proc :in) dot)
+      (:close (proc :in))
+      (def svg (:read (proc :out) :all))
+      (def status (os/proc-wait proc))
+      (if (zero? status)
+        [true (trimmed-svg (string svg))]
+        [false "graphviz failed to draw this graph"]))
+    ([err]
+      [false (string "graphviz is required to draw the graph, and running "
+                     "`dot` failed: " err
+                     ". Install it with `brew install graphviz`.")])))

@@ -1,45 +1,27 @@
 # Working on visualize
 
-A dependency-graph viewer in Janet. `README.md` is the full account -- how the
-config language works, what `v` is, why the layout replaced graphviz. This file
-is only what you need in the first five minutes, and the traps that cost a
-session each.
+A dependency-graph viewer in Janet. It scans a source tree, works out what
+imports what, and draws the result with graphviz. `README.md` is the full
+account of the config language; this file is what you need in the first five
+minutes.
 
-## The server runs from a loaded image
+## The loop
 
-**Editing a file does not change what the page draws.** The server holds the
-modules it compiled at startup, so your change is invisible to it until you
-reload -- and a fresh `janet` you run yourself will happily give you different
-numbers from the page, which is a confusing way to spend an afternoon.
-
-    ./vz reload            load your edits (git tells it which, innermost first)
+    ./visualize            start a server (./build runs first)
     ./vz shot out.png      what the graph looks like now
 
-That is the loop. `vz reload` exits non-zero and names the file if something
-fails to compile, and leaves the repl usable either way.
-
-## Reaching the live image
-
-    ./pane repl '(expr)'   evaluate, where a person watching the page sees it
-    ./pane repl            just read what the pane shows
-    ./pane harness 'text'  type at the agent in the other pane
-
-`vz eval '(expr)'` and `vz pane repl '(expr)'` are the *same script* -- pick
-whichever reads better. `./pane` with no arguments prints its own usage.
-
-**Do not open `nc -U` to the repl socket.** It gets a private evaluation
-environment that nobody watching the page can see, and work done there leaves
-no trace to scroll back through. `./pane` types into the pty instead, so what
-you type, a person sees typed.
+The server watches the tree and redraws when a file changes, so an edit to
+the code you are viewing shows up on its own. An edit to visualize ITSELF
+needs a restart: the server runs from the modules it compiled at startup.
 
 ## Tools
 
     ./vz                   the list, with what each one is for
     ./vz scan [pattern]    files, sizes, what each depends on
-    ./vz faults [n]        what has gone wrong lately, with stacks
+    ./vz dot [file]        the DOT the page is drawn from
     ./vz where             url, root, state directory
-    ./test/run             510+ assertions, no framework
-    ./visualize            start a server (dev mode; ./build runs first)
+    ./test/run             210+ assertions, no framework
+    ./visualize            start a server (./build runs first)
 
 `vz shot` writes SVG by default because SVG is text -- you can read node names
 and positions straight out of it. Ask for `.png` when you want to look.
@@ -54,27 +36,17 @@ four times before it occurred to anyone that it was a tool.
 The bar is low: `vz` is a shell script that reads a state file or posts to an
 endpoint, and every subcommand in it could be typed by hand. Adding one is a
 case in its `case` and a line in its usage block. If you find yourself
-measuring the same property of the graph a second time -- how many edges
-cross, how far a bend sits from its line, how deep an edge cuts into a node --
-that is the signal.
+measuring the same property of the tree a second time, that is the signal.
 
 It also makes the measurement available to the next person rather than to the
 transcript it was buried in, and puts it somewhere a test can call.
 
 ## Traps
 
-- **`dev/reload` takes a substring of the path.** `"layout"` now resolves to
-  `src/layout.janet` rather than erroring, but a name matching several
-  unrelated modules still needs to be exact.
-- **A failed reload drops the repl into `debug[1]`**, where every later
-  expression evaluates in the wrong environment and the next reload will look
-  like it worked. `(quit)` leaves -- once per level, and they nest.
-- **Reload innermost first.** A module that imports another holds bindings
-  from it, so reloading `select` alone leaves `layout.janet` and
-  `graph.janet` calling the version they compiled against. `vz reload` orders
-  by path depth for this reason; if you reload by hand, follow it.
 - **The tests do not need the server**, and the server does not notice the
   tests. They are separate images.
+- **`dot` must be installed.** graphviz draws every picture; without it the
+  page reports that it could not render and names the install command.
 
 ## Layout work specifically
 
@@ -103,7 +75,6 @@ two rankers, two coordinate passes, mincross with transpose and sift, and a
 funnel-and-slab spline router. It reached zero edges through nodes and zero
 clipped outlines, and never reached dot's crossing count (12 against 2,
 measured with the same scorer on the same tree). It was deleted deliberately.
-If you are tempted to write another one, read that history in git first --
-`docs/dotgen-audit.md` and the commits around 2026-08-17 record what was
-tried, what each attempt measured, and which of them made the picture worse
-while improving the numbers.
+If you are tempted to write another one, read that history first -- the
+commits on `feast` record what was tried, what each attempt measured, and
+which of them made the picture worse while improving the numbers.

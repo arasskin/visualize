@@ -18,7 +18,6 @@
 (import ../src/config)
 (import ../src/select)
 (import ../src/layout)
-(import ../src/v)
 
 (def specs (parsers/load "./src/parsers"))
 (def graph (scan/scan "." specs))
@@ -54,9 +53,4 @@
            :font (state :font)
            :weights weights})
 
-# Through v and back, exactly as `layout/draw` does it: the DOT is written
-# from what the text says, not from the scan directly.
-(def [ok parsed] (v/parse (v/render labelled opts)))
-(if ok
-  (print (layout/to-dot parsed opts))
-  (do (eprint "could not render the graph: " parsed) (os/exit 1)))
+(print (layout/to-dot labelled opts))

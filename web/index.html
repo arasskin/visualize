@@ -19,47 +19,13 @@
   </div>
   <div id="grip" class="grip" title="drag to resize"></div>
 </div>
-
-<div id="harness" class="panel term shut">
-  <div class="bar" title="click to open, drag to move">
-    <span class="name">{{HARNESS_NAME}}</span>
-    <span class="state"></span>
-  </div>
-  <!-- The terminal is a <pre>: the emulator writes a screen grid into it, and
-       a monospace block is exactly the shape a terminal is. tabindex makes it
-       focusable, which is how keystrokes get captured without a text input. -->
-  <div class="panel-body">
-    <pre class="screen" tabindex="0" spellcheck="false"></pre>
-  </div>
-  <div class="grip" title="drag to resize"></div>
-</div>
-
-<!-- The same pane again, driving /pane/repl/* instead of /pane/harness/*: a terminal
-     running ./repl, which is the server's own image on its dev socket.
-     Removed by app.js when the server was started --no-dev. -->
-<div id="repl" class="panel term shut">
-  <div class="bar" title="click to open, drag to move">
-    <span class="name">repl</span>
-    <span class="state"></span>
-  </div>
-  <div class="panel-body">
-    <pre class="screen" tabindex="0" spellcheck="false"></pre>
-  </div>
-  <div class="grip" title="drag to resize"></div>
-</div>
 <script>
 // The file the page was rendered from, handed over at load so the editor opens
 // on the same lines the graph came from.
 window.CONFIG_LINES = {{CONFIG_LINES}};
 window.CONFIG_PROBLEMS = {{CONFIG_PROBLEMS}};
-// The secret the terminal endpoints require. Here rather than in a cookie so
+// The secret the write endpoints require. Here rather than in a cookie so
 // it dies with the tab and is never sent to another origin.
 window.TOKEN = {{TOKEN}};
-// Whether this run hosts a dev repl -- without one there is no repl panel.
-window.DEV = {{DEV}};
-// The code the server was running when it rendered this page. Poll replies
-// carry the server's and supervisor's current stamps; a mismatch among the
-// three is named in the terminal's state line instead of being debugged.
-window.STAMP = {{STAMP}};
 </script>
 <script type="module" src="/app.js"></script>

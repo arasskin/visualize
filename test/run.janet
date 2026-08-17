@@ -18,18 +18,11 @@
 (import ./color)
 (import ./config)
 (import ./select)
-(import ./v)
 (import ./http)
 (import ./json)
 (import ./scan)
-(import ./dev)
-(import ./faults)
 (import ./state)
-(import ./stamp)
 # These spawn real processes (and the watchdog a real thread). Nothing may
 # be imported below them.
-(import ./watchdog)
-(import ./pty)
-(import ./term)
 
 (os/exit (t/report))
