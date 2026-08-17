@@ -93,6 +93,11 @@ renderer would emit, and both are handled -- dot escapes the arrow as
 as sibling `<text>` elements rather than `<tspan>`s (handled in
 `web/app.js`'s `moduleNames`, which reads both shapes).
 
+**The old layout lives on the `feast` branch**, at the last commit before it
+was deleted. Nothing on `main` needs it, but it is intact there rather than
+only in history: `git show feast:src/layout/layered.janet`, or check the
+branch out to run it.
+
 **There was a custom layout here** -- about six thousand lines of Sugiyama:
 two rankers, two coordinate passes, mincross with transpose and sift, and a
 funnel-and-slab spline router. It reached zero edges through nodes and zero
