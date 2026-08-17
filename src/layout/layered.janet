@@ -188,6 +188,25 @@
           (def n (length neighbours))
           (def zone-lo (neighbours (div (- n 1) 2)))
           (def zone-hi (neighbours (div n 2)))
+          # A SOURCE SINKS TO ITS CHILDREN. "Stay where you are" is the
+          # right rule for a node with edges on both sides -- its position
+          # is an answer to a real question -- but a node with NO PARENTS
+          # was never answering anything: rank 0 is where longest-path
+          # dumps every parentless node before the relaxation begins, and
+          # staying there is inertia, not indifference.
+          #
+          # Measured against dot on this tool's own graph: `src/stamp` and
+          # `src/watchdog` are pure sources whose only child is
+          # `src/core`, and dot ranks them one rank above it, spanning 2.
+          # Ours left them at rank 0 spanning 5 -- and every rank a chain
+          # crosses is a bend, a column, and something for a neighbour to
+          # cross. dot's ranking laid 25 bends on this graph where ours
+          # laid 42, and that difference is most of why it drew 2 edge
+          # crossings against our 9. The objective is FLAT across the
+          # zone, so this costs no edge length at all; it spends the same
+          # freedom the note above spends on group compactness, on the
+          # thing the picture actually reads.
+          (def sinks-down (empty? up))
           (def key (group-of name))
           (def ideal
             (if-let [mates (and key (filter |(and (not= $ name) (= key (group-of $)))
@@ -200,12 +219,88 @@
                 # the drift gone, free movement inside the zone is enough.)
                 (let [ranks (sorted (map |(layer $) mates))]
                   (ranks (div (length ranks) 2))))
-              (layer name)))
+              (if sinks-down ceiling (layer name))))
           (def want (min zone-hi (max zone-lo ideal)))
           (def target (min ceiling (max floor want)))
           (unless (= target (layer name))
             (put layer name target)
             (set moved true))))))
+
+  # SINK THE SOURCES, as a group or not at all.
+  #
+  # THE MOVE COORDINATE DESCENT CANNOT MAKE. `src/stamp` is a pure source
+  # whose children are `src/core` (rank 5) and `src/term/host` (rank 1),
+  # so its ceiling is 0 and it cannot descend one rank -- and neither can
+  # `term/host`, whose own ceiling is set by `term/client`. Every member of
+  # the cluster is individually pinned by a sibling that has not moved
+  # yet, and one-node-at-a-time relaxation therefore leaves the whole
+  # group stranded at the top of the drawing however flat the objective
+  # is. dot moves the cluster bodily: measured on this graph it ranks
+  # stamp, watchdog, pty and client together at r3 with host at r4, one
+  # above core, where ours left them at r0 spanning five ranks.
+  #
+  # WHY IT IS WORTH A PASS. Every rank a chain crosses is a bend, a
+  # reserved column, and something for a neighbour to cross. dot's ranking
+  # lays 25 bends on this graph where ours laid 42, and that difference is
+  # most of why it draws 2 edge crossings against our 9 -- measured with
+  # the same scorer on the same tree.
+  #
+  # THE RULE, and it is exact rather than heuristic: a set of nodes may
+  # all descend one rank together when every edge LEAVING the set still
+  # points down afterwards -- that is, no member has a child outside the
+  # set on the rank just below. Descending a closed set like that changes
+  # no edge's direction and shortens every edge that enters it from above,
+  # so it never costs edge length and usually saves it. Sources first,
+  # then whatever their descent unblocks, repeated to a fixed point.
+  (when (not (empty? names))
+    (var sank true)
+    (var rounds 0)
+    (while (and sank (< rounds 20))
+      (set sank false)
+      (++ rounds)
+      # The topmost rank that still holds a parentless node is the one
+      # worth trying: sinking anything above its own children is the whole
+      # point, and starting at the top keeps the descent orderly.
+      (each seed (sorted-by |(layer $) (filter |(empty? (parents $)) names))
+        # The closure: the seed, plus anything that would be left behind
+        # in a way that inverts an edge.
+        # `crew`, not `set`: `set` is Janet's assignment special form, and
+        # shadowing it makes every later (set x v) in this scope a compile
+        # error about argument counts, pointing at the assignment rather
+        # than at the binding that broke it.
+        (def crew @{seed true})
+        (var grew true)
+        (while grew
+          (set grew false)
+          (each n (keys crew)
+            (each c (children n)
+              # A child one rank below must come too, or the edge to it
+              # would flatten; a child further down is fine where it is.
+              (when (= (layer c) (+ 1 (layer n)))
+                (unless (crew c)
+                  (put crew c true)
+                  (set grew true))))))
+        # THE TEST IS NET EDGE LENGTH, not "nothing stretches". A crew
+        # nearly always has some parent outside it -- `src/term/host` is
+        # pulled on by watchdog, pty, client and json at once -- and
+        # refusing to move whenever one edge would lengthen refuses every
+        # move worth making. Descending the crew by one rank lengthens
+        # every edge entering it from above by one and shortens every edge
+        # leaving it downward by one, so the arithmetic is a count: move
+        # when strictly more edges leave than enter. That is the same
+        # trade network simplex makes when it exchanges a tree edge, done
+        # here on the one family of subtrees coordinate descent can never
+        # reach.
+        (var entering 0)
+        (var leaving 0)
+        (each n (keys crew)
+          (each p (parents n) (unless (crew p) (++ entering)))
+          (each c (children n) (unless (crew c) (++ leaving))))
+        # `leaving` doubles as the termination guard: a crew with no way
+        # down is its component's tail, and 0 > entering is never true.
+        (when (> leaving entering)
+          (each n (keys crew) (put layer n (+ 1 (layer n))))
+          (set sank true)))))
 
   # NORMALISE. The relaxation can leave the topmost rank above zero -- every
   # node in a component may have shifted down together -- and a picture that

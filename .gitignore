@@ -9,3 +9,4 @@ config.janet
 
 # Per-project state: the scan cache and the fault log.
 .visualize/
+.probe/
