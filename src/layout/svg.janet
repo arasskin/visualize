@@ -606,6 +606,154 @@
                              :y0 (- (p :y) (s :h)) :y1 (+ (p :y) (s :h))})))))
     out)
 
+  (defn set-route
+    ``The interval-set tier: free space by subtraction, passage chosen
+    jointly, run ONLY on edges the side model leaves dirty.
+
+    No sides, no coins: the free space at each station height is the
+    full line minus every obstacle's padded span -- an interval SET,
+    which is what "between these two" needs and a side can never say. A
+    cheap dynamic program then chooses one interval per gate to minimise
+    total sideways travel from start to goal, deciding every side and
+    every between at once; the funnel and fitter receive the resolved
+    single-interval gates and know nothing of any of it.
+
+    A FALLBACK TIER BY DESIGN, not the router. This model was first
+    integrated as a wholesale replacement and reverted the same day: it
+    re-decided routes that were already clean and had to reproduce every
+    behaviour the side model got right before fixing the one it got
+    wrong. As a tier it earns acceptance one edge at a time, and only by
+    coming back clean. The obstacle discovery below deliberately mirrors
+    with-overhangs rather than sharing its code: the tier exists to give
+    a second, independent opinion, and independence is the point --
+    unify them when the tier has earned trust, not before.
+
+    LEDGER, 2026-08-17, the day it was built: on this tool's own graph
+    the tier never fires -- both residual edges under VISUALIZE_SIMPLEX
+    decline it too, with the lane and without. Their blocker is not the
+    interval model but the FAMILY's shared blindness: every y-gate
+    variant constrains where a path crosses chosen heights and says
+    nothing about the segments BETWEEN them, and those edges cross nodes
+    between stations. The next idea has to bound segments, not heights
+    -- dot's slab boxes do exactly that, which is the argument for a
+    slab tier ported whole rather than a fourth gate variant. Until a
+    graph arrives where a residue IS expressible in intervals, this tier
+    is insurance: correct, tested by the modes staying at their
+    baselines to the digit, and dormant.``
+    [start goal gates extra]
+    (def [sx sy] start)
+    (def [gx gy] goal)
+    (def pts (array [sx sy] ;(map (fn [[x y]] [x y]) bends) [gx gy]))
+    (defn path-x [y]
+      (var out sx)
+      (for i 0 (- (length pts) 1)
+        (def [ax ay] (pts i))
+        (def [bx by] (pts (+ i 1)))
+        (when (and (<= ay y) (<= y by) (< ay by))
+          (set out (+ ax (* (- bx ax) (/ (- y ay) (- by ay)))))))
+      out)
+    (def pad 8)
+    (def rects @[])
+    (defn take-rect [x0 x1 y0 y1]
+      (when (and (< y0 gy) (> y1 sy))
+        (array/push rects {:x0 x0 :x1 x1 :y0 y0 :y1 y1})))
+    (when box-rects
+      (each r box-rects
+        (unless (or (get (r :members) from) (get (r :members) to))
+          (take-rect (r :x0) (r :x1) (r :y0) (r :y1)))))
+    (when (and places sizes)
+      (eachp [name p] places
+        (unless (or (= name from) (= name to))
+          (def s (sizes name))
+          (def margin (+ (s :w) 28))
+          (when (some (fn [y] (< (math/abs (- (path-x y) (p :x))) margin))
+                      [(- (p :y) (s :h)) (p :y) (+ (p :y) (s :h))])
+            (take-rect (- (p :x) (s :w)) (+ (p :x) (s :w))
+                       (- (p :y) (s :h)) (+ (p :y) (s :h)))))))
+    (when extra
+      (each r extra
+        (take-rect (r :x0) (r :x1) (r :y0) (r :y1))))
+    (when (not (empty? rects))
+      (defn subtract-span [spans a b]
+        (def out @[])
+        (each [l r] spans
+          (if (or (<= b l) (>= a r))
+            (array/push out [l r])
+            (do (when (< l a) (array/push out [l a]))
+                (when (< b r) (array/push out [b r])))))
+        out)
+      (defn free-at [y]
+        (var spans @[[-2000 2000]])
+        (each o rects
+          (when (and (<= (o :y0) y) (<= y (o :y1)))
+            (set spans (subtract-span spans
+                                      (- (o :x0) pad)
+                                      (+ (o :x1) pad)))))
+        # A sliver is not a passage: the resolver prices only sideways
+        # travel and would thread a crack the fit then bulldozes through
+        # both walls of.
+        (filter (fn [[l r]] (>= (- r l) 14)) spans))
+      (defn intersect-sets [as bs]
+        (def out @[])
+        (each [al ar] as
+          (each [bl br] bs
+            (def il (max al bl))
+            (def ir (min ar br))
+            (when (< il ir) (array/push out [il ir]))))
+        out)
+      (def stations @[])
+      (each o rects
+        (def y0c (max (o :y0) (+ sy 0.5)))
+        (def y1c (min (o :y1) (- gy 0.5)))
+        (each [y on-edge?] [[(- y0c 1) false] [y0c true]
+                            [y1c true] [(+ y1c 1) false]]
+          (when (and (> y sy) (< y gy) (<= y0c y1c))
+            (def spans (free-at y))
+            (def carried
+              (when on-edge?
+                (when-let [ch (funnel/channel gates y)]
+                  (def inter (intersect-sets spans [ch]))
+                  (when (not (empty? inter)) inter))))
+            (def use (or carried spans))
+            (when (not (empty? use))
+              (array/push stations [use y])))))
+      (def entries (array ;(map (fn [[l r y]] [@[[l r]] y 0]) gates)
+                          ;(map (fn [[sp y]] [sp y 1]) stations)))
+      (def merged @[])
+      (each [spans y kind]
+        (sorted entries (fn [a b] (if (= (a 1) (b 1))
+                                    (< (a 2) (b 2))
+                                    (< (a 1) (b 1)))))
+        (if (and (not (empty? merged)) (= ((last merged) 1) y))
+          (let [[ps _] (last merged)
+                inter (intersect-sets ps spans)]
+            (when (not (empty? inter))
+              (put merged (- (length merged) 1) [inter y])))
+          (array/push merged [spans y])))
+      # One interval per gate, chosen jointly: cheapest total sideways
+      # travel from start to goal, each state one interval of the
+      # current gate, the trail remembering the choices.
+      (var prev @[[0 sx @[]]])
+      (each [spans y] merged
+        (def nxt @[])
+        (each [l r] spans
+          (var best nil)
+          (each [c px trail] prev
+            (def nx (min r (max l px)))
+            (def nc (+ c (math/abs (- nx px))))
+            (when (or (nil? best) (< nc (best 0)))
+              (set best [nc nx (array ;trail [l r y])])))
+          (when best (array/push nxt best)))
+        (when (not (empty? nxt)) (set prev nxt)))
+      (var final nil)
+      (each [c px trail] prev
+        (def nc (+ c (math/abs (- gx px))))
+        (when (or (nil? final) (< nc (final 0)))
+          (set final [nc px trail])))
+      (when (and final (not (empty? (final 2))))
+        (when-let [p (funnel/path start goal (final 2))]
+          (fit/rounded p (final 2) bend-radius)))))
+
   (defn route-dodging
     ``Route start to goal through `gates`, iterating obstacle discovery.
 
@@ -681,8 +829,22 @@
     # side assignment can express "between these two" when the free
     # space at one height is two disjoint intervals. The honest fix for
     # that residue is gates that hold interval SETS -- a funnel over
-    # multi-interval gates -- which changes the model, not the search,
-    # and is where work on this class should resume.
+    # multi-interval gates -- which changes the model, not the search.
+    #
+    # THE SET MODEL WAS BUILT, AND REVERTED, 2026-08-17. Free space by
+    # subtraction, no sides at all, a shortest-travel resolve choosing
+    # one interval per gate, funnel unchanged downstream -- the design
+    # was right and the integration was wrong: it REPLACED the side
+    # model everywhere, re-deciding routes that were already clean, and
+    # the default went from 0 through to 2 while chasing a defect the
+    # default did not have. Three patches deep (sliver filters, edge
+    # binding, endpoint clamps) each fix exposed the next, because
+    # wholesale replacement has to reproduce every behaviour the old
+    # model got right before it can fix the one it got wrong. When this
+    # resumes: introduce the set model as a FALLBACK TIER -- run the
+    # side model first, and only where its result still invades, re-route
+    # that one edge under interval sets. The clean edges never notice;
+    # the residue gets the stronger model; parity is owed for nothing.
     (when (and (nil? accepted) (not (empty? extra)) (<= (length extra) 3))
       (var best nil)
       (var best-len math/inf)
@@ -713,6 +875,32 @@
           (eprintf "dodge: %s->%s pass-between cleaned it (%d assignments tried)"
                    (string from) (string to) (blshift 1 n)))
         (set accepted best)))
+    # THE SET TIER, last. Everything above works in single intervals and
+    # sides; where all of it leaves the route dirty, the edge is re-run
+    # under interval sets, and the tier's answer is taken only if it
+    # comes back CLEAN -- a dirty answer from the stronger model does not
+    # displace a dirty answer from the weaker one, it just costs more.
+    (when (nil? accepted)
+      (when-let [segs (set-route start goal gates extra)]
+        (when (empty? (invaded-by start segs))
+          (when (os/getenv "VISUALIZE_ROUTE_DEBUG")
+            (eprintf "dodge: %s->%s interval-set tier cleaned it"
+                     (string from) (string to)))
+          (set accepted segs))))
+    # AND WITHOUT THE LANE, very last. The lane is advice about where the
+    # bundle would like this edge; not crossing a node is law. When even
+    # the set tier cannot satisfy both, the lane is dropped and the edge
+    # routed on obstacles alone -- under the packed ranking,
+    # `stamp -> core`'s lane sits at x=600 while both its endpoints stand
+    # at x=96, and no router loyal to that lane can also stay out of what
+    # stands between.
+    (when (nil? accepted)
+      (when-let [segs (set-route start goal [] extra)]
+        (when (empty? (invaded-by start segs))
+          (when (os/getenv "VISUALIZE_ROUTE_DEBUG")
+            (eprintf "dodge: %s->%s laneless set tier cleaned it"
+                     (string from) (string to)))
+          (set accepted segs))))
     (or accepted candidate))
 
   (defn emit-run [start segs]
