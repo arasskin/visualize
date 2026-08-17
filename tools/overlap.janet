@@ -37,13 +37,21 @@
 (import ../src/graph) (import ../src/parsers)
 
 (def svg
-  (if-let [path (get (dyn :args) 1)]
-    (slurp path)
-    (do
-      (def specs (parsers/load "./src/parsers"))
-      (def [_ _ ok drawn] (graph/draw "." specs "./config.janet"))
-      (unless ok (eprint "render failed: " drawn) (os/exit 1))
-      drawn)))
+  # NORMALISED ON THE WAY IN, so graphviz's dialect scores too: `vz dot`
+  # exists to put the two renderers side by side, and a scorer that can
+  # only read one of them is half a comparison. dot writes
+  # `<g id="edge5" class="edge">` where this file writes
+  # `<g class="edge">`, and encodes the arrow in its titles as &#45;&gt;.
+  (string/replace-all "&#45;&gt;" "-&gt;"
+    (peg/replace-all ~(* `<g id="` (some (if-not `"` 1)) `" class="`)
+                     `<g class="`
+                     (if-let [path (get (dyn :args) 1)]
+                       (slurp path)
+                       (do
+                         (def specs (parsers/load "./src/parsers"))
+                         (def [_ _ ok drawn] (graph/draw "." specs "./config.janet"))
+                         (unless ok (eprint "render failed: " drawn) (os/exit 1))
+                         drawn)))))
 
 # Every ellipse: centre and radii.
 (def ellipses @[])
