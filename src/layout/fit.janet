@@ -171,15 +171,17 @@
       # group box, again.
       (var fitted nil)
       (var bad nil)
-      # SHORTER REACH FIRST. The control points sit close to their nodes --
-      # high on the curve at the top, low at the bottom -- so the turn
-      # happens near the endpoints and the long middle runs straight.
-      # Leading with a longer reach carried the departure direction a third
-      # of the journey before turning, which read as a hook wherever the
-      # tangent and the journey disagreed. The longer scales still follow
-      # for the curves that genuinely need the swing, and the flattest
-      # remain the escape valve for tight pinches.
-      (each k [0.8 1.2 1.7 0.4 0.2]
+      # SHORT REACH FIRST, and shorter than feels natural to a spline eye.
+      # The control points sit close to their nodes -- high on the curve at
+      # the top, low at the bottom -- so the turn happens right at the
+      # endpoints and everything between runs straight. This constant has
+      # now been tuned downward twice on the same verdict from the user:
+      # every extra unit of reach carries the departure direction further
+      # into the journey, and wherever tangent and journey disagree that
+      # reads as a hook. At 0.55 the reach is about a sixth of the chord.
+      # The longer scales still follow for curves that genuinely need
+      # swing, and the flattest remain the escape valve for tight pinches.
+      (each k [0.55 0.85 1.3 0.3 0.15]
         (unless fitted
           (def [c1 c2] (fit-one p0 p3 t0 t1 k))
           (def worst (inside? p0 c1 c2 p3 boxes))
