@@ -129,7 +129,7 @@
   (def here (os/realpath (string (dyn :current-file) "/../..")))
   (def web-dir (string here "/web"))
   (def config-path (string root "/" graph/config-name))
-  (def specs (graph/load-specs (string here "/src/parsers")))
+  (def specs graph/specs)
   # THE SOURCE GENERATION. Bumped whenever the watcher sees the tree change;
   # the page waits on it and redraws, which is what replaced the Regenerate
   # button. A number rather than a flag so a page that missed one edit still

@@ -14,7 +14,11 @@
 # write without touching the server.
 
 (import ./scan)
-(import ./parsers)
+(import ./parsers/go :as go)
+(import ./parsers/janet :as janet-lang)
+(import ./parsers/javascript :as javascript)
+(import ./parsers/python :as python)
+(import ./parsers/swift :as swift)
 (import ./select)
 (import ./layout)
 (import ./config)
@@ -226,11 +230,17 @@
    "error" (if ok "" result)
    "svg" (if ok result "")})
 
-(defn load-specs
-  ``The language specs, loaded from `dir`. Which languages exist is the
-  graph's business: nothing in the core knows a file has a language.``
-  [dir]
-  (parsers/load dir))
+(def specs
+  ``Every language this program can read, in name order.
+
+  A LIST, not a directory scan. This used to be src/parsers.janet: a loader
+  that walked the parsers directory at runtime, dofile'd whatever it found,
+  unwrapped a `spec` export through two possible shapes, and tolerated a
+  broken file by skipping that language -- a plugin system for five files
+  that ship in this repo and change when someone edits this line anyway.
+  Adding a language is now an import and an entry here, which is the same
+  amount of editing the loader was avoiding, minus the machinery.``
+  [go/spec janet-lang/spec javascript/spec python/spec swift/spec])
 
 (defn spec-names
   "Their names, for the startup banner."
