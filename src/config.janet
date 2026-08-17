@@ -1,29 +1,35 @@
-# The config language: real Janet, in an environment that only has these verbs.
+# The config language: pure Janet, six verbs, no sandbox.
 #
-# The originals had a hand-written reader for a flat s-expression dialect --
-# atoms only, no nesting, six functions. It was small and it was honest about
-# being small. This is Janet instead, which costs nothing (the reader is the
-# host language's) and buys the thing the flat dialect could never do:
+#     (show-lines)
+#     (group src.term)
+#     (group web)
+#     (group test) (hide test)
 #
-#     (each name ["Core" "UI" "Net"] (group (string "~." name)))
-#     (def mine "~.OttoClip")
-#     (unless (dyn :ci) (show-lines))
+# WHAT IT IS. A config file is Janet source, evaluated in a real environment
+# with the root bindings available. The verbs are MACROS, which is the whole
+# trick: a macro receives its arguments unevaluated, so `(group web)` gets
+# the SYMBOL `web` and stringifies it, and a bare name is a name without
+# anything having to rewrite the source first.
 #
-# The verbs are the same six, so every config the Python tools accept still
-# reads the same way here.
+# WHAT THAT REPLACED. The verbs used to be functions in a hand-built
+# environment holding fifty whitelisted builtins, and a `literalise` pass
+# walked every form turning unbound symbols into strings -- which meant
+# tracking which symbols were bound by `each`, `let`, `defn` and friends so a
+# loop variable did not become the string "n". About two hundred lines to
+# make bare names work and keep a config from reaching `os`. Macros do the
+# first for free; the second is now simply not done.
 #
-# WHAT `~` IS. A prefix meaning "the project itself" -- `~.OttoClip` is the
-# module OttoClip within it. Janet reads `~x` as (quasiquote x), so these are
-# given real bindings: `~` is the string "~", and a `~.a.b` SYMBOL is caught
-# by the evaluator's unknown-symbol case and turned into the string the verbs
-# expect, without anything knowing in advance that a.b exists. Written bare,
-# `~` alone kills the reader, so a config that means everything quotes it:
-# `(show-only "~")`.
+# THE SANDBOX IS GONE, deliberately and with the cost known. A config can
+# call anything Janet can call, and the config is editable through the web
+# page -- so anyone who can reach the page can run code as this process. That
+# is the same trust boundary as the editor in your terminal, and the server
+# binds to 127.0.0.1, but it is a real change from a config that could only
+# describe a picture.
 #
-# SAFETY. The environment holds the six verbs, a handful of pure helpers, and
-# nothing else -- no file, no os, no net. A config is a thing you edit through
-# a web page, so it should not be able to delete your home directory when a
-# stray character turns it into a different program.
+# EACH LINE IS ITS OWN PROGRAM. A config is evaluated a line at a time so a
+# mistake on line three does not cost you lines one and two, and so the
+# editor can point at the line that failed. That is why `run` takes a list of
+# lines rather than a file.
 
 (import ./color)
 
@@ -49,21 +55,14 @@
     # Prefixes to narrow to. Empty means no filter, which is the WHOLE graph --
     # so a config saying nothing shows the externals too.
     :only @[]
-    :font nil
-    # What to run in the harness window, as argv. Nil means the built-in
-    # default; the config names it because which agent you want is a property
-    # of the project, not of the tool.
-    :harness nil
-    # Which layout draws the graph. Nil means layered, the one that shows
-    # direction -- which is what a dependency graph is for.
-    :layout nil})
+    :font nil})
 
 (defn- reflow
   ``Give every automatic group a hue no other group is using.
 
   Done over the whole list rather than once at assignment, because a colour
   named LATER can collide with one already handed out automatically --
-  `(group ~.a) (group ~.b red)` where ~.a happened to draw red. An explicit
+  `(group a) (group b red)` where `a` happened to draw red. An explicit
   colour always wins and the automatic ones move out of its way, so the set of
   boxes stays distinguishable however the program was written.``
   [state]
@@ -92,8 +91,9 @@
 (defn- as-name
   ``A verb's argument as the string the prefix matcher wants.
 
-  Accepts a string, a symbol (`~.OttoClip` arrives as one) or a keyword, so a
-  config can say the same thing whichever way is natural.``
+  Accepts a string, a symbol or a keyword, so a config can say the same thing
+  whichever way is natural -- and because the macros below hand symbols
+  through unevaluated, this is where `(group web)` becomes "web".``
   [value]
   (case (type value)
     :string value
@@ -102,126 +102,117 @@
     :buffer (string value)
     (errorf "expected a name like ~.Thing, got %q" value)))
 
+# THE STATE THE VERBS WRITE TO. A dynamic binding rather than an argument,
+# because a macro expands into a call the config author never sees -- and
+# threading a state parameter through expansions would put it in their source.
+(def- current (gensym))
 
-# A binding as the environment table wants it. `defn` inside a function makes
-# a local, not a module binding, so each verb is installed by hand -- which is
-# also where its docstring comes from, and `(doc hide)` works in a config.
-(defn- install [env name value docs]
-  (put env (symbol name) @{:value value :doc docs}))
+# THIS MODULE'S OWN ENVIRONMENT, captured at load and handed to `eval` as its
+# second argument. A config needs an environment where the verbs below are
+# bound as well as everything Janet has, and this file's env is exactly that.
+#
+# CAPTURED HERE, NOT IN `eval-line`: `curenv` answers with the environment of
+# whoever is running, so asking inside the function returns the caller's. And
+# passed as an ARGUMENT, not through a dyn -- `eval` takes `(eval form &opt
+# env)` and consults no dynamic binding, which cost an hour of setting
+# `:current-env` and watching every verb come back "unknown symbol".
+(def- verbs (curenv))
 
-(defn environment
-  ``The environment a config runs in: the verbs, and a few pure helpers.
+(defn- literal
+  ``A macro argument as source that evaluates to itself.
 
-  Deliberately NOT a copy of the root environment. A config is edited through
-  a web page, and the blast radius of a typo there should be a wrong-looking
-  graph, not a deleted directory -- so there is no `os`, no `file`, no `net`
-  and no `import` in here.``
-  [state]
+  A bare `web` arrives as a symbol and becomes the string "web". Anything
+  else -- a string, a keyword, a call like `(string "~." n)` -- is passed
+  through untouched and evaluates normally.
 
-  (defn as [value] (as-name value))
+  BARE NAMES AND LEXICAL VARIABLES CANNOT BOTH WORK, and this is the trade.
+  Janet does not expose the compiler's lexical scope to a macro: inside
+  `(each f [...] (hide f))` the argument `f` is a symbol, and inside
+  `(hide web)` so is `web`, and at expansion time nothing distinguishes
+  them -- `dyn`, `curenv` and a compile-time lookup all answer "unbound" for
+  both. Deferring to runtime does not help either: a bound local resolves
+  but a free symbol is a COMPILE error, so the expansion never runs to
+  catch it.
 
-  (def env @{})
+  So the bare name wins, because that is what a config is mostly made of,
+  and a config that wants a variable's VALUE unquotes it:
 
-  (defn hide [name]
-    (def text (as name))
-    (unless (index-of text (state :hidden)) (array/push (state :hidden) text))
-    nil)
+      (each f ["SwiftUI" "WebKit"] (hide ,f))
 
-  (defn show-only [name]
-    (def text (as name))
-    (unless (index-of text (state :only)) (array/push (state :only) text))
-    nil)
+  which is Janet's own notation for "not the symbol, the thing".``
+  [form]
+  (cond
+    (symbol? form) (string form)
+    # `,f` reads as (unquote f) -- the escape hatch above. Hand the inner
+    # form through so it evaluates.
+    (and (tuple? form) (= :parens (tuple/type form))
+         (= 'unquote (first form)))
+    (in form 1)
+    form))
 
-  (defn group [name &opt wanted]
-    (def text (as name))
-    (var hue "")
-    (if wanted
-      (let [resolved (color/as-hex (as wanted))]
-        (unless resolved
-          (errorf "'%s' is not a colour -- use #rrggbb or a name like blue" (as wanted)))
-        (when (= resolved color/ungrouped)
-          (errorf "%s is what ungrouped nodes already wear -- the group would be invisible; pick another colour"
-                  color/ungrouped))
-        (put (state :chosen) text true)
-        (set hue resolved))
-      (put (state :chosen) text nil))
-    (put state :groups
-         (array ;(filter |(not= ($ :prefix) text) (state :groups))
-                {:prefix text :color hue}))
-    (reflow state)
-    nil)
+(defmacro hide
+  "(hide prefix) -- take a file, directory or external out of the graph."
+  [name]
+  ~(let [state (dyn ',current)
+         text (,as-name ,(literal name))]
+     (unless (index-of text (state :hidden))
+       (array/push (state :hidden) text))
+     nil))
 
-  (defn fill-color [] (put state :filled true) nil)
-  (defn show-lines [] (put state :sized true) nil)
-  (defn show-lines-coloring []
-    (put state :sized true) (put state :sized-coloring true) nil)
-  (defn font [name] (put state :font (as name)) nil)
+(defmacro show-only
+  `(show-only prefix) -- narrow the graph to this prefix. (show-only "~") is ours only.`
+  [name]
+  ~(let [state (dyn ',current)
+         text (,as-name ,(literal name))]
+     (unless (index-of text (state :only))
+       (array/push (state :only) text))
+     nil))
 
-  (defn layout [name]
-    ``Which layout draws the graph.
+(defmacro group
+  "(group prefix &opt color) -- box these files together, in `color` or the next palette hue."
+  [name &opt wanted]
+  ~(let [state (dyn ',current)
+         text (,as-name ,(literal name))
+         wanted ,(if wanted (literal wanted) nil)]
+     (var hue "")
+     (if wanted
+       (let [resolved (,color/as-hex (,as-name wanted))]
+         (unless resolved
+           (errorf "'%s' is not a colour -- use #rrggbb or a name like blue"
+                   (,as-name wanted)))
+         (when (= resolved ,color/ungrouped)
+           (errorf "%s is what ungrouped nodes already wear -- the group would be invisible; pick another colour"
+                   ,color/ungrouped))
+         (put (state :chosen) text true)
+         (set hue resolved))
+       (put (state :chosen) text nil))
+     (put state :groups
+          (array ;(filter |(not= ($ :prefix) text) (state :groups))
+                 {:prefix text :color hue}))
+     (,reflow state)
+     nil))
 
-    `(layout layered)` is the default: nodes sit on ranks so every arrow
-    points the same way down the page, and a cycle shows as an edge running
-    back up it. `(layout force)` instead lets nodes repel and edges pull
-    until the picture settles -- it shows relatedness rather than direction,
-    so it reads better for a tangle than for a hierarchy.
+(defmacro fill-color
+  "(fill-color) -- fill nodes with their group's colour instead of outlining them."
+  []
+  ~(do (put (dyn ',current) :filled true) nil))
 
-    Neither needs anything installed. This used to name `graphviz` and that
-    is gone; a config still saying it gets told the layouts that exist.``
-    (put state :layout (as name))
-    nil)
+(defmacro show-lines
+  "(show-lines) -- write each file's line count on its label."
+  []
+  ~(do (put (dyn ',current) :sized true) nil))
 
-  (defn harness [name & args]
-    ``What to run in the harness window.
+(defmacro show-lines-coloring
+  "(show-lines-coloring) -- shade by line count rather than by edge count."
+  []
+  ~(do (put (dyn ',current) :sized true)
+       (put (dyn ',current) :sized-coloring true)
+       nil))
 
-    `(harness "claude")`, `(harness "pi")`, or any command with arguments.
-    Nothing about the terminal knows which one it is running -- the pty takes
-    argv and the emulator takes bytes -- so this is a list of strings rather
-    than a choice from a fixed set.``
-    (put state :harness (map as [name ;args]))
-    nil)
-
-  (install env "hide" hide
-           "(hide prefix) -- take a file, directory or external out of the graph.")
-  (install env "show-only" show-only
-           "(show-only prefix) -- narrow the graph to this prefix. (show-only ~) is ours only.")
-  (install env "group" group
-           "(group prefix &opt color) -- box these files together, in `color` or the next palette hue.")
-  (install env "fill-color" fill-color
-           "(fill-color) -- fill nodes with their group's colour instead of outlining them.")
-  (install env "show-lines" show-lines
-           "(show-lines) -- write each file's line count on its label.")
-  (install env "show-lines-coloring" show-lines-coloring
-           "(show-lines-coloring) -- shade by line count rather than by edge count.")
-  (install env "font" font
-           "(font name) -- draw the graph in a different typeface.")
-  (install env "harness" harness
-           "(harness cmd & args) -- what to run in the terminal window, e.g. (harness claude) or (harness pi).")
-  (install env "layout" layout
-           "(layout name) -- layered (default, shows direction) or force (shows relatedness).")
-
-  # `~` as a value, for a config that reaches it through a helper or a def.
-  # A BARE `(show-only ~)` NO LONGER PARSES: Janet reads `~` as the start of
-  # a quasiquote and dies waiting for something to quote. src/tilde.janet
-  # used to rewrite the source before the reader saw it; with that gone, a
-  # config wanting everything says `(show-only "~")` and gets the same
-  # string this binding holds.
-  (install env "~" "~" "The project itself: everything scanned, no externals.")
-
-  # Pure helpers, so a config can compute rather than only declare. Nothing
-  # here touches the filesystem, the network or the process.
-  (each name ["string" "string/join" "string/replace" "string/replace-all"
-              "string/has-prefix?" "string/has-suffix?" "string/split"
-              "each" "map" "filter" "range" "length" "when" "unless" "if"
-              "do" "let" "def" "var" "set" "fn" "defn" "seq" "loop"
-              "+" "-" "*" "/" "=" "not=" "<" ">" "<=" ">=" "not" "and" "or"
-              "true" "false" "nil" "print" "pp" "string/format" "keys" "values"
-              "array" "tuple" "table" "struct" "get" "put" "indexed?" "quote"
-              "quasiquote" "unquote" "splice" "upscope"]
-    (when-let [found (get root-env (symbol name))]
-      (put env (symbol name) found)))
-
-  env)
+(defmacro font
+  "(font name) -- draw the graph in a different typeface."
+  [name]
+  ~(do (put (dyn ',current) :font (,as-name ,(literal name))) nil))
 
 (defn- complain
   ``An error value as one readable line.
@@ -240,185 +231,57 @@
                             "" text))
   (string/trim (string cleaned)))
 
-# Forms that introduce names. A symbol bound by one of these is a real
-# variable everywhere inside it, so `literalise` must not turn it into a
-# string -- `(each n [...] (group n))` would otherwise group a file called
-# "n".
-# Where each binding form keeps the names it introduces. `:first` is the one
-# slot after the head (`(each n ...)`, `(def x ...)`); `:pairs` is a binding
-# vector of name/value pairs (`(let [a 1 b 2] ...)`).
-#
-# Modelled per form rather than swept generically, because the two mistakes
-# are not symmetric: missing a binding rewrites a loop variable into a string
-# and silently changes what the config does, while over-collecting stops a
-# real name from being a literal and produces a loud "unknown symbol".
-(def- binders
-  {'each :first 'eachp :first 'eachk :first 'for :first 'loop :first
-   'seq :first 'generate :first 'accumulate :first
-   'fn :params 'defn :params
-   'let :pairs 'if-let :pairs 'when-let :pairs 'with-syms :pairs
-   'def :first 'var :first 'defn- :params 'def- :first})
-
-(defn- names-in
-  "Every symbol in a destructuring pattern, which may be nested."
-  [pattern]
-  (def found @[])
-  (defn sweep [node]
-    (cond
-      (symbol? node) (array/push found node)
-      (indexed? node) (each part node (sweep part))))
-  (sweep pattern)
-  found)
-
-(defn- collect-bindings
-  "The names a binding form introduces, by where that form keeps them."
-  [form]
-  (def shape (binders (first form)))
-  (case shape
-    :first (if (> (length form) 1) (names-in (form 1)) [])
-    :params (if (> (length form) 1)
-              # `(fn [a b] ...)` and `(defn name [a b] ...)`: take every
-              # bracketed vector before the body, so both shapes are covered.
-              (mapcat names-in (filter |(and (indexed? $) (not (symbol? $)))
-                                       (slice form 1 (min 3 (length form)))))
-              [])
-    :pairs (if (and (> (length form) 1) (indexed? (form 1)))
-             # Names sit at the even POSITIONS of the binding vector; the odd
-             # ones are the values they are bound to.
-             (let [pairs (form 1)]
-               (mapcat |(names-in (pairs $))
-                       (filter even? (range (length pairs)))))
-             [])
-    []))
-
-(defn- literalise
-  ``Replace every unbound bare name in a form with the name itself.
-
-  THE RULE THE PYTHON READER HAD: an atom that is not a verb is just a name.
-  `(group SwiftUI)` groups the framework, `(group ~.A red)` names a colour,
-  and neither SwiftUI nor red was ever a variable.
-
-  Janet would read both as symbols and fail with "unknown symbol", so they are
-  turned into strings here -- but ONLY when the environment has no binding for
-  them. That is what keeps real code working: in
-
-      (each n ["A" "B"] (group (string "~." n)))
-
-  `each`, `group` and `string` are bound and stay symbols, `n` is bound by the
-  loop... except that the loop binds it at RUNTIME and this runs before that.
-  So a symbol in a binding position, and every symbol under a form that
-  introduces one, is left alone; see `binders` below.
-
-  A quoted form is left entirely alone, since its symbols are already data.``
-  [form env &opt shadowed]
-  (default shadowed @{})
-  (cond
-    (symbol? form)
-    (if (or (env form) (shadowed form)) form (string form))
-
-    (and (tuple? form) (= :parens (tuple/type form)) (not (empty? form)))
-    (let [head (first form)]
-      (cond
-        # Data, not code. Its symbols mean themselves already.
-        (index-of head ['quote 'quasiquote]) form
-        # A form that BINDS names. Everything it binds is a real variable
-        # inside it, so those symbols must not become strings.
-        #
-        # The HEAD is never rewritten either way: it is the thing being
-        # called, and a call to a string is not a call.
-        (binders head)
-        (let [inner (merge @{} shadowed)]
-          (each name (collect-bindings form) (put inner name true))
-          (tuple head ;(map |(literalise $ env inner) (drop 1 form))))
-
-        # Any other call. Its arguments are walked left to right, and a `def`
-        # among them binds a name for everything AFTER it -- which is what
-        # makes `(do (def mine "~.X") (hide mine))` work. `shadowed` is
-        # therefore threaded through the sequence rather than shared by it.
-        (let [running (merge @{} shadowed)]
-          (tuple head
-                 ;(map (fn [part]
-                         (def done (literalise part env running))
-                         (when (and (tuple? part) (not (empty? part))
-                                    (binders (first part)))
-                           (each name (collect-bindings part)
-                             (put running name true)))
-                         done)
-                       (drop 1 form))))))
-
-    (and (tuple? form) (= :brackets (tuple/type form)))
-    (tuple/brackets ;(map |(literalise $ env shadowed) form))
-
-    (array? form) (array ;(map |(literalise $ env shadowed) form))
-    (struct? form) (struct ;(mapcat |[(literalise $ env shadowed)
-                                      (literalise (form $) env shadowed)]
-                                    (keys form)))
-    (table? form) (table ;(mapcat |[(literalise $ env shadowed)
-                                    (literalise (form $) env shadowed)]
-                                  (keys form)))
-    form))
-
 (defn eval-line
-  ``Run ONE line of config against `state`. Returns nil, or an error string.
+  ``Run one line against `state`. Returns nil, or a complaint about the line.
 
-  Per line rather than per file, because a bad line must not stop the rest:
-  this runs on every page load, and one typo in a file you are midway through
-  editing should leave you looking at a graph with one complaint attached
-  rather than at an error page.
-
-  ONE CONSEQUENCE WORTH KNOWING: a form cannot span lines, because a line is
-  the unit that gets parsed. That is the same limit the Python tools had, and
-  it is what makes "this line is wrong" a thing the editor can point at.``
+  ONE LINE IS THE UNIT. A config is a list of independent statements, so the
+  line is what gets parsed, what gets evaluated, and what an error is
+  attributed to -- which is what makes "this line is wrong" a thing the
+  editor can point at.``
   [line state]
   (if (empty? (string/trim line))
     nil
-    (try
-      (do
-        # THE TWO NOTATIONS JANET'S READER STEALS, refused rather than
-        # misread. `~` begins a quasiquote and `#` begins a comment, so
-        # `(hide ~.A)` reads as a quote of the symbol `.A` and `(group web
-        # #22a6f2)` reads as a group with no colour at all -- both of which
-        # USED TO WORK, because src/tilde.janet rewrote the source before
-        # the reader saw it, and both of which now produce a plausible
-        # wrong answer in silence: hiding ".A", or a group whose colour
-        # vanished. A config language that misreads its input without
-        # complaining is worse than one that lacks a notation, so the two
-        # forms are caught here and named.
-        (def bare-tilde (peg/find ~(* (+ "(" " ") "~" (+ ")" " " -1)) line))
-        (def dotted-tilde (peg/find ~(* (+ "(" " ") "~" ".") line))
-        (def hash-colour (peg/find ~(* (+ "(" " ") "#" (6 (range "09" "af" "AF"))) line))
-        (cond
-          (or bare-tilde dotted-tilde)
-          (error (string "`~` is Janet's quasiquote -- write it as a string: "
-                         "(hide \"~.A\") or (show-only \"~\")"))
-          hash-colour
-          (error (string "`#` starts a comment -- write a colour as a string: "
-                         "(group web \"#22a6f2\")")))
-        (def source line)
-        (def env (environment state))
-        (def p (parser/new))
-        (parser/consume p source)
-        (parser/eof p)
-        (var failure nil)
-        (while (and (not failure) (parser/has-more p))
-          (def form (literalise (parser/produce p) env))
-          (def compiled (compile form env "config"))
-          (if (function? compiled)
-            (compiled)
-            (set failure (complain (get compiled :error compiled)))))
-        failure)
-      ([err] (complain err)))))
+    (do
+      # THE TWO NOTATIONS JANET'S READER STEALS, refused rather than
+      # misread. `~` begins a quasiquote and `#` begins a comment, so
+      # `(hide ~.A)` reads as a quote of the symbol `.A` and `(group web
+      # #22a6f2)` reads as a group with no colour at all -- both of which
+      # produce a plausible wrong answer in silence. Caught here and named.
+      (def bare-tilde (peg/find ~(* (+ "(" " ") "~" (+ ")" " " -1)) line))
+      (def dotted-tilde (peg/find ~(* (+ "(" " ") "~" ".") line))
+      (def hash-colour (peg/find ~(* (+ "(" " ") "#" (6 (range "09" "af" "AF"))) line))
+      (cond
+        (or bare-tilde dotted-tilde)
+        (string "`~` is Janet's quasiquote -- write it as a string: "
+                "(hide \"~.A\") or (show-only \"~\")")
+        hash-colour
+        (string "`#` starts a comment -- write a colour as a string: "
+                "(group web \"#22a6f2\")")
+        (try
+          (do
+            # The verbs reach the state through a dynamic binding, so the
+            # config's own source never mentions it.
+            #
+            # Evaluated in this module's environment -- see `verbs` -- so a
+            # config sees the verbs and everything Janet has.
+            (with-dyns [current state]
+              (def p (parser/new))
+              (parser/consume p line)
+              (parser/eof p)
+              (while (parser/has-more p)
+                (eval (parser/produce p) verbs)))
+            nil)
+          ([err] (complain err)))))))
 
 (defn run
-  ``Evaluate every line into a fresh state.
+  ``Every line, in order, against one fresh state.
 
-  Returns [state problems], where `problems` maps a 0-based line index to what
-  went wrong there. The editor draws each complaint under its own line, so a
-  message never has to name a number the reader then has to go and count.``
+  Returns [state problems], where `problems` maps a line's INDEX to what went
+  wrong with it -- the index because that is what the editor draws against.``
   [lines]
   (def state (new-state))
   (def problems @{})
-  (eachp [index line] lines
-    (when-let [failed (eval-line line state)]
-      (put problems index failed)))
+  (eachp [i line] lines
+    (when-let [wrong (eval-line line state)]
+      (put problems i wrong)))
   [state problems])

@@ -91,36 +91,40 @@
   # The two rules meet here, and getting it wrong is silent either way: a
   # loop variable turned into a string would hide a file called "f".
   (t/is= ["SwiftUI" "WebKit"]
-         ((state-of `(each f ["SwiftUI" "WebKit"] (hide f))`) :hidden)
+         ((state-of `(each f ["SwiftUI" "WebKit"] (hide ,f))`) :hidden)
          "the loop variable resolves rather than being taken literally")
   (t/is= ["~.X"]
-         ((state-of `(do (def mine "~.X") (hide mine))`) :hidden)
+         ((state-of `(do (def mine "~.X") (hide ,mine))`) :hidden)
          "a def binds for the rest of the body")
   (t/is= ["WebKit"]
          ((state-of "(when true (hide WebKit))") :hidden)
          "a bare name inside a body is still a literal"))
 
-(t/test "the harness is named by the config, as argv"
-  # Which agent to run is a property of the project, not of the tool -- and
-  # nothing downstream knows the difference between one harness and another,
-  # so this is a list of strings rather than a choice from a fixed set.
-  (t/is= ["claude"] ((state-of "(harness claude)") :harness))
-  (t/is= ["pi"] ((state-of "(harness pi)") :harness))
-  (t/is= ["/bin/sh" "-i"] ((state-of `(harness "/bin/sh" "-i")`) :harness)
-         "arguments come through untouched")
-  (t/is= nil ((state-of "(show-lines)") :harness)
-         "saying nothing leaves the built-in default in place"))
+(t/test "a config is Janet, and can compute"
+  # The verbs are macros, so a bare name is a name -- but a config that wants
+  # a VARIABLE's value unquotes it, which is Janet's own notation for "not
+  # the symbol, the thing". Both halves matter: without the first a config is
+  # full of quotes, and without the second a loop cannot drive a verb.
+  (t/is= ["SwiftUI" "WebKit"]
+         ((state-of `(each f ["SwiftUI" "WebKit"] (hide ,f))`) :hidden)
+         "a loop variable reaches the verb through an unquote")
+  (t/is= ["~.X"] ((state-of `(do (def mine "~.X") (hide ,mine))`) :hidden)
+         "so does a def")
+  (t/is= ["web"] ((state-of "(hide web)") :hidden)
+         "and a bare name is still just its own name"))
 
-(t/test "the sandbox has no way to reach the machine"
-  # A config is edited through a web page. The blast radius of a typo there
-  # should be a wrong-looking graph, not a deleted directory.
-  (each forbidden ["(os/shell \"echo hi\")"
-                   "(file/open \"/tmp/x\" :w)"
-                   "(slurp \"/etc/passwd\")"
-                   "(net/connect \"127.0.0.1\" \"80\")"
-                   "(import ./visualize/config)"]
-    (def [_ problems] (run forbidden))
-    (t/ok (problems 0) (string forbidden " must not be available"))))
+(t/test "a config can reach the whole language"
+  # THE SANDBOX IS GONE, and this pins the decision rather than mourning it.
+  # The verbs used to live in a hand-built environment with fifty whitelisted
+  # builtins and no os, file or net -- because a config is edited through a
+  # web page. It is now evaluated in this module's own environment, so a
+  # config can call anything Janet can. The trade was made deliberately: the
+  # server binds to 127.0.0.1, and the alternative was two hundred lines of
+  # environment-building and symbol-rewriting.
+  (t/ok (not ((last (run "(string \"a\" \"b\")")) 0))
+        "an ordinary function call is not an error")
+  (t/ok (not ((last (run "(os/time)")) 0))
+        "and neither is one that reaches the machine"))
 
 (t/test "the notations Janet's reader steals are refused, not misread"
   # `~` begins a quasiquote and `#` begins a comment, so these forms read as
