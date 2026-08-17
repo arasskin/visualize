@@ -1875,6 +1875,43 @@
                           bend?
                           cost))
       (dump-rows "untangled" untangled)
+
+      # CHAIN-SIFT: the move the other passes cannot make. A long chain is
+      # BISTABLE under adjacent swaps -- all-left and all-right of what it
+      # straddles are both stable, every intermediate is worse, and the
+      # sweeps keep whichever side they happened to land on. Under the
+      # packed ranking `stamp -> core` ran from x=0 through bends at x=800
+      # because of exactly this. So each multi-bend chain is tried WHOLE at
+      # the far left and far right of its rows, judged by the same cost as
+      # every other reordering, and moved only when the whole picture says
+      # so. Two candidates per chain, not a search: the stable states are
+      # the ends, and the ends are cheap.
+      (def sifted
+        (do
+          (var rows untangled)
+          (var best-cost (cost rows))
+          (eachp [pair chain] chains
+            (when (> (length chain) 1)
+              (def members @{})
+              (each b chain (put members b true))
+              (each side [:left :right]
+                (def candidate @{})
+                (eachp [index row] rows
+                  (def kept (filter |(not (members $)) row))
+                  (def mine (filter |(members $) row))
+                  (put candidate index
+                       (if (empty? mine)
+                         (array ;kept)
+                         (if (= side :left)
+                           (array ;mine ;kept)
+                           (array ;kept ;mine)))))
+                (def c (cost candidate))
+                (when (< c best-cost)
+                  (set best-cost c)
+                  (set rows candidate)))))
+          rows))
+      (dump-rows "sifted" sifted)
+
       # X, EITHER WAY -- AND THE AUX GRAPH IS NOW THE DEFAULT. It is dot's
       # formulation: separation and straightness as one weighted
       # optimisation rather than two passes that cannot see each other,
@@ -1934,9 +1971,9 @@
                 # of the packing-versus-legibility law the audit keeps
                 # meeting, and it deserves a fresh session, not a fifth
                 # patch on this one.
-                solved (solve-once untangled)]
-            (or solved (seat untangled)))
-          (seat untangled)))
+                solved (solve-once sifted)]
+            (or solved (seat sifted)))
+          (seat sifted)))
 
       (def points @{})
       (each name names
@@ -1995,7 +2032,10 @@
           (put corridors pair
                (map (fn [name]
                       (def rank (dummy-layer name))
-                      (def row (get ordered rank []))
+                      # The SIFTED rows: corridors must describe the order
+                      # the picture was actually placed with, or a moved
+                      # chain gets walls from the rows it left behind.
+                      (def row (get sifted rank []))
                       (def at (find-index |(= $ name) row))
                       (def here (x name))
                       # Left wall: the right edge of the previous occupant,
