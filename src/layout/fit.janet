@@ -95,9 +95,19 @@
   down. Subdividing on it converges, because the funnel polyline is
   monotone by construction.
 
+  A FEW UNITS OF SLACK, deliberately. Zero tolerance meant every wobble
+  of a lane forced a subdivision, and every subdivision is a visible
+  change of slope: `select -> graph` and `watch -> core` came out as
+  chains of exact pieces where one arc missing the lane by two units
+  would have read as a single fluid line. The slack trades that much
+  positional truth for continuity, which is the trade a reader makes
+  anyway -- nobody checks a curve against its lane; everybody notices a
+  kink. Folding back in y gets NO slack; a knot is not a rounding error.
+
   Returns the parameter of the WORST violation, or nil when clean, because
   the caller wants to split exactly there.``
   [p0 c1 c2 p3 gates]
+  (def slack 3)
   (var worst nil)
   (var worst-at nil)
   (var prev-y nil)
@@ -105,7 +115,7 @@
     (def t (/ k 32))
     (def [x y] (bezier-at p0 c1 c2 p3 t))
     (when-let [[l r] (funnel/channel gates y)]
-      (def over (max (- l x) (- x r)))
+      (def over (- (max (- l x) (- x r)) slack))
       (when (and (pos? over) (or (nil? worst) (> over worst)))
         (set worst over)
         (set worst-at t)))
@@ -161,7 +171,10 @@
       # group box, again.
       (var fitted nil)
       (var bad nil)
-      (each k [1 1.5 2.1 0.5 0.2]
+      # Slightly round before flat: 1.3 leads because a touch of swing is
+      # what makes a long curve read as one gesture; the flat scales stay
+      # as the escape valve for tight pinches.
+      (each k [1.3 1.8 1 2.4 0.5 0.2]
         (unless fitted
           (def [c1 c2] (fit-one p0 p3 t0 t1 k))
           (def worst (inside? p0 c1 c2 p3 boxes))
