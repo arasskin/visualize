@@ -42,89 +42,33 @@
   [(+ (* a (p0 0)) (* b (c1 0)) (* c (c2 0)) (* d (p3 0)))
    (+ (* a (p0 1)) (* b (c1 1)) (* c (c2 1)) (* d (p3 1)))])
 
-(defn- chord-lengths
-  ``Parameter values for each point, spaced by distance along the polyline.
-
-  Uniform spacing (t = i/n) is the obvious choice and fits badly whenever the
-  segments differ in length, because it asks the curve to cover a long
-  stretch and a short one in the same amount of parameter. Chord-length
-  parameterisation is the standard fix and what dot uses.``
-  [points]
-  (def d @[0])
-  (var total 0)
-  (for i 1 (length points)
-    (+= total (math/sqrt (dot (sub (points i) (points (- i 1)))
-                              (sub (points i) (points (- i 1))))))
-    (array/push d total))
-  (if (zero? total)
-    (map (fn [_] 0) d)
-    (map |(/ $ total) d)))
-
 (defn- fit-one
-  ``One cubic from `points` first to last, leaving along `t0` and arriving
-  along `t1`. Returns [c1 c2], the two control points.
+  ``One cubic from `p0` to `p3`, leaving along `t0`, arriving along `t1`,
+  with both control distances a THIRD OF THE CHORD scaled by `k`.
+  Returns [c1 c2].
 
-  LEAST SQUARES WITH THE TANGENTS FIXED. The control points are constrained
-  to lie along the given tangents -- c1 = p0 + a*t0, c2 = p3 - b*t1 -- so
-  the only unknowns are the two distances a and b. That makes this a 2x2
-  system rather than a general fit, which is both faster and better
-  behaved: the curve cannot flail off sideways to chase a point, it can
-  only reach further along a direction that was already chosen.
+  PROPORTIONAL, NOT SOLVED FOR -- and this is what route.c actually does.
+  An earlier version ran a least-squares fit for the two distances (the
+  Hoschek/Plass scheme, misread into dot's code), and with the tangents
+  fixed and the distances free, the solver stretched controls until the
+  cubic's direction reversed mid-curve: `config -> graph` shipped with
+  its controls at y=328 then y=133 and drew a visible knot, and the
+  containment never objected because the fold was in DIRECTION, not in
+  the channel. dot's `splinefits` never solves: both controls sit at the
+  same proportional distance along their tangents, tried at a few scales
+  by the caller, and a curve of that shape has nowhere to fold -- the
+  hodograph cannot reverse when both controls pull the same way. Fitting
+  tightness costs subdivision instead of wiggles, which is the right
+  currency: two smooth arcs read better than one clever knot.
 
-  This is `points2coeff` and its solve in route.c, which is the standard
-  Hoschek/Plass fit.``
-  [points t0 t1]
-  (def p0 (first points))
-  (def p3 (last points))
-  (def ts (chord-lengths points))
-
-  # The 2x2 normal equations. Each point contributes the bezier basis
-  # weights of the two unknowns and a residual against the fixed ends.
-  (var c00 0) (var c01 0) (var c11 0) (var x0 0) (var x1 0)
-  (for i 0 (length points)
-    (def t (ts i))
-    (def u (- 1 t))
-    (def b1 (* 3 u u t))
-    (def b2 (* 3 u t t))
-    (def a1 [(* b1 (t0 0)) (* b1 (t0 1))])
-    (def a2 [(* (- b2) (t1 0)) (* (- b2) (t1 1))])
-    (+= c00 (dot a1 a1))
-    (+= c01 (dot a1 a2))
-    (+= c11 (dot a2 a2))
-    # What is left after the two fixed endpoints have had their say.
-    (def base (+ (* u u u) b1))
-    (def base2 (+ (* t t t) b2))
-    (def residual (sub (points i)
-                       [(+ (* base (p0 0)) (* base2 (p3 0)))
-                        (+ (* base (p0 1)) (* base2 (p3 1)))]))
-    (+= x0 (dot a1 residual))
-    (+= x1 (dot a2 residual)))
-
-  (def det (- (* c00 c11) (* c01 c01)))
-  # A degenerate system means the points are effectively collinear with the
-  # tangents; the thirds of the chord are the right answer and the one dot
-  # falls back to.
-  (def [a b]
-    (if (< (math/abs det) 0.000001)
-      (let [d (math/sqrt (dot (sub p3 p0) (sub p3 p0)))]
-        [(/ d 3) (/ d 3)])
-      [(/ (- (* x0 c11) (* x1 c01)) det)
-       (/ (- (* x1 c00) (* x0 c01)) det)]))
-
-  # Negative or absurd distances turn the curve inside out. Clamped to
-  # something sane in the same spirit as route.c's checks.
-  #
-  # NOT NAMED a' AND b'. Janet reads ' as QUOTE, so `(* a' (t0 0))` parses
-  # as `(* a '(t0 0))` -- a number times a literal tuple -- and the error
-  # arrives from a line that looks like arithmetic on two numbers. Worse,
-  # `(max a 0.01)` compares a tuple against a number without complaining, so
-  # a mistake of this shape can also come back as a plausible wrong number
-  # rather than an error.
+  NOT NAMED a' AND b'. Janet reads ' as QUOTE, so `(* a' (t0 0))` parses
+  as `(* a '(t0 0))` -- a number times a literal tuple -- and the error
+  arrives from a line that looks like arithmetic on two numbers.``
+  [p0 p3 t0 t1 k]
   (def span (math/sqrt (dot (sub p3 p0) (sub p3 p0))))
-  (def lead (min (max a 0.01) (* 3 span)))
-  (def trail (min (max b 0.01) (* 3 span)))
-  [[(+ (p0 0) (* lead (t0 0))) (+ (p0 1) (* lead (t0 1)))]
-   [(- (p3 0) (* trail (t1 0))) (- (p3 1) (* trail (t1 1)))]])
+  (def reach (* k (/ span 3)))
+  [[(+ (p0 0) (* reach (t0 0))) (+ (p0 1) (* reach (t0 1)))]
+   [(- (p3 0) (* reach (t1 0))) (- (p3 1) (* reach (t1 1)))]])
 
 (defn- inside?
   ``Does the curve stay within the corridor's channel?
@@ -140,11 +84,23 @@
   is caught by the next subdivision, and the gates have a gap's worth of
   margin built in by the layout.
 
+  A curve that DOUBLES BACK IN Y is a violation wherever it turns, however
+  legal its x. Every path here descends -- gates strictly increase in y --
+  and a cubic whose y reverses has folded into a knot. The channel alone
+  cannot catch it: above the first gate and below the last nothing bounds
+  x, and that is exactly where a folding curve swings, so `config ->
+  graph` shipped one segment whose controls sat at y=328 then y=36 and
+  drew a loop the containment never sampled illegal. Monotone y is part
+  of what "inside the corridor" means for a corridor that only ever goes
+  down. Subdividing on it converges, because the funnel polyline is
+  monotone by construction.
+
   Returns the parameter of the WORST violation, or nil when clean, because
   the caller wants to split exactly there.``
   [p0 c1 c2 p3 gates]
   (var worst nil)
   (var worst-at nil)
+  (var prev-y nil)
   (for k 0 33
     (def t (/ k 32))
     (def [x y] (bezier-at p0 c1 c2 p3 t))
@@ -152,7 +108,14 @@
       (def over (max (- l x) (- x r)))
       (when (and (pos? over) (or (nil? worst) (> over worst)))
         (set worst over)
-        (set worst-at t))))
+        (set worst-at t)))
+    (when prev-y
+      (def back (- prev-y y))
+      # A hair of tolerance: flat is fine, climbing is a fold.
+      (when (and (> back 0.5) (or (nil? worst) (> back worst)))
+        (set worst back)
+        (set worst-at t)))
+    (set prev-y y))
   worst-at)
 
 (defn curve
@@ -184,10 +147,22 @@
     (do
       (def p0 (first path))
       (def p3 (last path))
-      (def [c1 c2] (fit-one path t0 t1))
-      (def bad (inside? p0 c1 c2 p3 boxes))
+      # A FEW SCALES, GENTLEST FIRST, the way splinefits grows its curve:
+      # short controls hug the chord, longer ones swing wider to honour the
+      # tangents. The first scale whose curve stays inside wins; the range
+      # is deliberately small because a curve that needs more reach than
+      # this reads better as two curves.
+      (var fitted nil)
+      (var bad nil)
+      (each k [1 1.5 2.1]
+        (unless fitted
+          (def [c1 c2] (fit-one p0 p3 t0 t1 k))
+          (def worst (inside? p0 c1 c2 p3 boxes))
+          (if (nil? worst)
+            (set fitted [[c1 c2 p3]])
+            (when (nil? bad) (set bad worst)))))
       (cond
-        (nil? bad) [[c1 c2 p3]]
+        fitted fitted
 
         # SUBDIVISION HAS A FLOOR. Past a handful of levels the pieces are
         # shorter than the sampling can resolve and splitting again cannot
@@ -203,8 +178,12 @@
               left (slice path 0 (+ cut 1))
               right (slice path cut)
               mid (path cut)
-              through (norm (sub (path (min (- (length path) 1) (+ cut 1)))
-                                 (path (max 0 (- cut 1)))))
+              across (norm (sub (path (min (- (length path) 1) (+ cut 1)))
+                                (path (max 0 (- cut 1)))))
+              # A zero tangent -- the neighbours coincide -- would pin a
+              # control point onto its endpoint and draw a corner; the
+              # chord's direction is the honest substitute.
+              through (if (deep= across [0 0]) (norm (sub p3 p0)) across)
               # Boxes are split at the same y the path was.
               above (filter (fn [[_ _ y]] (<= y (mid 1))) boxes)
               below (filter (fn [[_ _ y]] (>= y (mid 1))) boxes)

@@ -26,20 +26,23 @@
 # "before" and "after" of a code change are different graphs -- the change
 # adds nodes -- and the only fair comparison is two SVGs rendered from the
 # SAME tree by different code. Render each side to a file, score both.
-(import ../src/scan) (import ../src/parsers) (import ../src/config)
-(import ../src/select) (import ../src/layout)
+# THROUGH THE SAME PIPELINE AS THE PAGE, or the score is of a different
+# picture. The first version rebuilt the render by hand -- scan, config,
+# trim, draw -- and skipped the one step graph.janet adds: merging line
+# counts into the labels when (show-lines) is on. Labels size the nodes,
+# nodes place the layout, and the hand-rolled pipeline scored a drawing
+# nobody sees: it reported 0 crossings while the page drew an edge
+# through tools/overlap. `graph/draw` is what the server calls; it is
+# what this calls.
+(import ../src/graph) (import ../src/parsers)
 
 (def svg
   (if-let [path (get (dyn :args) 1)]
     (slurp path)
     (do
       (def specs (parsers/load "./src/parsers"))
-      (def graph (scan/scan "." specs))
-      (def [state _] (config/run (string/split "\n" (string/trimr (slurp "config.janet")))))
-      (def trimmed (select/drop-nodes (select/keep graph (state :only)) (state :hidden)))
-      (def [ok drawn] (layout/draw trimmed {:layout "layered" :groups (state :groups)
-                                            :sized (state :sized) :filled (state :filled)
-                                            :font (state :font)}))
+      (def [_ _ ok drawn] (graph/draw "." specs "./config.janet"))
+      (unless ok (eprint "render failed: " drawn) (os/exit 1))
       drawn)))
 
 # Every ellipse: centre and radii.
@@ -139,6 +142,7 @@
 # Named, not just counted: "1 cross a node" starts an investigation that
 # opening the picture and squinting used to finish. The title says which.
 (def offenders @[])
+(def grazers @[])
 (defn own-ellipses [pts]
   # The ellipses this edge is entitled to touch: the ones its ends sit on.
   (def ends [(first pts) (last pts)])
@@ -175,6 +179,7 @@
           (when (< d2 1.0) (set grazed true))
           (when (< d2 1.44) (set near true))))))
     (when bad (++ hits) (array/push offenders (p :title)))
+    (when (and grazed (not bad)) (array/push grazers (p :title)))
     (when grazed (++ grazes))
     (when near (++ nears))))
 # -- crossings, between the curves as drawn --------------------------------
@@ -229,3 +234,6 @@
 (unless (empty? offenders)
   (printf "through a node: %s"
           (string/join (map |(string/replace "-&gt;" " -> " $) offenders) ", ")))
+(unless (empty? grazers)
+  (printf "clipping an outline: %s"
+          (string/join (map |(string/replace "-&gt;" " -> " $) grazers) ", ")))
