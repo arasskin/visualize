@@ -362,14 +362,19 @@
         # beside the obstacle, not against it.
         (def pad 8)
         (def obstacles @[])
-        (defn consider [x0 x1 y0 y1]
+        (defn consider [x0 x1 y0 y1 &opt side]
           (when (and (< y0 gy) (> y1 sy))
             # The side, decided once, where the path and the obstacle
-            # actually share the page.
+            # actually share the page -- unless the caller has already
+            # decided it. A path that passes THROUGH an obstacle gives
+            # this heuristic a coin to flip, and pass-between search
+            # (route-dodging) flips it deliberately instead.
             (def my (/ (+ (max y0 sy) (min y1 gy)) 2))
             (array/push obstacles
                         {:x0 x0 :x1 x1 :y0 y0 :y1 y1
-                         :right? (>= (path-x my) (/ (+ x0 x1) 2))})))
+                         :right? (if (nil? side)
+                                   (>= (path-x my) (/ (+ x0 x1) 2))
+                                   side)})))
         # Group boxes the edge does not belong to.
         (when box-rects
           (each r box-rects
@@ -404,7 +409,7 @@
         # until the result invades nothing.
         (when extra
           (each r extra
-            (consider (r :x0) (r :x1) (r :y0) (r :y1))))
+            (consider (r :x0) (r :x1) (r :y0) (r :y1) (r :right?))))
         (if (empty? obstacles)
           corridor
           (do
@@ -448,8 +453,22 @@
               # the stations mark that slice.
               (def y0c (max (o :y0) (+ sy 0.5)))
               (def y1c (min (o :y1) (- gy 0.5)))
-              (each [y on-edge?] [[(- y0c 1) false] [y0c true]
-                                  [y1c true] [(+ y1c 1) false]]
+              # AN EDGE THAT STARTS INSIDE AN OBSTACLE'S BAND cannot be
+              # constrained at its entry: the start point is FIXED, and a
+              # gate at (or clamped to) the start's height demanding the
+              # far side of the obstacle forces the funnel into a
+              # horizontal teleport through whatever stands between --
+              # `stamp -> core` jumped 400 units sideways at its own
+              # starting height, through `src/watchdog`, to satisfy a gate
+              # for an obstacle whose band its source shares. Only the
+              # edge of the band the path EXITS through can bind; same for
+              # the goal, mirrored.
+              (def top-binds (> (o :y0) sy))
+              (def bottom-binds (< (o :y1) gy))
+              (def station-ys
+                (array ;(if top-binds [[(- y0c 1) false] [y0c true]] [])
+                       ;(if bottom-binds [[y1c true] [(+ y1c 1) false]] [])))
+              (each [y on-edge?] station-ys
                 (when (and (> y sy) (< y gy) (<= y0c y1c))
                   (def [l r] (clipped y))
                   # Only the obstacle's own edges hold the lane; the
@@ -598,30 +617,102 @@
     is returned even if still dirty; it dodges everything it knew, which
     beats a fallback that dodges nothing.``
     [start goal gates]
-    (var extra @[])
-    (var accepted nil)
-    (var candidate nil)
-    (var tries 0)
-    (while (and (nil? accepted) (< tries 3))
-      (++ tries)
-      (def aug (with-overhangs start goal gates extra))
-      (if (empty? aug)
-        (set tries 3)
-        (do
-          (def p (funnel/path start goal aug))
-          (def segs (when p (fit/rounded p aug bend-radius)))
-          (if (nil? segs)
-            (set tries 3)
-            (do
-              (set candidate segs)
-              (def invaders (invaded-by start segs))
-              (when (os/getenv "VISUALIZE_ROUTE_DEBUG")
-                (unless (empty? invaders)
-                  (eprintf "dodge: %s->%s try %d invades %d node(s)"
-                           (string from) (string to) tries (length invaders))))
-              (if (empty? invaders)
-                (set accepted segs)
-                (each v invaders (array/push extra v))))))))
+    (defn route-once [extras]
+      (def aug (with-overhangs start goal gates extras))
+      (when (not (empty? aug))
+        (when-let [p (funnel/path start goal aug)]
+          (fit/rounded p aug bend-radius))))
+    (defn run-length [segs]
+      (var total 0)
+      (var px (start 0)) (var py (start 1))
+      (each [_ _ end] segs
+        (def dx (- (end 0) px)) (def dy (- (end 1) py))
+        (+= total (math/sqrt (+ (* dx dx) (* dy dy))))
+        (set px (end 0)) (set py (end 1)))
+      total)
+    (defn inner-dodge
+      ``The route/check/add loop from a given starting set of obstacles.
+      Returns [segs extras clean?]: the last candidate, the obstacle set
+      as it grew, and whether the candidate invades nothing.``
+      [seed]
+      (def extra (array ;seed))
+      (defn remember [v]
+        (unless (some (fn [e] (and (= (e :x0) (v :x0)) (= (e :y0) (v :y0))))
+                      extra)
+          (array/push extra v)))
+      (var candidate nil)
+      (var clean false)
+      (var tries 0)
+      (while (and (not clean) (< tries 3))
+        (++ tries)
+        (def segs (route-once extra))
+        (if (nil? segs)
+          (set tries 3)
+          (do
+            (set candidate segs)
+            (def invaders (invaded-by start segs))
+            (if (empty? invaders)
+              (set clean true)
+              (each v invaders (remember v))))))
+      [candidate extra clean])
+    (def [candidate extra clean] (inner-dodge []))
+    (var accepted (when clean candidate))
+    (when (and (nil? accepted) candidate
+               (os/getenv "VISUALIZE_ROUTE_DEBUG"))
+      (eprintf "dodge: %s->%s heuristic sides leave it dirty (%d obstacles)"
+               (string from) (string to) (length extra)))
+    # PASS-BETWEEN. An obstacle the path goes THROUGH gives the side
+    # heuristic a coin to flip, and two bad flips contradict: one says
+    # left, the next says right, the channel between them is narrower
+    # than both pads, and the merged station empties -- protection
+    # cancels itself exactly where two obstacles pinch. With the
+    # heuristic exhausted, the sides of the invaded obstacles are
+    # ENUMERATED: at most three invaders is eight assignments, each run
+    # through the full dodging loop, and the shortest clean one wins.
+    #
+    # WHAT THIS DOES AND DOES NOT REACH, measured the day it was built:
+    # it answers the contradicting-sides class and is inert when the
+    # heuristic succeeds. It does NOT rescue `stamp -> core` under
+    # VISUALIZE_SIMPLEX, and the trace says why: that edge's lane forces
+    # it across a rank of standing nodes, every assignment routes through
+    # a region where SOME station has been dropped by the per-station
+    # degradation (one obstacle's clip empties against another's, the
+    # gate vanishes, the curve walks through where it stood), and no
+    # side assignment can express "between these two" when the free
+    # space at one height is two disjoint intervals. The honest fix for
+    # that residue is gates that hold interval SETS -- a funnel over
+    # multi-interval gates -- which changes the model, not the search,
+    # and is where work on this class should resume.
+    (when (and (nil? accepted) (not (empty? extra)) (<= (length extra) 3))
+      (var best nil)
+      (var best-len math/inf)
+      (def n (length extra))
+      (for mask 0 (blshift 1 n)
+        (def forced (seq [i :range [0 n]]
+                      (merge (extra i) {:right? (odd? (brshift mask i))})))
+        # Each assignment gets the FULL dodging loop, not one route: the
+        # detour a flipped side produces can wander into obstacles the
+        # seed set never met -- watchdog-left sends `stamp -> core` under
+        # its own rank and into territory the right-side attempt never
+        # visited -- and a single route judged that assignment on its
+        # first draft.
+        (def [segs _ clean2] (inner-dodge forced))
+        (when (= (os/getenv "VISUALIZE_ROUTE_TRACE")
+                 (string from "->" to))
+          (eprintf "  mask %d: %s" mask
+                   (cond (nil? segs) "no route"
+                         clean2 "CLEAN"
+                         "dirty")))
+        (when (and segs clean2)
+          (def len (run-length segs))
+          (when (< len best-len)
+            (set best-len len)
+            (set best segs))))
+      (when best
+        (when (os/getenv "VISUALIZE_ROUTE_DEBUG")
+          (eprintf "dodge: %s->%s pass-between cleaned it (%d assignments tried)"
+                   (string from) (string to) (blshift 1 n)))
+        (set accepted best)))
     (or accepted candidate))
 
   (defn emit-run [start segs]
