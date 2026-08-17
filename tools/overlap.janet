@@ -84,6 +84,9 @@
 (var grazes 0)
 (var nears 0)
 (var checked 0)
+# Named, not just counted: "1 cross a node" starts an investigation that
+# opening the picture and squinting used to finish. The title says which.
+(def offenders @[])
 (defn own-ellipses [pts]
   # The ellipses this edge is entitled to touch: the ones its ends sit on.
   (def ends [(first pts) (last pts)])
@@ -121,7 +124,7 @@
           (when (< d2 0.55) (set bad true))
           (when (< d2 1.0) (set grazed true))
           (when (< d2 1.44) (set near true))))))
-    (when bad (++ hits))
+    (when bad (++ hits) (array/push offenders (p :title)))
     (when grazed (++ grazes))
     (when near (++ nears))))
 # -- crossings, between the curves as drawn --------------------------------
@@ -226,3 +229,6 @@
         checked hits grazes nears)
 (printf "%d edge pairs cross; drawn %s x %s"
         crossings (get size 0 "?") (get size 1 "?"))
+(unless (empty? offenders)
+  (printf "through a node: %s"
+          (string/join (map |(string/replace "-&gt;" " -> " $) offenders) ", ")))

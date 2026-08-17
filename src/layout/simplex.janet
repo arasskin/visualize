@@ -71,17 +71,16 @@
 # falls back on none of them. Every curve stays inside the box it was
 # given. The boxes are in the wrong places.
 #
-# WHICH MOVES THE SUSPECT TO X-PLACEMENT. A corridor is only as good as the
-# column the ordering and placement passes reserved for it, and packing
-# nodes onto fewer ranks makes those columns narrower and more contested --
-# see the corridor measurement in docs/dotgen-audit.md, where 20 of 37 were
-# already under 20px with the LOOSER ranking. dot's answer is the aux graph
-# in position.c, which decides x for the whole drawing at once instead of a
-# rank at a time; src/layout/aux.janet is that port, and it is also not the
-# default yet.
-#
-# So: still one line in `rank`, and the flag now exists to try it. The next
-# thing that has to get better is x, not the ranking and not the router.
+# THE SUSPECT MOVED TWICE AND SETTLED SOMEWHERE ELSE. First the router was
+# blamed (wrong, above); then x-placement; then the second audit rendered
+# every layout commit against the SAME tree and found the origin of the
+# famous detour in the RELAXATION'S TIE-BREAK -- `rank` snapped nodes to
+# the upper median of their neighbours inside an interval the objective was
+# indifferent across, a group box grew a rank for zero gain, and every long
+# edge detoured around it. Fixed in layered.janet, and the fix is a reason
+# this file stays unwired: the relaxation with interval-aware ties draws
+# the group shapes a reader wants, which no total-edge-length optimum asks
+# for. See docs/dotgen-audit.md for the full account.
 
 (defn- tree-of
   "Adjacency for an undirected view of the tree edges."
