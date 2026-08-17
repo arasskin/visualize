@@ -447,19 +447,22 @@
                          # Where the straight line is at this bend's rank.
                          t (if (zero? span) 0.5 (/ (- (bend 1) ay) span))
                          wants (+ ax (* t (- bx ax)))
-                         # THE SLIDE SPENDS ONLY THE SLOT'S SPARE WIDTH. A
-                         # narrow slot means bundle neighbours close on both
-                         # sides, and the pitch between lanes is what makes
-                         # the bundle read as one; sliding each member toward
-                         # its OWN chord broke that -- `stamp -> core` ran
-                         # pinched against `watchdog -> core` at the top,
-                         # then drifted over to hug `host -> core` as the
-                         # three chords fanned, trading partners mid-flight.
-                         # A wide slot means open space, where straightening
-                         # toward the chord is pure gain. So the budget is
-                         # the width beyond two lane-pitches, halved: zero
-                         # in a packed bundle, generous in the open.
-                         budget (max 0 (/ (- right left 24) 2))
+                         # THE SLIDE SMOOTHS; IT NO LONGER STEERS. It once
+                         # spent a slot's whole spare width pulling each
+                         # bend toward its own chord, and the layout's
+                         # bundling could not survive it: a bundle's
+                         # OUTERMOST member always has open space on its
+                         # outside, so its budget was huge and it slid
+                         # clean off the band back onto its private
+                         # diagonal -- `watchdog -> core` deserted the
+                         # flock the placement pass had just packed it
+                         # into, drew itself one straight line, and left
+                         # `stamp -> core` looking abandoned mid-journey.
+                         # Where a lane runs is the LAYOUT's decision now
+                         # (aims, flocking, settle); the renderer may nudge
+                         # a bend by a few units to iron a wobble, never
+                         # relocate it.
+                         budget (min 6 (max 0 (/ (- right left 24) 2)))
                          low (max left (- (bend 0) budget))
                          high (min right (+ (bend 0) budget))]
                      [(min high (max low wants)) (bend 1)])))
