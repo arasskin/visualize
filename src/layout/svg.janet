@@ -303,35 +303,44 @@
   # visible gap away from the node it points at.
 
   (defn with-overhangs
-    ``The corridor plus every group box the chain passes, as obstacles.
+    ``The corridor plus everything solid the chain passes, as extra gates.
 
-    The layout keeps BENDS off the ranks a box occupies, but a box is
-    drawn taller than its members' ranks -- half a node plus the inset
-    hangs below the last rank and above the first -- and the segment
-    between two legally-placed bends can cut that overhanging corner.
-    The placement pass used to prevent this by walling the box's whole
-    x-range off one rank further, which pushed every passing bundle a
-    box-width sideways and back: the S-curves this replaces. Keeping the
-    segment off the corner is a ROUTING job, so the box rectangle joins
-    the corridor here and the funnel rounds the corner instead.
+    The corridor's own gates keep a bend inside its slot AT each rank
+    line, and nothing else: the bands between ranks are open, and both
+    group boxes and node ellipses stand in them. A group box is drawn
+    taller than its members' ranks -- half a node plus the inset hangs
+    past the first and last -- and a segment between two legally-placed
+    bends can cut that overhanging corner; a node's ellipse bulges into
+    the band and a diagonal curve can graze its shoulder. The placement
+    pass used to prevent the first by walling the box's whole x-range off
+    one rank further, which pushed every passing bundle a box-width
+    sideways and back -- the S-curves this replaces. Keeping curves off
+    solids between rank lines is a ROUTING job, so the solids join the
+    corridor here as gates and the funnel rounds them instead.
 
-    THE SHAPE OF THE INSERTION MATTERS. At each edge of a box's vertical
-    band the corridor gets two stations: one ON the edge, clipped to the
-    side of the box the path passes, and one just OUTSIDE it, clipped
-    only by whatever other boxes reach that y. Without the outside one
-    the funnel sees the clipped station and the next bend's narrow slot
-    as disjoint and refuses -- the open space between them never appears
-    in a stack of boxes unless a box says it is there. Two groups side
-    by side each clip their own side, which is how a path threads the
-    channel between them.``
+    EACH OBSTACLE PICKS ITS SIDE ONCE, at the midpoint of the stretch the
+    path shares with it. Deciding per gate line looked more precise and
+    was wrong: the interpolated path drifts across an obstacle's centre
+    line between its top and bottom, the two edges then clipped opposite
+    sides, and the gates contradicted each other -- the funnel refused
+    and the whole edge silently fell back to the spline that checks
+    nothing, which is how `stamp -> core` cut a box corner while the code
+    to prevent exactly that sat unreachable.
+
+    THE SHAPE OF THE INSERTION: at each horizontal edge of an obstacle,
+    one gate ON the edge, clipped to its chosen side, and one just
+    OUTSIDE it, clipped only by whatever else reaches that y -- the
+    outside gate is what tells the funnel the space past the obstacle is
+    open. Two obstacles side by side each clip their own side, which is
+    how a path threads the channel between them.``
     [start goal corridor]
-    (if (or (nil? box-rects) (empty? box-rects) (empty? corridor))
+    (if (empty? corridor)
       corridor
       (do
         (def [sx sy] start)
         (def [gx gy] goal)
         # The path as the renderer knows it so far: endpoints and slid
-        # bends, for deciding which side of a box the chain passes.
+        # bends, for deciding which side of an obstacle the chain passes.
         (def pts (array [sx sy] ;(map (fn [[x y]] [x y]) bends) [gx gy]))
         (defn path-x [y]
           (var out sx)
@@ -341,45 +350,74 @@
             (when (and (<= ay y) (<= y by) (< ay by))
               (set out (+ ax (* (- bx ax) (/ (- y ay) (- by ay)))))))
           out)
-        (def relevant
-          (filter (fn [r] (and (not (get (r :members) from))
-                               (not (get (r :members) to))
-                               (< (r :y0) gy) (> (r :y1) sy)))
-                  box-rects))
-        (if (empty? relevant)
+        # Clearance matches a bend's slot: enough that the line reads as
+        # beside the obstacle, not against it.
+        (def pad 8)
+        (def obstacles @[])
+        (defn consider [x0 x1 y0 y1]
+          (when (and (< y0 gy) (> y1 sy))
+            # The side, decided once, where the path and the obstacle
+            # actually share the page.
+            (def my (/ (+ (max y0 sy) (min y1 gy)) 2))
+            (array/push obstacles
+                        {:x0 x0 :x1 x1 :y0 y0 :y1 y1
+                         :right? (>= (path-x my) (/ (+ x0 x1) 2))})))
+        # Group boxes the edge does not belong to.
+        (when box-rects
+          (each r box-rects
+            (unless (or (get (r :members) from) (get (r :members) to))
+              (consider (r :x0) (r :x1) (r :y0) (r :y1)))))
+        # Node ellipses standing near the path -- their bounding boxes,
+        # which is what dot's maximal_bbox subtracts too. Only the ones
+        # the path actually passes: an obstacle two hundred units away
+        # would still pick a side, and enough far-off sides eventually
+        # contradict each other for no drawing benefit.
+        (when (and places sizes)
+          (eachp [name p] places
+            (unless (or (= name from) (= name to))
+              (def s (sizes name))
+              (when (< (math/abs (- (path-x (p :y)) (p :x))) (+ (s :w) 28))
+                (consider (- (p :x) (s :w)) (+ (p :x) (s :w))
+                          (- (p :y) (s :h)) (+ (p :y) (s :h)))))))
+        (if (empty? obstacles)
           corridor
           (do
-            # Clearance matches a bend's slot: enough that the line reads
-            # as beside the box, not against it.
-            (def pad 8)
             (defn clipped
-              "The free interval at y, after every box reaching it."
+              "The free interval at y, after every obstacle reaching it."
               [y]
               (var left -2000)
               (var right 2000)
-              (each r relevant
-                (when (and (<= (r :y0) y) (<= y (r :y1)))
-                  (def mid (/ (+ (r :x0) (r :x1)) 2))
-                  (if (>= (path-x y) mid)
-                    (set left (max left (+ (r :x1) pad)))
-                    (set right (min right (- (r :x0) pad))))))
-              (when (< left right) [left right]))
+              (each o obstacles
+                (when (and (<= (o :y0) y) (<= y (o :y1)))
+                  (if (o :right?)
+                    (set left (max left (+ (o :x1) pad)))
+                    (set right (min right (- (o :x0) pad))))))
+              [left right])
             (def stations @[])
-            (each r relevant
-              (each y [(- (r :y0) 1) (r :y0) (r :y1) (+ (r :y1) 1)]
+            (each o obstacles
+              (each y [(- (o :y0) 1) (o :y0) (o :y1) (+ (o :y1) 1)]
                 (when (and (> y sy) (< y gy))
-                  (when-let [[l r*] (clipped y)]
-                    (array/push stations [l r* y])))))
-            (def merged (sorted (array ;corridor ;stations)
-                                (fn [a b] (< (a 2) (b 2)))))
-            # STRICTLY DESCENDING RANKS OR NOTHING. A back edge's chain
-            # runs upward and this model does not: hand back the corridor
-            # untouched rather than a stack the funnel will misread. The
-            # same if two stations collide.
-            (var ok true)
-            (for i 0 (- (length merged) 1)
-              (unless (< ((merged i) 2) ((merged (+ i 1)) 2)) (set ok false)))
-            (if ok merged corridor))))))
+                  (def [l r] (clipped y))
+                  (array/push stations [l r y]))))
+            # MERGE, coalescing gates that landed on the same line by
+            # intersection -- two obstacles can share an edge height. An
+            # empty result anywhere means the obstacles genuinely close
+            # the corridor; hand back the original and let the fallback
+            # draw, rather than refusing on our own addition.
+            (def merged @[])
+            (var impossible false)
+            (each [l r y] (sorted (array ;corridor ;stations)
+                                  (fn [a b] (< (a 2) (b 2))))
+              (if (and (not (empty? merged)) (= ((last merged) 2) y))
+                (let [[pl pr _] (last merged)
+                      nl (max pl l)
+                      nr (min pr r)]
+                  (put merged (- (length merged) 1) [nl nr y])
+                  (when (> nl nr) (set impossible true)))
+                (do
+                  (array/push merged [l r y])
+                  (when (> l r) (set impossible true)))))
+            (if impossible corridor merged))))))
     # SLIDE EACH BEND ALONG ITS CORRIDOR toward the straight line, which
     # is dot's routing step: the bends say where the edge may pass, the
     # corridor says how far either way it may move, and the line between
@@ -722,17 +760,35 @@
     (eachp [to sources] incoming
       (when (> (length sources) 2)
         (def b (places to))
-        (def angled
-          (sorted-by (fn [from]
-                       (def a (places from))
-                       (math/atan2 (- (a :y) (b :y)) (- (a :x) (b :x))))
-                     sources))
+        (defn angle-of [from]
+          (def a (places from))
+          (math/atan2 (- (a :y) (b :y)) (- (a :x) (b :x))))
+        (def angled (sorted-by angle-of sources))
         (def n (length angled))
-        # Half a node-width of arc, centred: wide enough to separate the
-        # heads, narrow enough that an edge still points at its target.
-        (def spread (min 1.1 (* 0.16 n)))
+        # SEPARATE ONLY WHAT IS CLUSTERED. The first version dealt every
+        # edge a slot offset from its own natural angle -- evenly spaced
+        # across the arc whether the naturals needed spacing or not. An
+        # edge arriving from a direction all its own was still rotated to
+        # the end of the fan, and on a SHORT edge the rotation is most of
+        # what a reader sees: `fit -> svg`, a 24-unit stub between two big
+        # ellipses stacked vertically, was tilted a seventh of a radian
+        # for the crime of sharing its target with two edges forty degrees
+        # away. So: sweep the sorted natural angles enforcing a minimum
+        # gap, and offset each edge only by however far the sweep had to
+        # move it. Edges already separated move by zero, exactly.
+        (def gap 0.16)
+        (def naturals (map angle-of angled))
+        (def spaced (array (naturals 0)))
+        (for i 1 n
+          (array/push spaced (max (naturals i) (+ (spaced (- i 1)) gap))))
+        # Re-centre so the fan spreads around the cluster rather than
+        # shoving it all one way -- the sweep above only ever pushes
+        # counter-clockwise.
+        (var drift 0)
+        (for i 0 n (+= drift (- (spaced i) (naturals i))))
+        (set drift (/ drift n))
         (eachp [i from] angled
-          (put fan [from to] (- (* spread (/ i (- n 1))) (/ spread 2)))))))
+          (put fan [from to] (- (spaced i) (naturals i) drift))))))
 
   (def paths @[])
   (each [from to] edges

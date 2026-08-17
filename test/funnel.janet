@@ -1,9 +1,14 @@
-# The funnel: shortest path through a stack of boxes.
+# The funnel: shortest path through a sequence of gates.
 #
 # Every case here is hand-computed. A router's output is easy to eyeball as
-# plausible and hard to check, and the last five layout ports each looked
-# right and measured wrong -- so these assert against paths worked out on
-# paper, not against whatever the code happened to print the first time.
+# plausible and hard to check, and the layout ports each looked right and
+# measured wrong -- so these assert against paths worked out on paper, not
+# against whatever the code happened to print the first time.
+#
+# GATES, not boxes: each [left right y] constrains the path at that y only,
+# and between gates the space is open. The first version modelled slabs,
+# and the mismatch silently disabled the router for every diagonal corridor
+# -- see the header of funnel.janet.
 
 (import ../src/layout/funnel)
 (import ./harness :as t)
@@ -19,165 +24,130 @@
             (near? 0 (- (* (- x1 x0) (- y y0))
                         (* (- y1 y0) (- x x0)))))))
 
-(t/test "a straight shot through aligned boxes stays straight"
-  # Three boxes, all spanning the same x. Nothing is in the way, so the
-  # shortest path is the segment -- no corners at all.
-  (def boxes [[0 100 0] [0 100 100] [0 100 200]])
-  (def p (funnel/path [50 0] [50 200] boxes))
+(defn- crossing-at
+  "The path's x where it crosses height y."
+  [path y]
+  (var out nil)
+  (for i 0 (- (length path) 1)
+    (def [x0 y0] (path i))
+    (def [x1 y1] (path (+ i 1)))
+    (when (and (nil? out) (<= (min y0 y1) y) (<= y (max y0 y1)))
+      (set out (if (near? y0 y1)
+                 x0
+                 (+ x0 (* (- x1 x0) (/ (- y y0) (- y1 y0))))))))
+  out)
+
+(defn- passes-gates?
+  "Does the path cross every gate inside its span?"
+  [path gates]
+  (var ok true)
+  (each [l r y] gates
+    (def x (crossing-at path y))
+    (unless (and x (>= x (- l 0.001)) (<= x (+ r 0.001)))
+      (set ok false)))
+  ok)
+
+(t/test "wide gates on the line leave it straight"
+  # Three gates, all spanning [0,100], endpoints at x=50: nothing binds,
+  # so the shortest path is the segment -- no corners at all.
+  (def gates [[0 100 50] [0 100 100] [0 100 150]])
+  (def p (funnel/path [50 0] [50 200] gates))
   (t/ok (straight? p) "no bends where none are needed")
   (t/is= [50 0] (first p))
   (t/is= [50 200] (last p)))
 
-(t/test "a diagonal through wide boxes is still one segment"
-  # The endpoints differ in x, but every gate is wide enough to admit the
-  # straight line between them, so the funnel never closes.
-  (def boxes [[0 100 0] [0 100 100] [0 100 200]])
-  (def p (funnel/path [10 0] [90 200] boxes))
+(t/test "a diagonal through wide gates is still one segment"
+  (def gates [[0 100 50] [0 100 100] [0 100 150]])
+  (def p (funnel/path [10 0] [90 200] gates))
   (t/ok (straight? p) "a clear diagonal needs no corner"))
 
-(t/test "a jog bends at the corner that blocks it"
-  # Hand-computed. The middle box is pushed right, so its LEFT wall at x=60
-  # is a corner the path must round:
-  #
-  #     rank 0   [ 0 .. 100]        start (10, 0)
-  #     rank 1   [60 .. 100]        <- left wall at 60 blocks the straight line
-  #     rank 2   [ 0 .. 100]        goal  (10, 200)
-  #
-  # The straight line from (10,0) to (10,200) runs at x=10, outside rank 1
-  # entirely. The shortest legal path touches (60, 50) -- the near corner of
-  # the gate into the narrow box -- and returns.
-  (def boxes [[0 100 0] [60 100 100] [0 100 200]])
-  (def p (funnel/path [10 0] [10 200] boxes))
-  (t/ok (not (straight? p)) "an obstructed path must bend")
-  (t/ok (some |(near? 60 ($ 0)) p) "it rounds the wall at x=60"))
+(t/test "one narrow gate off the line bends the path at its near end"
+  # Hand-computed. The straight line from (10,0) to (10,200) runs at x=10;
+  # the gate at y=100 admits only [60,100]. The shortest legal path turns
+  # exactly once, at the gate's NEAR end: (60,100).
+  (def gates [[60 100 100]])
+  (def p (funnel/path [10 0] [10 200] gates))
+  (t/is= 3 (length p) "start, one corner, goal")
+  (t/ok (near? 60 ((p 1) 0)) "the corner is at x=60")
+  (t/ok (near? 100 ((p 1) 1)) "on the gate line"))
 
-(t/test "an evenly-stepped staircase needs no corners at all"
-  # Worth its own case because it caught a bad test rather than bad code.
-  # Four boxes marching right by 30 a rank: the straight line from start to
-  # goal passes through every gate with room to spare, so the honest answer
-  # is the segment. A router that bent here would be adding kinks a reader
-  # would have to follow for nothing.
-  (def boxes [[0 40 0] [30 70 100] [60 100 200] [90 130 300]])
-  (def p (funnel/path [20 0] [110 300] boxes))
-  (t/is= 2 (length p) "a clear line is start and goal, nothing between")
-  (t/ok (straight? p)))
+(t/test "the mirror image bends at the mirrored corner"
+  (def gates [[0 40 100]])
+  (def p (funnel/path [90 0] [90 200] gates))
+  (t/is= 3 (length p))
+  (t/ok (near? 40 ((p 1) 0)) "the corner is at x=40"))
 
-(t/test "an uneven staircase bends at the steps that block it"
-  # Hand-computed. The boxes overlap -- they must, or there is no corridor --
-  # but by uneven amounts, so the gates are not aligned:
-  #
-  #     rank 0  [ 0 ..  60]   start (10, 0)
-  #     rank 1  [50 .. 140]   gate y= 50  x in [ 50 ..  60]  <- narrow, right
-  #     rank 2  [50 .. 140]   gate y=150  x in [ 50 .. 140]
-  #     rank 3  [ 0 ..  60]   gate y=250  x in [ 50 ..  60]  <- narrow again
-  #                           goal  (10, 300)
-  #
-  # The straight line from (10,0) to (10,300) runs at x=10, outside both
-  # narrow gates. The path must push right to x=50 to get through the first,
-  # hold, and come back -- two corners, both on the wall at x=50.
-  (def boxes [[0 60 0] [50 140 100] [50 140 200] [0 60 300]])
-  (def p (funnel/path [10 0] [10 300] boxes))
+(t/test "two offset narrow gates give one corner each"
+  # Hand-computed. From (10,0), through [50,60]@100 and back to (10,300)
+  # through [50,60]@200: the path pushes right to 50, holds through both
+  # gates, and returns. Corners at (50,100) and (50,200).
+  (def gates [[50 60 100] [50 60 200]])
+  (def p (funnel/path [10 0] [10 300] gates))
   (t/ok (not (straight? p)) "a blocked path must bend")
-  (t/ok (some |(and (near? 50 ($ 0)) (near? 50 ($ 1))) p)
-        "it turns at the corner (50, 50)")
-  (t/ok (some |(and (near? 50 ($ 0)) (near? 250 ($ 1))) p)
-        "and back at (50, 250)")
-  # Every corner must be a real box wall, not an interior point invented
-  # along the way. Endpoints excepted -- those are given.
-  (def walls @{})
-  (each [l r _] boxes (put walls l true) (put walls r true))
-  (each [x _] (slice p 1 -2)
-    (t/ok (some |(near? x $) (keys walls))
-          (string "corner at x=" x " is a box wall"))))
+  (t/ok (some |(and (near? 50 ($ 0)) (near? 100 ($ 1))) p) "corner at (50,100)")
+  (t/ok (some |(and (near? 50 ($ 0)) (near? 200 ($ 1))) p) "corner at (50,200)"))
 
-(t/test "the path never leaves the corridor"
-  # The property that actually matters for the drawing, checked at the
-  # GATES rather than by sampling with a tolerance -- a path stays inside a
-  # stack of boxes exactly when it is inside every gate it crosses, and the
-  # gates are where a wrong path escapes.
-  (defn crosses-legally? [start goal boxes]
-    (def p (funnel/path start goal boxes))
-    (def gates (funnel/portals boxes))
-    # A refused corridor is not a containment failure; it has its own test.
-    (if (or (nil? p) (nil? gates)) (break false))
-    (var ok true)
-    (each [[l gy] [r _]] gates
-      # Where is the path at this gate's y?
-      (var at nil)
-      (for i 0 (- (length p) 1)
-        (def [x0 y0] (p i))
-        (def [x1 y1] (p (+ i 1)))
-        (when (and (nil? at) (<= (min y0 y1) gy) (<= gy (max y0 y1)))
-          (set at (if (near? y0 y1)
-                    x0
-                    (+ x0 (* (- x1 x0) (/ (- gy y0) (- y1 y0))))))))
-      (unless (and at (>= at (- l 0.001)) (<= at (+ r 0.001)))
-        (set ok false)))
-    ok)
-  (t/ok (crosses-legally? [20 0] [110 300]
-                          [[0 40 0] [30 70 100] [60 100 200] [90 130 300]])
-        "the even staircase")
-  (t/ok (crosses-legally? [10 0] [10 300]
-                          [[0 60 0] [50 140 100] [50 140 200] [0 60 300]])
-        "the uneven staircase")
-  (t/ok (crosses-legally? [10 0] [10 200]
-                          [[0 100 0] [60 100 100] [0 100 200]])
-        "the jog")
-  (t/ok (crosses-legally? [90 0] [90 200]
-                          [[0 100 0] [0 40 100] [0 100 200]])
-        "the jog, mirrored")
-  # A zigzag, which forces corners on ALTERNATING sides and is where a
-  # swapped left/right chain shows up. Consecutive boxes must still overlap
-  # or it is not a corridor at all -- the first draft of this case pushed
-  # the swing too far, the boxes came apart, and it was testing the broken
-  # corridor above by accident.
-  (t/ok (crosses-legally? [50 0] [50 400]
-                          [[0 100 0] [60 140 100] [0 80 200]
-                           [60 140 300] [0 100 400]])
-        "a zigzag alternating sides"))
+(t/test "a diagonal corridor of disjoint gates is a straight line"
+  # THE CASE THAT KILLED THE BOX MODEL. Gates marching leftward, each
+  # x-interval DISJOINT from the last -- as bend slots are when a long
+  # edge runs diagonally. The straight line from (300,0) to (30,400)
+  # crosses at x = 232.5, 165, 97.5, inside all three gates, so the
+  # answer is the segment. The box model computed the portal between the
+  # first two gates as [max(210,140), min(260,200)] = empty, called the
+  # corridor broken, and refused -- which is exactly what silently
+  # disabled the router for every diagonal corridor in the drawing.
+  (def gates [[210 260 100] [140 200 200] [60 135 300]])
+  (def p (funnel/path [300 0] [30 400] gates))
+  (t/ok p "the diagonal corridor is passable")
+  (t/ok (straight? p) "and the straight diagonal is the answer")
+  (t/ok (passes-gates? p gates)))
 
-(t/test "a broken corridor is refused, not routed through"
-  # THE BUG THIS EXISTS FOR. Boxes [0,40] and [100,140] share no x, so there
-  # is no opening between them. The first version computed the gate as
-  # min(r0,r1)..max(l0,l1) = 40..100 -- the gap itself, the one region the
-  # path may NOT enter -- handed it to the funnel as the only way through,
-  # and got back a confident straight line through the wall. It looked
-  # entirely reasonable, which is why this is asserted rather than trusted.
-  (def broken [[0 40 0] [0 40 100] [100 140 200] [100 140 300]])
-  (t/is= nil (funnel/portals broken) "no gate between disjoint boxes")
-  (t/is= nil (funnel/path [20 0] [120 300] broken)
-         "and no path, so the caller can fall back"))
+(t/test "a zigzag holds the binding wall and ignores the slack one"
+  # Gates alternating right and left of the endpoints' column. The two
+  # outer gates bind (x must reach 60); the middle gate [0,80] is crossed
+  # at x=60 without touching it -- the first draft of this test expected a
+  # corner on the middle gate's wall at 80, which is a LONGER path than
+  # holding x=60 straight through. The funnel knew better.
+  (def gates [[60 140 100] [0 80 200] [60 140 300]])
+  (def p (funnel/path [50 0] [50 400] gates))
+  (t/ok (passes-gates? p gates) "every gate crossed inside its span")
+  (t/ok (some |(and (near? 60 ($ 0)) (near? 100 ($ 1))) p) "corner at (60,100)")
+  (t/ok (some |(and (near? 60 ($ 0)) (near? 300 ($ 1))) p) "corner at (60,300)"))
 
-(t/test "boxes touching at exactly one x still connect"
-  # The boundary of the case above: [0,40] and [40,80] share the single
-  # point x=40. That is a corridor -- a very thin one -- and refusing it
-  # would be as wrong as inventing one.
-  (def boxes [[0 40 0] [40 80 100]])
-  (t/ok (funnel/portals boxes) "a zero-width gate is still a gate")
-  (def p (funnel/path [20 0] [60 100] boxes))
-  (t/ok p "and a path exists through it")
-  (t/ok (some |(near? 40 ($ 0)) p) "which necessarily passes x=40"))
+(t/test "an empty gate is refused, not squeezed through"
+  # A gate with left > right has no opening; nil sends the caller to its
+  # fallback rather than drawing a line through a wall.
+  (t/is= nil (funnel/path [10 0] [10 200] [[100 40 100]])))
 
-(t/test "no boxes means a straight line"
+(t/test "a zero-width gate is a point the path must visit"
+  (def gates [[40 40 100]])
+  (def p (funnel/path [20 0] [60 200] gates))
+  (t/ok p "one exact point is still an opening")
+  (t/ok (some |(and (near? 40 ($ 0)) (near? 100 ($ 1))) p)
+        "and the path passes through it"))
+
+(t/test "no gates means a straight line"
   (def p (funnel/path [0 0] [10 10] []))
   (t/is= 2 (length p))
   (t/is= [0 0] (first p))
   (t/is= [10 10] (last p)))
 
-(t/test "the path is no longer than the polyline through box centres"
-  # The sanity check on "shortest": whatever it returns must beat the
-  # obvious naive route, which is what the current router effectively draws.
-  (def boxes [[0 40 0] [30 70 100] [60 100 200] [90 130 300]])
-  (defn length-of [points]
-    (var total 0)
-    (for i 0 (- (length points) 1)
-      (def [x0 y0] (points i))
-      (def [x1 y1] (points (+ i 1)))
-      (+= total (math/sqrt (+ (* (- x1 x0) (- x1 x0)) (* (- y1 y0) (- y1 y0))))))
-    total)
-  (def naive (array [20 0]))
-  (each [l r y] boxes (array/push naive [(/ (+ l r) 2) y]))
-  (array/push naive [110 300])
-  (def found (funnel/path [20 0] [110 300] boxes))
-  (t/ok (<= (length-of found) (+ 0.001 (length-of naive)))
-        "the funnel is at least as short as routing through centres"))
+(t/test "every path crosses every gate inside its span"
+  (each [start goal gates]
+    [[[50 0] [50 200] [[0 100 50] [0 100 100] [0 100 150]]]
+     [[10 0] [10 200] [[60 100 100]]]
+     [[10 0] [10 300] [[50 60 100] [50 60 200]]]
+     [[300 0] [30 400] [[210 260 100] [140 200 200] [60 135 300]]]
+     [[50 0] [50 400] [[60 140 100] [0 80 200] [60 140 300]]]]
+    (def p (funnel/path start goal gates))
+    (t/ok (and p (passes-gates? p gates))
+          (string "legal crossing for goal " (string/format "%j" goal)))))
+
+(t/test "the channel between gates interpolates their walls"
+  (def gates [[0 100 100] [50 150 200]])
+  (t/is= [0 100] (funnel/channel gates 100) "on the first gate line")
+  (def mid (funnel/channel gates 150))
+  (t/ok (near? 25 (mid 0)) "left wall halfway between 0 and 50")
+  (t/ok (near? 125 (mid 1)) "right wall halfway between 100 and 150")
+  (t/is= nil (funnel/channel gates 50) "above the corridor nothing binds")
+  (t/is= nil (funnel/channel gates 250) "below it either"))

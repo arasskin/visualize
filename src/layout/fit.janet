@@ -127,32 +127,28 @@
    [(- (p3 0) (* trail (t1 0))) (- (p3 1) (* trail (t1 1)))]])
 
 (defn- inside?
-  ``Does the curve stay within the corridor?
+  ``Does the curve stay within the corridor's channel?
 
-  Sampled rather than solved. dot's `splineisinside` walks the boxes and
+  The corridor is a sequence of GATES, and between two gate lines the
+  bound is the linear interpolation of their intervals -- `funnel/channel`.
+  The funnel's polyline always fits that channel by linearity, so
+  subdividing toward the polyline always converges.
+
+  Sampled rather than solved. dot's `splineisinside` walks its boxes and
   clips analytically; sampling at a fixed rate is a few lines instead and
   the failure mode is benign -- a curve that bulges out between two samples
-  is caught by the next subdivision, and the boxes have a gap's worth of
+  is caught by the next subdivision, and the gates have a gap's worth of
   margin built in by the layout.
 
   Returns the parameter of the WORST violation, or nil when clean, because
   the caller wants to split exactly there.``
-  [p0 c1 c2 p3 boxes]
-  (defn box-at [y]
-    (var found nil)
-    (var best nil)
-    (each [l r by] boxes
-      (def d (math/abs (- y by)))
-      (when (or (nil? best) (< d best))
-        (set best d)
-        (set found [l r])))
-    found)
+  [p0 c1 c2 p3 gates]
   (var worst nil)
   (var worst-at nil)
   (for k 0 33
     (def t (/ k 32))
     (def [x y] (bezier-at p0 c1 c2 p3 t))
-    (when-let [[l r] (box-at y)]
+    (when-let [[l r] (funnel/channel gates y)]
       (def over (max (- l x) (- x r)))
       (when (and (pos? over) (or (nil? worst) (> over worst)))
         (set worst over)
