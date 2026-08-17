@@ -445,22 +445,76 @@
   (def straight-from (on-ellipse a (ra :w) (ra :h) (b :x) (b :y) 0))
   (def straight-to (on-ellipse b (rb :w) (rb :h) (a :x) (a :y) 0 turn))
 
-  (def verdict (hits-anything? (straight-from 0) (straight-from 1)
-                               (straight-to 0) (straight-to 1)))
-  (if (or (nil? verdict)
-          # A LINE CROSSING CANNOT BE DODGED, only moved. When the straight
-          # line's one offence is crossing another edge's line -- no node,
-          # no box -- and there is no reserved route to change the topology,
-          # the crossing is a fact of where the endpoints are. Draw the
-          # straight line and let the two cross cleanly; the alternative was
-          # a bow with the same crossing plus a kink.
-          (and (= verdict :line) (empty? bends)))
-    # Straight reaches. Say it that way, bends or no bends -- a chain of
-    # bends the edge does not need is a detour drawn for its own sake.
-    (string/format "M%.1f,%.1f L%.1f,%.1f"
-                   (straight-from 0) (straight-from 1)
-                   (straight-to 0) (straight-to 1))
-    (if (empty? bends)
+  # THE LANE BEFORE THE SHORTCUT. A multi-rank edge with a corridor routes
+  # through it FIRST, even when its own straight line happens to be clear.
+  # This used to be the other way around, and the picture showed it: edges
+  # travelling together used different regimes -- `watchdog -> core` drew
+  # its lucky straight diagonal while `stamp -> core` beside it hugged the
+  # box and turned, one line and one curve telling the same story two
+  # different ways. The ordering pass already lays sibling edges' bends in
+  # adjacent lanes; routing through the lane is what makes the siblings
+  # come out as offset copies of each other -- parallel where they travel
+  # together, splitting at the ends. A SOLO edge loses nothing: the slide
+  # pass pulls its lane onto its own straight line, so its routed curve is
+  # the straight line, give or take nothing a reader can see.
+  (def routed
+    (when (and (not (empty? bends)) corridor (>= (length corridor) 2))
+      (def first-target (first bends))
+      (def last-source (last bends))
+      (def [x1 y1] (on-ellipse a (ra :w) (ra :h)
+                               (first-target 0) (first-target 1) 0))
+      (def [x2 y2] (on-ellipse b (rb :w) (rb :h)
+                               (last-source 0) (last-source 1) 0 turn))
+      # The gate model runs downward; a back edge's drawn direction does
+      # not, and gets its spline as before.
+      (when (< y1 y2)
+        (def augmented (with-overhangs [x1 y1] [x2 y2] corridor))
+        (def out (fit/route [x1 y1] [x2 y2] augmented
+                            [(- (first-target 0) x1) (- (first-target 1) y1)]
+                            [(- x2 (last-source 0)) (- y2 (last-source 1))]))
+        # WHICH EDGES FELL BACK, AND AT WHICH STAGE. A fallback is silent
+        # by design -- something still draws -- and that silence has now
+        # hidden the router being broken TWICE, each time found only by
+        # noticing an edge cut a box it should have rounded. The question
+        # "why did this edge fall back" recurs; this answers it without an
+        # afternoon of replication.
+        (when (os/getenv "VISUALIZE_ROUTE_DEBUG")
+          (cond
+            out nil
+            (nil? (funnel/path [x1 y1] [x2 y2] augmented))
+            (eprintf "route: %s->%s funnel refused (%d gates)"
+                     (string from) (string to) (length augmented))
+            (eprintf "route: %s->%s fit gave up (%d gates)"
+                     (string from) (string to) (length augmented))))
+        (when out
+          (string/join
+            (array (string/format "M%.1f,%.1f" x1 y1)
+                   ;(map (fn [[c1 c2 end]]
+                           (string/format "C%.1f,%.1f %.1f,%.1f %.1f,%.1f"
+                                          (c1 0) (c1 1) (c2 0) (c2 1)
+                                          (end 0) (end 1)))
+                         out))
+            " ")))))
+
+  (def verdict (when (nil? routed)
+                 (hits-anything? (straight-from 0) (straight-from 1)
+                                 (straight-to 0) (straight-to 1))))
+  (if routed
+    routed
+    (if (or (nil? verdict)
+            # A LINE CROSSING CANNOT BE DODGED, only moved. When the straight
+            # line's one offence is crossing another edge's line -- no node,
+            # no box -- and there is no reserved route to change the topology,
+            # the crossing is a fact of where the endpoints are. Draw the
+            # straight line and let the two cross cleanly; the alternative was
+            # a bow with the same crossing plus a kink.
+            (and (= verdict :line) (empty? bends)))
+      # Straight reaches. Say it that way, bends or no bends -- a chain of
+      # bends the edge does not need is a detour drawn for its own sake.
+      (string/format "M%.1f,%.1f L%.1f,%.1f"
+                     (straight-from 0) (straight-from 1)
+                     (straight-to 0) (straight-to 1))
+      (if (empty? bends)
       # BLOCKED, AND NOTHING TO ROUTE THROUGH. Bends exist only for edges
       # spanning more than one rank, so an edge to the next rank down has no
       # reserved column to detour along -- and the layout has already decided
@@ -557,7 +611,8 @@
                     pick))]
         (string/format "M%.1f,%.1f Q%.1f,%.1f %.1f,%.1f"
                        x1 y1 (c 0) (c 1) x2 y2))
-      # Blocked, and the layout reserved a route: follow it -- as a CURVE.
+      # Blocked, the router declined (or the edge runs upward), and the
+      # layout reserved a route: follow the bends as a CURVE.
       #
       # The bends are where the edge must pass, not corners it must turn.
       # Drawn as line segments they read as plumbing: every multi-rank edge
@@ -565,62 +620,14 @@
       # times, and a reader tracks the kinks instead of the connection. A
       # curve through the same points says the same thing about where the
       # edge goes and nothing about corners that are not there.
-      #
-      # ROUTED INSIDE THE CORRIDOR WHEN THERE IS ONE, and through the bends
-      # themselves when there is not.
-      #
-      # THE DIFFERENCE IS WHAT THE BENDS MEAN. A Catmull-Rom through the
-      # bend points has to pass through them, which treats each bend as a
-      # place the edge must visit. It is not: the bend is where the layout
-      # PARKED the edge on that rank, and the box around it is how far it
-      # may move. Fitting inside the boxes uses that freedom, so an edge
-      # whose bend sits far from its line can still be drawn near it.
-      # See funnel.janet and fit.janet, and docs/pathplan-scope.md.
-      #
-      # THE FALLBACK IS NOT DECORATION. The router returns nil rather than
-      # a curve that leaves the corridor, and a corridor is only as good as
-      # the layout that built it; when it declines, the spline through the
-      # bends is the answer that shipped before and still draws.
       (let [first-target (first bends)
             last-source (last bends)
             [x1 y1] (on-ellipse a (ra :w) (ra :h)
                                 (first-target 0) (first-target 1) 0)
             [x2 y2] (on-ellipse b (rb :w) (rb :h)
                                 (last-source 0) (last-source 1) 0 turn)
-            pts (array [x1 y1] ;(map |[($ 0) ($ 1)] bends) [x2 y2])
-            # Tangents from the ellipse exits, so the fitted curve leaves
-            # and arrives at the angles the fan logic already chose.
-            fitted (when (and corridor (>= (length corridor) 2))
-                     (def augmented (with-overhangs [x1 y1] [x2 y2] corridor))
-                     (def out (fit/route [x1 y1] [x2 y2] augmented
-                                         [(- (first-target 0) x1) (- (first-target 1) y1)]
-                                         [(- x2 (last-source 0)) (- y2 (last-source 1))]))
-                     # WHICH EDGES FELL BACK, AND AT WHICH STAGE. A fallback
-                     # is silent by design -- the spline through the bends
-                     # still draws -- and that silence has now hidden the
-                     # router being broken TWICE, each time found only by
-                     # noticing an edge cut a box it should have rounded.
-                     # The question "why did this edge fall back" recurs;
-                     # this answers it without an afternoon of replication.
-                     (when (os/getenv "VISUALIZE_ROUTE_DEBUG")
-                       (cond
-                         out nil
-                         (nil? (funnel/path [x1 y1] [x2 y2] augmented))
-                         (eprintf "route: %s->%s funnel refused (%d gates)"
-                                  (string from) (string to) (length augmented))
-                         (eprintf "route: %s->%s fit gave up (%d gates)"
-                                  (string from) (string to) (length augmented))))
-                     out)]
-        (if fitted
-          (string/join
-            (array (string/format "M%.1f,%.1f" x1 y1)
-                   ;(map (fn [[c1 c2 end]]
-                           (string/format "C%.1f,%.1f %.1f,%.1f %.1f,%.1f"
-                                          (c1 0) (c1 1) (c2 0) (c2 1)
-                                          (end 0) (end 1)))
-                         fitted))
-            " ")
-          (spline pts))))))
+            pts (array [x1 y1] ;(map |[($ 0) ($ 1)] bends) [x2 y2])]
+        (spline pts))))))
 
 (defn draw
   ``The graph as SVG, laid out by `places`.
