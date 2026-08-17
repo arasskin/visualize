@@ -403,11 +403,37 @@
                     (set right (min right (- (o :x0) pad))))))
               [left right])
             (def stations @[])
+            # A STATION KEEPS THE EDGE IN ITS OWN LANE. The side clip alone
+            # says only "past the obstacle", and every member of a bundle
+            # rounding the same box then corners at the SAME point -- the
+            # clip's edge -- so `watchdog -> core` lay on top of
+            # `stamp -> core` exactly at the term box's bottom corner, the
+            # lanes converging to a point and fanning back out. The lane
+            # identity lives in the corridor gate just above the station:
+            # when that gate already sits clear of the obstacle on the
+            # passing side, the station carries the gate's interval through
+            # the turn, and each member rounds the corner in its own
+            # column, pitch intact.
+            (defn lane-above [y side-left side-right]
+              (var found nil)
+              (each [l r gy] corridor
+                (when (and (< gy y)
+                           (>= l side-left) (<= r side-right))
+                  (set found [l r])))
+              found)
             (each o obstacles
-              (each y [(- (o :y0) 1) (o :y0) (o :y1) (+ (o :y1) 1)]
+              (each [y on-edge?] [[(- (o :y0) 1) false] [(o :y0) true]
+                                  [(o :y1) true] [(+ (o :y1) 1) false]]
                 (when (and (> y sy) (< y gy))
                   (def [l r] (clipped y))
-                  (array/push stations [l r y]))))
+                  # Only the obstacle's own edges hold the lane; the
+                  # stations just outside exist to say the space is open
+                  # again, and pinning those to the lane would delay every
+                  # turn a rank.
+                  (def carried (when on-edge? (lane-above y l r)))
+                  (if carried
+                    (array/push stations [(carried 0) (carried 1) y])
+                    (array/push stations [l r y])))))
             # MERGE, coalescing gates that landed on the same line by
             # intersection -- two obstacles can share an edge height. An
             # empty result anywhere means the obstacles genuinely close
