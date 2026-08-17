@@ -269,4 +269,111 @@
       (unless (empty? local)
         (def top (min ;(map |(rank-of $) local)))
         (each n local (put rank-of n (- (rank-of n) top))))))
+
+  # BALANCE, from the tail of rank.c -- ported, correct, and PROVABLY
+  # INERT for the purpose it was ported for. Both halves are the finding.
+  #
+  # dot's pass: a node whose in-weight equals its out-weight can move
+  # anywhere its edges allow without changing total edge length, so dot
+  # puts it on the emptiest rank in that window. It was ported here as the
+  # last named piece between this layout and dot's crossing count -- the
+  # ordering passes measured at their instance's floor (see the ledger in
+  # layered.janet's mincross loop), and thinning the crowded ranks was the
+  # only lever left.
+  #
+  # FIRST TRY, NODE-COUNTED like dot's: it produced beautifully even rows
+  # -- 6 4 7 7 7 4 4 2 -- while the BEND columns piled 11 deep on the
+  # middle ranks, and drawn crossings doubled from 22 to 44. dot can count
+  # nodes because in dot the virtual chain nodes ARE nodes by the time
+  # balance runs; here bends are derived later, so a node-only count
+  # balances the wrong quantity.
+  #
+  # SECOND TRY counts bends too, and every candidate rank is scored by the
+  # squared load of the WHOLE graph (a move changes its own edges' spans,
+  # so its own bends move with it). This is the honest objective -- and it
+  # cannot move anything on graphs of this shape. Hand-computed on a
+  # synthetic case built to be favourable, a free node with a three-rank
+  # window and a crowd of seven on its home rank: squared load 149 at
+  # every position in the window, flat. Moving the node off a rank removes
+  # a node from it and adds a bend to it -- its own edge now spans that
+  # rank -- and occupancy is conserved EXACTLY. The freedom dot spends is
+  # freedom this model does not have: with bends counted, a free node's
+  # rank is not a free variable at all.
+  #
+  # So the pass stays, inert by proof rather than by accident: it is what
+  # rank.c does, it is correct, and the crossing gap to dot is NOT here.
+  # Whoever hunts that gap next should look where dot and this layout
+  # genuinely differ in kind -- dot ranks its virtual chain nodes as
+  # first-class nodes throughout, which changes what every later pass
+  # sees, and no single tail pass reproduces that.
+  #
+  # A node is FREE when in-weight equals out-weight, which for an unweighted
+  # dependency graph means equal counts of parents and children. dot's
+  # condition exactly; the asymmetric case is left alone because moving it
+  # would change the objective simplex just minimised.
+  (def parents @{})
+  (def children @{})
+  (each n names (put parents n @[]) (put children n @[]))
+  (each [from to] edges
+    (when (and (parents from) (parents to) (not= from to))
+      (array/push (children from) to)
+      (array/push (parents to) from)))
+  # OCCUPANCY COUNTS BENDS, NOT JUST NODES, and that correction is the
+  # whole difference between this pass helping and hurting. dot's balance
+  # counts nodes because in dot the virtual chain nodes ARE nodes on the
+  # rank -- they were inserted before ranking's tail runs. Here bends are
+  # derived later, so a node-only count balanced the wrong quantity: it
+  # produced beautifully even rows of 6 4 7 7 7 4 4 2 while the bend
+  # columns piled 11 deep on the middle ranks, and crossings doubled. An
+  # edge spanning r ranks lays a bend on each rank strictly between its
+  # ends, which is exactly what this counts.
+  (def occupancy @{})
+  (each n names (put occupancy (rank-of n) (+ 1 (get occupancy (rank-of n) 0))))
+  (defn count-bends [delta]
+    (each [from to] edges
+      (when (and (parents from) (parents to) (not= from to))
+        (def a (rank-of from))
+        (def b (rank-of to))
+        (def lo (min a b))
+        (def hi (max a b))
+        (for r (+ lo 1) hi
+          (put occupancy r (+ (get occupancy r 0) delta))))))
+  (count-bends 1)
+  (each n names
+    (def up (parents n))
+    (def down (children n))
+    (when (and (not (empty? up)) (not (empty? down))
+               (= (length up) (length down)))
+      # The window its edges allow: strictly below every parent, strictly
+      # above every child, minlen respected at both ends.
+      (def low (+ (max ;(map |(rank-of $) up)) minlen))
+      (def high (- (min ;(map |(rank-of $) down)) minlen))
+      (when (< low high)
+        (def here (rank-of n))
+        # THE MOVE CHANGES ITS OWN EDGES' BENDS, so a candidate is judged
+        # by the occupancy the whole graph would have, not by the row's
+        # current load. Moving a node up shortens its parents' edges and
+        # lengthens its children's -- the bends move with it, and a pass
+        # that ignored that would trade a crowded row for a crowded
+        # column and call it progress.
+        (defn spread-if [r]
+          (put rank-of n r)
+          (each k (keys occupancy) (put occupancy k 0))
+          (each m names (put occupancy (rank-of m) (+ 1 (get occupancy (rank-of m) 0))))
+          (count-bends 1)
+          # The cost of a row is its load SQUARED, summed: two rows of
+          # five beat one of ten, which is what "spread out" means and
+          # what a plain maximum cannot express.
+          (var total 0)
+          (eachp [_ load] occupancy (+= total (* load load)))
+          total)
+        (var best here)
+        (var best-cost (spread-if here))
+        (for r low (+ high 1)
+          (unless (= r here)
+            (def c (spread-if r))
+            (when (< c best-cost)
+              (set best-cost c)
+              (set best r))))
+        (spread-if best))))
   rank-of)

@@ -20,6 +20,7 @@
 (import ./select)
 (import ./v)
 (import ./layered)
+(import ./simplex)
 (import ./funnel)
 (import ./fit)
 (import ./http)
