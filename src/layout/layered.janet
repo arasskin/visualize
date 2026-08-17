@@ -1198,102 +1198,6 @@
     (eachp [key s] span
       (put column key (/ (+ (s :x0) (s :x1)) 2)))
 
-    # LANES WITHIN A FLOCK FOLLOW ENTRY GEOMETRY. The spine makes row
-    # order BE lane assignment -- every member asks for the same x, so
-    # settle deals lanes in row order -- and row order was chosen by the
-    # crossing pass before placement, blind to where each member's entry
-    # actually comes from. `state -> core` entered from the left of
-    # `json -> core`'s lane but was dealt the lane to its right, and its
-    # entry segment cut straight across the band.
-    #
-    # THE BAND'S ORDER IS BUILT LIKE A MERGING RIVER, top rank down: a
-    # member already in the band keeps its position for its whole run --
-    # reordering mid-band is a weave by definition -- and a NEW entrant
-    # joins on the side it arrives from, judged against the band's centre
-    # at that rank. (A global sort by source x got this wrong at once:
-    # `faults` has the rightmost SOURCE of its three, but the whole band
-    # sits right of every source by then, so faults arrives from the
-    # LEFT like everyone else and must join on the left. Which side is a
-    # fact about the entrant and the band's position, not about the
-    # entrant and its siblings.) Within a row, only the flock's own
-    # contiguous block is re-dealt -- the members are interchangeable to
-    # everyone else, and a block interrupted by a stranger is somebody
-    # else's crossing count.
-    (def band @{})
-    (each index indexes
-      (def present @{})
-      (each name (get ordered index [])
-        (when (bend? name)
-          (def [_ from to _] name)
-          (put present to (array/push (or (present to) @[]) name))))
-      (eachp [to members] present
-        (unless (band to) (put band to @[]))
-        (def order (band to))
-        (var mean 0)
-        (each m members (+= mean (or (aim m x) 0)))
-        (set mean (/ mean (length members)))
-        (each m (sorted-by (fn [b] (or (x (b 1)) 0)) members)
-          (def from (m 1))
-          (unless (find |(= $ from) order)
-            (if (< (or (x from) 0) mean)
-              (array/insert order 0 from)
-              (array/push order from))))))
-    (defn band-rank [to from]
-      (or (find-index |(= $ from) (get band to [])) 0))
-    (each index indexes
-      (def row (ordered index))
-      (var i 0)
-      (while (< i (length row))
-        (def name (row i))
-        (if-not (bend? name)
-          (++ i)
-          (do
-            (def [_ _ to _] name)
-            (var j i)
-            (while (and (< (+ j 1) (length row))
-                        (bend? (row (+ j 1)))
-                        (= to (get (row (+ j 1)) 2)))
-              (++ j))
-            (when (> j i)
-              (def block (sorted-by (fn [b] (band-rank to (b 1)))
-                                    (array/slice row i (+ j 1))))
-              (eachp [k b] block (put row (+ i k) b)))
-            (set i (+ j 1))))))
-
-    # THE FLOCK'S SPINE IS A STRAIGHT LINE, computed before any row seats.
-    # The first bundling pass averaged each rank's members separately, and
-    # the band WANDERED: every time an edge joined the flock -- host and
-    # client enter a rank below stamp and watchdog -- the mean jolted
-    # sideways, and every lane picked up a slope change at every rank
-    # where membership changed. Parallel, but crooked, where the old
-    # unbundled picture had been straight fans. So the spine is fixed per
-    # target for the whole round: the per-rank means of the members' own
-    # chords, then a straight line through the first and last of them.
-    # Every bend of the flock asks for the spine at its rank; settle packs
-    # the members around it at even pitch. A target with ONE edge gets a
-    # spine identical to that edge's chord, so solo edges are straight by
-    # the same rule that makes bundles straight -- one mechanism, no
-    # special case.
-    (def flock-points @{})
-    (each index indexes
-      (def sums @{})
-      (each name (get ordered index [])
-        (when (bend? name)
-          (def [_ _ to _] name)
-          (when-let [a (aim name x)]
-            (put sums to (array/push (or (sums to) @[]) a)))))
-      (eachp [to vals] sums
-        (put flock-points to
-             (array/push (or (flock-points to) @[])
-                         [index (/ (sum vals) (length vals))]))))
-    (defn spine-at [to index]
-      (when-let [pts (flock-points to)]
-        (def [i0 m0] (first pts))
-        (def [i1 m1] (last pts))
-        (if (= i0 i1)
-          m0
-          (+ m0 (* (- m1 m0) (/ (- index i0) (- i1 i0)))))))
-
     (each index (if (= pick :down) indexes (reverse indexes))
       (def names (ordered index))
       (def here (get claims index []))
@@ -1333,24 +1237,16 @@
           (set target (column key)))
         (put want name target))
 
-      # 2b. A CONFLUENCE TRAVELS AS A BUNDLE, along its straight spine.
-      #     Bends whose edges share a TARGET all ask for the spine's x at
-      #     their rank -- one value, so settle packs them at even pitch in
-      #     the crossing pass's order: uniform pitch, membership decided
-      #     by destination, straightness guaranteed by the spine being a
-      #     line. (History, briefly: own-chord desires ran siblings as
-      #     strangers meeting at the arrival; blending toward a per-rank
-      #     mean bundled them but paired members off by source distance;
-      #     the full per-rank mean held pitch but jolted sideways at every
-      #     membership change. The straight spine is the fourth draft.)
-      #     Shared SOURCES are not bundled: those edges are a fan opening
-      #     toward different places, and squeezing a fan shut says
-      #     something false.
-      (each name names
-        (when (bend? name)
-          (def [_ _ to _] name)
-          (when-let [s (spine-at to index)]
-            (put want name s))))
+      # (A FLOCKING PASS LIVED HERE and was removed on judgement. Four
+      # drafts tried to make same-target edges travel as one band --
+      # per-rank mean, blended mean, straight spine, river-ordered lanes
+      # -- and each fixed the previous draft's artifact while adding its
+      # own: partner-swapping, sideways jolts, entry weaves. The bends'
+      # own chords, which is what the code above computes, were the look
+      # the complexity kept chasing. If bundling returns, it should
+      # arrive as ONE principle that decides order, spacing and
+      # straightness together, not as desires patched rank by rank; the
+      # drafts and their failures are in the history around 2026-08-16.)
 
       # 3. STAYING OUT OF A BOX IS A BOUND, NOT A WISH. A wish is an average,
       #    and a block of nodes pushed into contact places itself at the
