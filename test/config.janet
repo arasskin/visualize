@@ -1,41 +1,14 @@
-# The config language, and the source rewriting that makes it readable.
+# The config language.
 
 (import ../src/config)
-(import ../src/tilde)
 (import ../src/color)
 (import ./harness :as t)
 
 (defn- run [& lines] (config/run lines))
 (defn- state-of [& lines] (first (config/run lines)))
 
-(t/test "the reader survives the notation the Python tools established"
-  # Each of these is a Janet reader collision, and each one appears in real
-  # config files. See src/tilde.janet.
-  (t/is= `(show-only "~")` (tilde/prepare "(show-only ~)")
-         "a bare ~ would otherwise kill the parser outright")
-  (t/is= `(hide "~.OttoClip")` (tilde/prepare "(hide ~.OttoClip)"))
-  (t/is= `(group "~.Shared" "#a54a4a")` (tilde/prepare "(group ~.Shared #a54a4a)")
-         "#rrggbb would otherwise be a comment to end of line")
-  (t/is= `(hide "~.Otto.")` (tilde/prepare "(hide ~.Otto.)")
-         "a trailing dot is meaningful and must survive"))
-
-(t/test "rewriting leaves strings and comments alone"
-  (t/is= `(hide "~.literal")` (tilde/prepare `(hide "~.literal")`)
-         "a tilde already inside a string is not rewritten twice")
-  (t/is= "# a note with #hash" (tilde/prepare "# a note with #hash"))
-  (t/is= "# a note about ~ and #abc" (tilde/prepare "# a note about ~ and #abc")
-         "a comment is passed through whatever is inside it")
-  (t/is= `(hide "~.A") # trailing` (tilde/prepare "(hide ~.A) # trailing")))
-
-(t/test "a semicolon is Janet's own splice, not a comment"
-  # The Python tools this replaced took `;` for a comment, and the rewriter
-  # used to turn a leading one into `#`. The config is Janet now, in a file
-  # called config.janet, so `;` means what Janet means by it.
-  (t/is= "(hide ;names)" (tilde/prepare "(hide ;names)")
-         "a splice in argument position is left exactly as written"))
-
 (t/test "hide and show-only collect prefixes"
-  (def state (state-of "(hide ~.Tests)" "(hide WebKit)" "(show-only ~)"))
+  (def state (state-of "(hide \"~.Tests\")" "(hide WebKit)" "(show-only \"~\")"))
   (t/is= ["~.Tests" "WebKit"] (state :hidden))
   (t/is= ["~"] (state :only)))
 
@@ -43,7 +16,7 @@
   # Stating an outcome rather than toggling is what makes a config readable:
   # a line means the same thing wherever it sits, and re-running the file
   # cannot land you in the opposite state.
-  (def state (state-of "(hide ~.Tests)" "(hide ~.Tests)"))
+  (def state (state-of "(hide \"~.Tests\")" "(hide \"~.Tests\")"))
   (t/is= ["~.Tests"] (state :hidden)))
 
 (t/test "flags are set, never flipped"
@@ -59,7 +32,7 @@
   (t/ok (state :sized-coloring)))
 
 (t/test "groups take the palette in order and never repeat"
-  (def state (state-of "(group ~.A)" "(group ~.B)" "(group ~.C)"))
+  (def state (state-of "(group \"~.A\")" "(group \"~.B\")" "(group \"~.C\")"))
   (def hues (map |($ :color) (state :groups)))
   (t/is= 3 (length (distinct hues)))
   (t/ok (not (index-of color/ungrouped hues))
@@ -68,18 +41,18 @@
 (t/test "an explicit colour wins and the automatic ones move around it"
   # (group ~.a) (group ~.b red) where ~.a already drew red: the named colour
   # keeps it and ~.a is reassigned, so the boxes stay distinguishable.
-  (def state (state-of "(group ~.A)" "(group ~.B red)"))
+  (def state (state-of "(group \"~.A\")" "(group \"~.B\" red)"))
   (def by-prefix (table ;(mapcat |[($ :prefix) ($ :color)] (state :groups))))
   (t/is= "#ff4d6d" (by-prefix "~.B"))
   (t/ok (not= "#ff4d6d" (by-prefix "~.A"))))
 
 (t/test "regrouping a prefix recolours rather than duplicating"
-  (def state (state-of "(group ~.A)" "(group ~.A blue)"))
+  (def state (state-of "(group \"~.A\")" "(group \"~.A\" blue)"))
   (t/is= 1 (length (state :groups)))
   (t/is= "#22a6f2" (((state :groups) 0) :color)))
 
 (t/test "a bad colour complains on its own line and the rest still runs"
-  (def [state problems] (run "(group ~.A nonsense)" "(hide ~.B)"))
+  (def [state problems] (run "(group \"~.A\" nonsense)" "(hide \"~.B\")"))
   (t/ok (problems 0) "the bad line is reported")
   (t/ok (string/find "not a colour" (problems 0)))
   (t/is= ["~.B"] (state :hidden) "the good line still took effect")
@@ -87,12 +60,12 @@
 
 (t/test "the ungrouped colour is refused as a group colour"
   # The box would be the same colour as every ungrouped node and say nothing.
-  (def [_ problems] (run (string "(group ~.A " color/ungrouped ")")))
+  (def [_ problems] (run (string "(group \"~.A\" \"" color/ungrouped "\")")))
   (t/ok (problems 0))
   (t/ok (string/find "invisible" (problems 0))))
 
 (t/test "an unknown verb is reported, not fatal"
-  (def [state problems] (run "(explode ~.A)" "(hide ~.B)"))
+  (def [state problems] (run "(explode \"~.A\")" "(hide \"~.B\")"))
   (t/ok (problems 0))
   (t/is= ["~.B"] (state :hidden)))
 
@@ -148,3 +121,24 @@
                    "(import ./visualize/config)"]
     (def [_ problems] (run forbidden))
     (t/ok (problems 0) (string forbidden " must not be available"))))
+
+(t/test "the notations Janet's reader steals are refused, not misread"
+  # `~` begins a quasiquote and `#` begins a comment, so these forms read as
+  # something other than what they say. They used to work -- src/tilde.janet
+  # rewrote the source first -- and when it was deleted they began producing
+  # plausible wrong answers in silence: (hide ~.A) hid ".A", and a #rrggbb
+  # colour vanished into a comment leaving the group uncoloured. Refusing
+  # them is the whole point of this test.
+  (def [_ bare] (run "(show-only ~)"))
+  (t/ok (bare 0) "a bare ~ is refused")
+  (def [_ dotted] (run "(hide ~.A)"))
+  (t/ok (dotted 0) "so is ~.A, which would otherwise hide \".A\"")
+  (t/ok (string/find "quasiquote" (dotted 0)) "and the message says why")
+  (def [_ hashed] (run "(group web #22a6f2)"))
+  (t/ok (hashed 0) "a bare #rrggbb is refused")
+  (t/ok (string/find "comment" (hashed 0)) "and the message says why")
+  # The quoted spellings are the supported ones and must still work.
+  (def [state clean] (run "(hide \"~.A\")" "(group web \"#22a6f2\")"))
+  (t/ok (not (clean 0)) "quoted forms are fine")
+  (t/ok (not (clean 1)))
+  (t/is= ["~.A"] (state :hidden)))

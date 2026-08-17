@@ -12,13 +12,13 @@
 # The verbs are the same six, so every config the Python tools accept still
 # reads the same way here.
 #
-# WHAT `~` IS. In a flat reader `~` was just a character in an atom. Janet
-# reads `~x` as (quasiquote x), so the tilde forms are given real bindings
-# instead: `~` is the string "~", and `~.OttoClip` is a symbol the environment
-# resolves. Rather than predeclare every possible one, the evaluator catches
-# the "unknown symbol" case and turns the symbol's NAME into the string the
-# verbs already expect -- so `~.a.b` works without anything knowing in advance
-# that a.b exists.
+# WHAT `~` IS. A prefix meaning "the project itself" -- `~.OttoClip` is the
+# module OttoClip within it. Janet reads `~x` as (quasiquote x), so these are
+# given real bindings: `~` is the string "~", and a `~.a.b` SYMBOL is caught
+# by the evaluator's unknown-symbol case and turned into the string the verbs
+# expect, without anything knowing in advance that a.b exists. Written bare,
+# `~` alone kills the reader, so a config that means everything quotes it:
+# `(show-only "~")`.
 #
 # SAFETY. The environment holds the six verbs, a handful of pure helpers, and
 # nothing else -- no file, no os, no net. A config is a thing you edit through
@@ -26,7 +26,6 @@
 # stray character turns it into a different program.
 
 (import ./color)
-(import ./tilde)
 
 (defn new-state
   ``What the config has said about the graph so far.
@@ -201,10 +200,12 @@
   (install env "layout" layout
            "(layout name) -- layered (default, shows direction) or force (shows relatedness).")
 
-  # `~` alone, for a config that quotes it or reaches it through a helper.
-  # The bare `(show-only ~)` form never gets this far -- src/tilde.janet turns
-  # it into a string before the reader sees it -- but a config that says
-  # `(def mine ~)` deserves to work.
+  # `~` as a value, for a config that reaches it through a helper or a def.
+  # A BARE `(show-only ~)` NO LONGER PARSES: Janet reads `~` as the start of
+  # a quasiquote and dies waiting for something to quote. src/tilde.janet
+  # used to rewrite the source before the reader saw it; with that gone, a
+  # config wanting everything says `(show-only "~")` and gets the same
+  # string this binding holds.
   (install env "~" "~" "The project itself: everything scanned, no externals.")
 
   # Pure helpers, so a config can compute rather than only declare. Nothing
@@ -373,7 +374,27 @@
     nil
     (try
       (do
-        (def source (tilde/prepare line))
+        # THE TWO NOTATIONS JANET'S READER STEALS, refused rather than
+        # misread. `~` begins a quasiquote and `#` begins a comment, so
+        # `(hide ~.A)` reads as a quote of the symbol `.A` and `(group web
+        # #22a6f2)` reads as a group with no colour at all -- both of which
+        # USED TO WORK, because src/tilde.janet rewrote the source before
+        # the reader saw it, and both of which now produce a plausible
+        # wrong answer in silence: hiding ".A", or a group whose colour
+        # vanished. A config language that misreads its input without
+        # complaining is worse than one that lacks a notation, so the two
+        # forms are caught here and named.
+        (def bare-tilde (peg/find ~(* (+ "(" " ") "~" (+ ")" " " -1)) line))
+        (def dotted-tilde (peg/find ~(* (+ "(" " ") "~" ".") line))
+        (def hash-colour (peg/find ~(* (+ "(" " ") "#" (6 (range "09" "af" "AF"))) line))
+        (cond
+          (or bare-tilde dotted-tilde)
+          (error (string "`~` is Janet's quasiquote -- write it as a string: "
+                         "(hide \"~.A\") or (show-only \"~\")"))
+          hash-colour
+          (error (string "`#` starts a comment -- write a colour as a string: "
+                         "(group web \"#22a6f2\")")))
+        (def source line)
         (def env (environment state))
         (def p (parser/new))
         (parser/consume p source)

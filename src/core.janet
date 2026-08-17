@@ -48,7 +48,6 @@
 
 (import ./http)
 (import ./json)
-(import ./state)
 # The first app built on this core. See the note at the top of graph.janet:
 # it is a consumer, not a component -- delete it and the server still runs.
 (import ./graph)

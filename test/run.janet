@@ -21,7 +21,6 @@
 (import ./http)
 (import ./json)
 (import ./scan)
-(import ./state)
 # These spawn real processes (and the watchdog a real thread). Nothing may
 # be imported below them.
 

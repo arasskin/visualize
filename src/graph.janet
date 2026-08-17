@@ -19,7 +19,6 @@
 (import ./layout)
 (import ./config)
 (import ./json)
-(import ./state)
 
 (def config-name "config.janet")
 
@@ -100,19 +99,7 @@
 
 (defn- graph-for [root specs]
   (unless cached
-    (set cached (scan/scan root specs))
-    (try
-      (state/write root "scan.json"
-                   # The whole scan, not a chosen subset: a consumer this
-                   # file has never heard of is the entire point.
-                   {"at" (os/time)
-                    "root" root
-                    "nodes" (get cached :nodes [])
-                    "edges" (get cached :edges [])
-                    "sizes" (get cached :sizes {})
-                    "ours" (get cached :ours {})
-                    "error" (get cached :error)})
-      ([_] nil)))
+    (set cached (scan/scan root specs)))
   cached)
 
 (defn- render-svg
