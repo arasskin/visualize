@@ -111,8 +111,8 @@
   (var worst nil)
   (var worst-at nil)
   (var prev-y nil)
-  (for k 0 33
-    (def t (/ k 32))
+  (for k 0 65
+    (def t (/ k 64))
     (def [x y] (bezier-at p0 c1 c2 p3 t))
     (when-let [[l r] (funnel/channel gates y)]
       (def over (- (max (- l x) (- x r)) slack))
@@ -171,10 +171,15 @@
       # group box, again.
       (var fitted nil)
       (var bad nil)
-      # Slightly round before flat: 1.3 leads because a touch of swing is
-      # what makes a long curve read as one gesture; the flat scales stay
-      # as the escape valve for tight pinches.
-      (each k [1.3 1.8 1 2.4 0.5 0.2]
+      # SHORTER REACH FIRST. The control points sit close to their nodes --
+      # high on the curve at the top, low at the bottom -- so the turn
+      # happens near the endpoints and the long middle runs straight.
+      # Leading with a longer reach carried the departure direction a third
+      # of the journey before turning, which read as a hook wherever the
+      # tangent and the journey disagreed. The longer scales still follow
+      # for the curves that genuinely need the swing, and the flattest
+      # remain the escape valve for tight pinches.
+      (each k [0.8 1.2 1.7 0.4 0.2]
         (unless fitted
           (def [c1 c2] (fit-one p0 p3 t0 t1 k))
           (def worst (inside? p0 c1 c2 p3 boxes))

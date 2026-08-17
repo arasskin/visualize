@@ -35,8 +35,10 @@
   (var out false)
   (each [x y] (at start segments 24)
     (when-let [[l r] (funnel/channel gates y)]
-      # A hair of tolerance: touching a wall is legal, crossing it is not.
-      (when (or (< x (- l 0.5)) (> x (+ r 0.5))) (set out true))))
+      # The fitter deliberately grants itself three units of slack --
+      # continuity over positional truth, see inside? -- so the test allows
+      # the same three plus a hair. Anything past that is an escape.
+      (when (or (< x (- l 3.5)) (> x (+ r 3.5))) (set out true))))
   out)
 
 (t/test "a clear channel fits one curve"

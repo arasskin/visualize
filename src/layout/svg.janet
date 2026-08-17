@@ -501,9 +501,19 @@
       # not, and gets its spline as before.
       (when (< y1 y2)
         (def augmented (with-overhangs [x1 y1] [x2 y2] lanes))
+        # TANGENTS AIM ONE BEND PAST THE NEAREST. Aimed at the first bend,
+        # the curve leaves the node toward its first PARKING SPOT -- and
+        # when the lane's first slot sits off the journey's line, the curve
+        # visibly hooks toward it before swinging back: `select -> graph`
+        # bulged left for a slot it passed within ten units of anyway. The
+        # second bend says where the edge is GOING rather than where it
+        # first stands, and the slack in the fit absorbs the difference at
+        # the slot itself. Same at the arrival, mirrored.
+        (def aim-out (get bends 1 first-target))
+        (def aim-in (get bends (- (length bends) 2) last-source))
         (def out (fit/route [x1 y1] [x2 y2] augmented
-                            [(- (first-target 0) x1) (- (first-target 1) y1)]
-                            [(- x2 (last-source 0)) (- y2 (last-source 1))]))
+                            [(- (aim-out 0) x1) (- (aim-out 1) y1)]
+                            [(- x2 (aim-in 0)) (- y2 (aim-in 1))]))
         # WHICH EDGES FELL BACK, AND AT WHICH STAGE. A fallback is silent
         # by design -- something still draws -- and that silence has now
         # hidden the router being broken TWICE, each time found only by
