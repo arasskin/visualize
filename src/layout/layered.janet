@@ -1842,34 +1842,55 @@
       # the same graph -- see docs/dotgen-audit.md for why it exists.
       (def x
         (if (os/getenv "VISUALIZE_AUX")
-          (let [rows untangled
-                # A GROUP IS A COLUMN, and the aux graph has to be told so
-                # or it scatters the members across their ranks and the box
-                # drawn round them swallows whatever is between. Expressed
-                # as containment edges rather than pins: every member is
-                # tied to the group's own slack node with a heavy weight, so
-                # the optimiser keeps them in line while still being free to
-                # move the whole column.
-                pinned nil
-                solved (aux/solve rows widths
-                                  # Every segment a line is actually drawn
-                                  # along: node to bend, bend to bend, bend
-                                  # to node. These are what straightness is
-                                  # about, not the logical edges.
-                                  (let [segs @[]]
-                                    (eachp [pair chain] chains
-                                      (def [from to] pair)
-                                      (def path (array from ;chain to))
-                                      (for i 0 (- (length path) 1)
-                                        (array/push segs [(path i) (path (+ i 1))])))
-                                    (each [from to] edges
-                                      (unless (chains [from to])
-                                        (array/push segs [from to])))
-                                    segs)
-                                  gap-between bend? pinned
-                                  (when group-of
-                                    (fn [name]
-                                      (when (string? name) (group-of name)))))]
+          (let [# Every segment a line is actually drawn along: node to
+                # bend, bend to bend, bend to node. These are what
+                # straightness is about, not the logical edges.
+                segs (let [segs @[]]
+                       (eachp [pair chain] chains
+                         (def [from to] pair)
+                         (def path (array from ;chain to))
+                         (for i 0 (- (length path) 1)
+                           (array/push segs [(path i) (path (+ i 1))])))
+                       (each [from to] edges
+                         (unless (chains [from to])
+                           (array/push segs [from to])))
+                       segs)
+                aux-group (when group-of
+                            (fn [name] (when (string? name) (group-of name))))
+                solve-once (fn [rows] (aux/solve rows widths segs
+                                                 gap-between bend? nil
+                                                 aux-group))
+                # SOLVE, RESEAT AGAINST THE SOLVE, SOLVE AGAIN. The bend
+                # slots arriving here were reseated against the
+                # RELAXATION'S coordinates, and the aux solve draws a
+                # different geography: `src/stamp` moved from the far
+                # right of its rank to the far left, and its bends stayed
+                # in slots chosen for the old address -- a chain from
+                # x=0 through a bend at x=822, zigzagging six hundred
+                # units for nothing the crossing count wanted. Bend slots
+                # are a function of the coordinates the picture will
+                # actually have, so under aux they are re-threaded
+                # against aux's own answer and solved once more.
+                # AN OPEN PROBLEM SITS HERE, and one attempt at it was
+                # removed for changing nothing. The bend slots arriving in
+                # `untangled` were reseated against the RELAXATION'S
+                # coordinates, and aux draws a different geography: under
+                # VISUALIZE_SIMPLEX, `src/stamp` lands at the far left of
+                # its rank while its bends keep slots chosen when it stood
+                # at the far right -- a chain from x=0 through bends at
+                # x=800, zigzagging for nothing any objective wanted. The
+                # obvious fix -- solve, reseat against the solve with a
+                # cost measured in aux coordinates, solve again -- was
+                # built and measured: same offenders, same drawn size,
+                # bends still stranded. reseat-bends declined to move them
+                # even when judged in the right frame, which means the
+                # crossing count genuinely prefers the stranded slots, and
+                # the disagreement between that count and the picture is
+                # the actual problem. It is the ordering layer's version
+                # of the packing-versus-legibility law the audit keeps
+                # meeting, and it deserves a fresh session, not a fifth
+                # patch on this one.
+                solved (solve-once untangled)]
             (or solved (seat untangled)))
           (seat untangled)))
 

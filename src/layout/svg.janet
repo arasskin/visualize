@@ -739,10 +739,21 @@
       # Under a packed ranking this is most of the difference between a
       # drawing and a pincushion: dot routes EVERYTHING, and its short
       # edges dodge like its long ones.
+      # NOT FOR EDGES THAT BARELY DESCEND. The gate model constrains where
+      # a path crosses horizontal lines, so a nearly-horizontal edge can
+      # slide along BETWEEN its own gates through anything: `scan ->
+      # watch`, one rank down and five hundred across under the packed
+      # ranking, jogged 130 units sideways at its target's height straight
+      # through `src/term/host` -- past every gate, violating none. Below
+      # one-in-five slope the funnel abstains and the bow tries; a first
+      # draft of this guard demanded one-in-1.6 and took the detour away
+      # from a dozen edges it was quietly keeping clean. The truly flat
+      # case has no good answer yet in either model, and is on the record
+      # as such.
       (def detour
         (let [[x1 y1] straight-from
               [x2 y2] straight-to]
-          (when (< y1 y2)
+          (when (> (- y2 y1) (* 0.2 (math/abs (- x2 x1))))
             (when-let [segs (route-dodging [x1 y1] [x2 y2] [])]
               (emit-run [x1 y1] segs)))))
       (if detour
