@@ -403,24 +403,22 @@
                     (set right (min right (- (o :x0) pad))))))
               [left right])
             (def stations @[])
-            # A STATION KEEPS THE EDGE IN ITS OWN LANE. The side clip alone
-            # says only "past the obstacle", and every member of a bundle
-            # rounding the same box then corners at the SAME point -- the
-            # clip's edge -- so `watchdog -> core` lay on top of
-            # `stamp -> core` exactly at the term box's bottom corner, the
-            # lanes converging to a point and fanning back out. The lane
-            # identity lives in the corridor gate just above the station:
-            # when that gate already sits clear of the obstacle on the
-            # passing side, the station carries the gate's interval through
-            # the turn, and each member rounds the corner in its own
-            # column, pitch intact.
-            (defn lane-above [y side-left side-right]
-              (var found nil)
-              (each [l r gy] corridor
-                (when (and (< gy y)
-                           (>= l side-left) (<= r side-right))
-                  (set found [l r])))
-              found)
+            # A STATION KEEPS THE EDGE IN ITS OWN LANE -- the lane AT THAT
+            # HEIGHT, which between rank lines is the interpolated channel,
+            # not the gate above. The side clip alone says only "past the
+            # obstacle", and every edge whose lane conflicts with the box
+            # then corners at the SAME point, the clip's edge --
+            # `watchdog -> core` lay on top of `stamp -> core` there. The
+            # first fix carried the gate ABOVE the station down to it, and
+            # manufactured the opposite artifact: watchdog's lane runs
+            # diagonally, its rank-1 gate pinned the path to a column its
+            # chord had already left, and a perfectly straight lane drew a
+            # corner. The channel lerp is the lane's actual span at the
+            # station's y: intersected with the clip, an edge whose lane
+            # clears the obstacle keeps its straight line, and one whose
+            # lane conflicts falls back to the clip edge and rounds the
+            # corner there -- distinct corners for distinct lanes, straight
+            # lines for lanes that were never in the way.
             (each o obstacles
               (each [y on-edge?] [[(- (o :y0) 1) false] [(o :y0) true]
                                   [(o :y1) true] [(+ (o :y1) 1) false]]
@@ -430,7 +428,12 @@
                   # stations just outside exist to say the space is open
                   # again, and pinning those to the lane would delay every
                   # turn a rank.
-                  (def carried (when on-edge? (lane-above y l r)))
+                  (def carried
+                    (when on-edge?
+                      (when-let [[cl cr] (funnel/channel corridor y)]
+                        (def il (max cl l))
+                        (def ir (min cr r))
+                        (when (< il ir) [il ir]))))
                   (if carried
                     (array/push stations [(carried 0) (carried 1) y])
                     (array/push stations [l r y])))))
