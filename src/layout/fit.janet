@@ -147,14 +147,21 @@
     (do
       (def p0 (first path))
       (def p3 (last path))
-      # A FEW SCALES, GENTLEST FIRST, the way splinefits grows its curve:
-      # short controls hug the chord, longer ones swing wider to honour the
-      # tangents. The first scale whose curve stays inside wins; the range
-      # is deliberately small because a curve that needs more reach than
-      # this reads better as two curves.
+      # A FEW SCALES, ROUNDEST-REASONABLE FIRST, THEN FLAT. Scales above
+      # one swing wider to honour the tangents; scales below one hug the
+      # chord, and as k approaches zero the cubic approaches the straight
+      # segment REGARDLESS of what the tangents ask -- which is the escape
+      # valve, because the chord of any piece of the funnel polyline
+      # provably fits the channel. splinefits has the same ladder and the
+      # same reason. Without the small scales, a piece whose tangents
+      # fight a tight channel could only subdivide, and a two-point piece
+      # cannot: it was slicing itself into itself plus a lone point,
+      # returning nil, and cascading whole edges to the fallback -- which
+      # is how three routed edges silently became splines and one cut a
+      # group box, again.
       (var fitted nil)
       (var bad nil)
-      (each k [1 1.5 2.1]
+      (each k [1 1.5 2.1 0.5 0.2]
         (unless fitted
           (def [c1 c2] (fit-one p0 p3 t0 t1 k))
           (def worst (inside? p0 c1 c2 p3 boxes))
@@ -164,10 +171,25 @@
       (cond
         fitted fitted
 
-        # SUBDIVISION HAS A FLOOR. Past a handful of levels the pieces are
-        # shorter than the sampling can resolve and splitting again cannot
-        # help; dot gives up the same way. nil here rather than a bad curve.
-        (> depth 6) nil
+        # SUBDIVISION HAS A FLOOR, twice over: past a handful of levels
+        # the pieces are shorter than the sampling can resolve, and a
+        # two-point piece has no interior point to cut at. What remains
+        # then is the POLYLINE ITSELF, emitted as chord cubics -- always
+        # legal, since every funnel segment fits the channel by linearity.
+        # Returning nil here instead threw the WHOLE route away: the
+        # narrowest gates in a bundle are a few units wide, the funnel's
+        # corner sits at the gate's edge, no tangent-respecting cubic can
+        # cross without a bulge, and three routed edges quietly became
+        # obstacle-blind splines -- one through a group box, again. A
+        # slight kink at exactly the pinch is the honest price; the reader
+        # gets a curve that goes where the corridor says everywhere else.
+        (or (> depth 6) (< (length path) 3))
+        (seq [i :range [0 (- (length path) 1)]]
+          (def [ax ay] (path i))
+          (def [bx by] (path (+ i 1)))
+          [[(+ ax (/ (- bx ax) 3)) (+ ay (/ (- by ay) 3))]
+           [(- bx (/ (- bx ax) 3)) (- by (/ (- by ay) 3))]
+           [bx by]])
 
         # SPLIT AT THE WORST POINT and fit each half. The join takes the
         # tangent of the polyline there, which keeps the two pieces

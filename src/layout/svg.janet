@@ -25,6 +25,7 @@
 (import ../color)
 (import ../select)
 (import ./fit)
+(import ./funnel)
 
 (def- pad 40)          # margin around the drawing
 (def- ry-base 16)      # half-height of a single-line node
@@ -590,10 +591,26 @@
             # Tangents from the ellipse exits, so the fitted curve leaves
             # and arrives at the angles the fan logic already chose.
             fitted (when (and corridor (>= (length corridor) 2))
-                     (fit/route [x1 y1] [x2 y2]
-                                (with-overhangs [x1 y1] [x2 y2] corridor)
-                                [(- (first-target 0) x1) (- (first-target 1) y1)]
-                                [(- x2 (last-source 0)) (- y2 (last-source 1))]))]
+                     (def augmented (with-overhangs [x1 y1] [x2 y2] corridor))
+                     (def out (fit/route [x1 y1] [x2 y2] augmented
+                                         [(- (first-target 0) x1) (- (first-target 1) y1)]
+                                         [(- x2 (last-source 0)) (- y2 (last-source 1))]))
+                     # WHICH EDGES FELL BACK, AND AT WHICH STAGE. A fallback
+                     # is silent by design -- the spline through the bends
+                     # still draws -- and that silence has now hidden the
+                     # router being broken TWICE, each time found only by
+                     # noticing an edge cut a box it should have rounded.
+                     # The question "why did this edge fall back" recurs;
+                     # this answers it without an afternoon of replication.
+                     (when (os/getenv "VISUALIZE_ROUTE_DEBUG")
+                       (cond
+                         out nil
+                         (nil? (funnel/path [x1 y1] [x2 y2] augmented))
+                         (eprintf "route: %s->%s funnel refused (%d gates)"
+                                  (string from) (string to) (length augmented))
+                         (eprintf "route: %s->%s fit gave up (%d gates)"
+                                  (string from) (string to) (length augmented))))
+                     out)]
         (if fitted
           (string/join
             (array (string/format "M%.1f,%.1f" x1 y1)
