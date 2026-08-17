@@ -200,20 +200,24 @@
   [a b ra rb bends &opt from to places sizes box-rects paths turn corridor]
 
   (defn hits-anything?
-    ``Is a straight line from (x1,y1) to (x2,y2) clear of everything it has
-    no business touching -- nodes, group boxes it is not part of, and the
-    straight lines of other edges?
+    ``What a straight line from (x1,y1) to (x2,y2) touches that it has no
+    business touching: :solid for a node or a group box it is not part of,
+    :line for another edge's straight line, nil for clear.
 
-    ALL THREE ARE THE SAME KIND OF MESS. A line through a node, a line
-    through a box around a group it does not belong to, and two lines
-    crossing in open space all read as the picture failing to keep its
-    subjects apart; a reader notices the last of them first. An edge that
-    would cause any of them takes its reserved route instead, or curves.``
+    THE TWO VERDICTS ARE NOT THE SAME KIND OF MESS, which is why this
+    reports a kind rather than a boolean. A node or a box is a REGION: a
+    curve can go around it, so :solid is an instruction to bow or take the
+    reserved route. Another edge's line is a DIVIDER: if this edge's
+    endpoints lie on opposite sides of it, every curve between them
+    crosses it somewhere -- bowing moves the crossing, adds a kink, and
+    fixes nothing. The boolean version of this function sent line-blocked
+    edges into the bow machinery anyway, and `fit -> svg` came out bent
+    around a crossing it still had.``
     [x1 y1 x2 y2]
     (if (or (nil? places) (nil? sizes))
-      false
+      nil
       (do
-        (var hit false)
+        (var hit nil)
         # Nodes.
         (for k 0 33
           (def t (/ k 32))
@@ -227,7 +231,7 @@
               # A whisker inside the ellipse rather than on it, so a line
               # that merely grazes the outline is not counted as blocked.
               (when (< (+ (* dx dx) (* dy dy)) 0.94)
-                (set hit true)))))
+                (set hit :solid)))))
         # Group boxes, unless this edge has an end inside the box -- an edge
         # that starts or finishes in a group is entitled to be in its box.
         (unless (or hit (nil? box-rects))
@@ -241,7 +245,7 @@
                 (def py (+ y1 (* t (- y2 y1))))
                 (when (and (>= px (r :x0)) (<= px (r :x1))
                            (>= py (r :y0)) (<= py (r :y1)))
-                  (set hit true))))))
+                  (set hit :solid))))))
         # Other edges' straight lines. Edges sharing an endpoint always meet
         # there and are not crossing in any sense a reader minds.
         (unless (or hit (nil? paths))
@@ -288,7 +292,7 @@
                     (when (< (+ (* gx gx) (* gy gy))
                              (let [r (+ (* 2.2 (s :w)) (* 2.2 (s :h)))] (* r r)))
                       (set near true))))
-                (unless near (set hit true)))))))
+                (unless near (set hit :line)))))))
         hit)))
 
   # THE ARROW LANDS ON THE NODE. The path runs to the boundary itself, and
@@ -297,6 +301,85 @@
   # Stopping short by the marker's length, which is what the 9 here used to
   # do, subtracted the arrowhead twice and left every edge floating a
   # visible gap away from the node it points at.
+
+  (defn with-overhangs
+    ``The corridor plus every group box the chain passes, as obstacles.
+
+    The layout keeps BENDS off the ranks a box occupies, but a box is
+    drawn taller than its members' ranks -- half a node plus the inset
+    hangs below the last rank and above the first -- and the segment
+    between two legally-placed bends can cut that overhanging corner.
+    The placement pass used to prevent this by walling the box's whole
+    x-range off one rank further, which pushed every passing bundle a
+    box-width sideways and back: the S-curves this replaces. Keeping the
+    segment off the corner is a ROUTING job, so the box rectangle joins
+    the corridor here and the funnel rounds the corner instead.
+
+    THE SHAPE OF THE INSERTION MATTERS. At each edge of a box's vertical
+    band the corridor gets two stations: one ON the edge, clipped to the
+    side of the box the path passes, and one just OUTSIDE it, clipped
+    only by whatever other boxes reach that y. Without the outside one
+    the funnel sees the clipped station and the next bend's narrow slot
+    as disjoint and refuses -- the open space between them never appears
+    in a stack of boxes unless a box says it is there. Two groups side
+    by side each clip their own side, which is how a path threads the
+    channel between them.``
+    [start goal corridor]
+    (if (or (nil? box-rects) (empty? box-rects) (empty? corridor))
+      corridor
+      (do
+        (def [sx sy] start)
+        (def [gx gy] goal)
+        # The path as the renderer knows it so far: endpoints and slid
+        # bends, for deciding which side of a box the chain passes.
+        (def pts (array [sx sy] ;(map (fn [[x y]] [x y]) bends) [gx gy]))
+        (defn path-x [y]
+          (var out sx)
+          (for i 0 (- (length pts) 1)
+            (def [ax ay] (pts i))
+            (def [bx by] (pts (+ i 1)))
+            (when (and (<= ay y) (<= y by) (< ay by))
+              (set out (+ ax (* (- bx ax) (/ (- y ay) (- by ay)))))))
+          out)
+        (def relevant
+          (filter (fn [r] (and (not (get (r :members) from))
+                               (not (get (r :members) to))
+                               (< (r :y0) gy) (> (r :y1) sy)))
+                  box-rects))
+        (if (empty? relevant)
+          corridor
+          (do
+            # Clearance matches a bend's slot: enough that the line reads
+            # as beside the box, not against it.
+            (def pad 8)
+            (defn clipped
+              "The free interval at y, after every box reaching it."
+              [y]
+              (var left -2000)
+              (var right 2000)
+              (each r relevant
+                (when (and (<= (r :y0) y) (<= y (r :y1)))
+                  (def mid (/ (+ (r :x0) (r :x1)) 2))
+                  (if (>= (path-x y) mid)
+                    (set left (max left (+ (r :x1) pad)))
+                    (set right (min right (- (r :x0) pad))))))
+              (when (< left right) [left right]))
+            (def stations @[])
+            (each r relevant
+              (each y [(- (r :y0) 1) (r :y0) (r :y1) (+ (r :y1) 1)]
+                (when (and (> y sy) (< y gy))
+                  (when-let [[l r*] (clipped y)]
+                    (array/push stations [l r* y])))))
+            (def merged (sorted (array ;corridor ;stations)
+                                (fn [a b] (< (a 2) (b 2)))))
+            # STRICTLY DESCENDING RANKS OR NOTHING. A back edge's chain
+            # runs upward and this model does not: hand back the corridor
+            # untouched rather than a stack the funnel will misread. The
+            # same if two stations collide.
+            (var ok true)
+            (for i 0 (- (length merged) 1)
+              (unless (< ((merged i) 2) ((merged (+ i 1)) 2)) (set ok false)))
+            (if ok merged corridor))))))
     # SLIDE EACH BEND ALONG ITS CORRIDOR toward the straight line, which
     # is dot's routing step: the bends say where the edge may pass, the
     # corridor says how far either way it may move, and the line between
@@ -323,8 +406,16 @@
   (def straight-from (on-ellipse a (ra :w) (ra :h) (b :x) (b :y) 0))
   (def straight-to (on-ellipse b (rb :w) (rb :h) (a :x) (a :y) 0 turn))
 
-  (if (not (hits-anything? (straight-from 0) (straight-from 1)
-                           (straight-to 0) (straight-to 1)))
+  (def verdict (hits-anything? (straight-from 0) (straight-from 1)
+                               (straight-to 0) (straight-to 1)))
+  (if (or (nil? verdict)
+          # A LINE CROSSING CANNOT BE DODGED, only moved. When the straight
+          # line's one offence is crossing another edge's line -- no node,
+          # no box -- and there is no reserved route to change the topology,
+          # the crossing is a fact of where the endpoints are. Draw the
+          # straight line and let the two cross cleanly; the alternative was
+          # a bow with the same crossing plus a kink.
+          (and (= verdict :line) (empty? bends)))
     # Straight reaches. Say it that way, bends or no bends -- a chain of
     # bends the edge does not need is a detour drawn for its own sake.
     (string/format "M%.1f,%.1f L%.1f,%.1f"
@@ -461,7 +552,8 @@
             # Tangents from the ellipse exits, so the fitted curve leaves
             # and arrives at the angles the fan logic already chose.
             fitted (when (and corridor (>= (length corridor) 2))
-                     (fit/route [x1 y1] [x2 y2] corridor
+                     (fit/route [x1 y1] [x2 y2]
+                                (with-overhangs [x1 y1] [x2 y2] corridor)
                                 [(- (first-target 0) x1) (- (first-target 1) y1)]
                                 [(- x2 (last-source 0)) (- y2 (last-source 1))]))]
         (if fitted

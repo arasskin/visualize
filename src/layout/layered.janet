@@ -1150,17 +1150,28 @@
         # ONE RANK PAST THE LOWEST MEMBER, because the box reaches there. A
         # node is drawn as an ellipse, so the box around it extends half a
         # node plus the inset BELOW the rank line -- about fifty units into
-        # the gap before the next rank. An edge bending on that next rank is
-        # free to sit inside the box's x-range, and the segment climbing to
-        # it clips the overhang: `src/json -> src/core` and
-        # `src/stamp -> src/core` both cut the bottom corner of `src.term`
-        # that way, having cleared it perfectly well on the ranks the group
-        # actually has members on.
+        # the gap before the next rank. A node on that rank can stand tall
+        # enough to collide with the overhang, so the claim reaches it. The
+        # same is true above the topmost member, where the box carries its
+        # name.
         #
-        # The same is true above the topmost member, where the box also
-        # carries its name.
+        # FOR NODES, NOT FOR BENDS. The fourth element says whether this is
+        # a rank the group actually has members on; on the overhang ranks
+        # the claim binds only real nodes. It used to bind bends too --
+        # added when `src/stamp -> src/core` cut the box's bottom corner --
+        # and that was the right problem with the wrong constraint: the
+        # corner is clipped by the SEGMENT between two bends, not by where
+        # one bend stands, and a bend well inside the box's x-range is fine
+        # when its upstream bend has cleared the box with room. Walling the
+        # whole x-range off pushed every passing bundle a full box-width
+        # sideways for one rank and snapped it back the next -- the S-curves
+        # on every long edge down the right side. The segment-vs-corner
+        # problem is the ROUTER's now: the corridor carries the box overhang
+        # as an obstacle (see `path-through`), and the fitted curve rounds
+        # the corner instead of detouring around a wall.
         (when (and (<= (- (s :top) 1) index) (<= index (+ (s :low) 1)))
-          (array/push here [key (- (s :x0) inset) (+ (s :x1) inset)])))
+          (array/push here [key (- (s :x0) inset) (+ (s :x1) inset)
+                            (and (<= (s :top) index) (<= index (s :low)))])))
       (put out index here))
     [span out])
 
@@ -1244,15 +1255,19 @@
       (eachp [i name] names
         (unless (and group-of (group-of name))
           (def half (/ (widths name) 2))
-          (each [key x0 x1] here
-            (def mates (seq [[j m] :pairs names
-                             :when (= key (and group-of (group-of m)))] j))
-            (def before? (if (empty? mates)
-                           (< (want name) (/ (+ x0 x1) 2))
-                           (< i (min ;mates))))
-            (if before?
-              (put high name (min (get high name math/inf) (- x0 half flat-gap)))
-              (put low name (max (get low name (- math/inf)) (+ x1 half flat-gap)))))))
+          (each [key x0 x1 member-rank?] here
+            # A bend on an overhang rank passes freely -- the box is not
+            # there, only its shadow, and the router keeps the segment off
+            # the corner. See the note in `claims-by-layer`.
+            (when (or member-rank? (not (bend? name)))
+              (def mates (seq [[j m] :pairs names
+                               :when (= key (and group-of (group-of m)))] j))
+              (def before? (if (empty? mates)
+                             (< (want name) (/ (+ x0 x1) 2))
+                             (< i (min ;mates))))
+              (if before?
+                (put high name (min (get high name math/inf) (- x0 half flat-gap)))
+                (put low name (max (get low name (- math/inf)) (+ x1 half flat-gap))))))))
 
       # A BOX TAKES UP THE ROOM A BOX TAKES UP. `settle` is told each member
       # is `inset` wider on both sides than the node itself, because that is
