@@ -1247,12 +1247,21 @@
       #     toward the flock's mean pulls the lanes adjacent from the
       #     first rank: the exit angles converge, the first turn happens
       #     right after the source, and the long middle runs as one
-      #     parallel band. Two parts flock to one part own aim -- enough
-      #     to bundle, while the residual own-aim keeps the bundle's
-      #     ORDER stretched in the direction its members' sources lie,
-      #     so settle has no ties to break. Shared SOURCES are not
-      #     bundled: those edges are a fan opening toward different
-      #     places, and squeezing a fan shut says something false.
+      #     parallel band.
+      #
+      #     THE WHOLE DESIRE IS THE FLOCK'S MEAN, no own-aim residue. The
+      #     first version kept one part own aim in three "to stretch the
+      #     order", and the stretch was spacing proportional to how far
+      #     apart the SOURCES sit -- `stamp -> core` rode 22 units from
+      #     `host -> core` and 34 from `watchdog -> core`, pairing off
+      #     with whichever source stood nearest instead of holding the
+      #     band's pitch. With every member asking for the same x, settle
+      #     packs them in the crossing pass's order at even gaps, which
+      #     is what a bundle IS: uniform pitch, membership decided by
+      #     destination, not by where each edge happens to come from.
+      #     Shared SOURCES are not bundled: those edges are a fan opening
+      #     toward different places, and squeezing a fan shut says
+      #     something false.
       (def flock @{})
       (each name names
         (when (bend? name)
@@ -1263,8 +1272,7 @@
           (var sum 0)
           (each m members (+= sum (want m)))
           (def mid (/ sum (length members)))
-          (each m members
-            (put want m (/ (+ (want m) (* 2 mid)) 3)))))
+          (each m members (put want m mid))))
 
       # 3. STAYING OUT OF A BOX IS A BOUND, NOT A WISH. A wish is an average,
       #    and a block of nodes pushed into contact places itself at the
