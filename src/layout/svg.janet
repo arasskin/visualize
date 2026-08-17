@@ -343,8 +343,7 @@
     open. Two obstacles side by side each clip their own side, which is
     how a path threads the channel between them.``
     [start goal corridor]
-    (if (empty? corridor)
-      corridor
+    (do
       (do
         (def [sx sy] start)
         (def [gx gy] goal)
@@ -381,11 +380,20 @@
         # the path actually passes: an obstacle two hundred units away
         # would still pick a side, and enough far-off sides eventually
         # contradict each other for no drawing benefit.
+        #
+        # NEARNESS IS CHECKED ACROSS THE WHOLE BAND, not at the centre
+        # height alone. A diagonal sweeps sideways as it crosses a node's
+        # vertical extent, and `json -> graph` passed dead through
+        # `src/http`'s shoulder while measuring 53.6 units away at http's
+        # centre line -- 0.7 past the cutoff, excluded, unprotected. Top,
+        # centre and bottom of the band catch what a single sample cannot.
         (when (and places sizes)
           (eachp [name p] places
             (unless (or (= name from) (= name to))
               (def s (sizes name))
-              (when (< (math/abs (- (path-x (p :y)) (p :x))) (+ (s :w) 28))
+              (def margin (+ (s :w) 28))
+              (when (some (fn [y] (< (math/abs (- (path-x y) (p :x))) margin))
+                          [(- (p :y) (s :h)) (p :y) (+ (p :y) (s :h))])
                 (consider (- (p :x) (s :w)) (+ (p :x) (s :w))
                           (- (p :y) (s :h)) (+ (p :y) (s :h)))))))
         (if (empty? obstacles)
@@ -434,28 +442,40 @@
                         (def il (max cl l))
                         (def ir (min cr r))
                         (when (< il ir) [il ir]))))
-                  (if carried
-                    (array/push stations [(carried 0) (carried 1) y])
-                    (array/push stations [l r y])))))
-            # MERGE, coalescing gates that landed on the same line by
-            # intersection -- two obstacles can share an edge height. An
-            # empty result anywhere means the obstacles genuinely close
-            # the corridor; hand back the original and let the fallback
-            # draw, rather than refusing on our own addition.
+                  # A STATION THAT CLOSED is dropped alone, not fatal:
+                  # two obstacles pinching from opposite sides can leave
+                  # nothing at one height, and the first version declared
+                  # the whole augmentation impossible and handed back the
+                  # BARE corridor -- every obstacle dropped for the whole
+                  # edge, which is how `json -> graph` drew through
+                  # `src/http` under a crowded layout: all-or-nothing
+                  # protection removed itself exactly where it was most
+                  # needed. One unsatisfiable height loses one gate; the
+                  # rest keep standing guard.
+                  (def station (or carried (when (< l r) [l r])))
+                  (when station
+                    (array/push stations [(station 0) (station 1) y])))))
+            # MERGE, coalescing gates that landed on the same line. Same
+            # per-station degradation: an intersection that empties keeps
+            # what stands and forgets the newcomer -- and corridor gates
+            # sort ahead of stations at equal height, so the corridor is
+            # what stands. The corridor is ground truth; a station is
+            # advice.
             (def merged @[])
-            (var impossible false)
-            (each [l r y] (sorted (array ;corridor ;stations)
-                                  (fn [a b] (< (a 2) (b 2))))
+            (def tagged (array ;(map (fn [[l r y]] [l r y 0]) corridor)
+                               ;(map (fn [[l r y]] [l r y 1]) stations)))
+            (each [l r y _] (sorted tagged
+                                    (fn [a b] (if (= (a 2) (b 2))
+                                                (< (a 3) (b 3))
+                                                (< (a 2) (b 2)))))
               (if (and (not (empty? merged)) (= ((last merged) 2) y))
                 (let [[pl pr _] (last merged)
                       nl (max pl l)
                       nr (min pr r)]
-                  (put merged (- (length merged) 1) [nl nr y])
-                  (when (> nl nr) (set impossible true)))
-                (do
-                  (array/push merged [l r y])
-                  (when (> l r) (set impossible true)))))
-            (if impossible corridor merged))))))
+                  (when (<= nl nr)
+                    (put merged (- (length merged) 1) [nl nr y])))
+                (array/push merged [l r y])))
+            merged)))))
     # SLIDE EACH BEND ALONG ITS CORRIDOR toward the straight line, which
     # is dot's routing step: the bends say where the edge may pass, the
     # corridor says how far either way it may move, and the line between
@@ -559,6 +579,23 @@
         (when (and (os/getenv "VISUALIZE_ROUTE_DEBUG") (nil? out))
           (eprintf "route: %s->%s funnel refused (%d gates)"
                    (string from) (string to) (length augmented)))
+        # VISUALIZE_ROUTE_TRACE=from->to dumps one edge's routing inputs:
+        # the corridor, the augmented gates, and the funnel's path. The
+        # question "what did the router actually see for THIS edge" has
+        # now been answered by hand-replicating the pipeline three times,
+        # and the replication drifts from the real thing every time the
+        # pipeline moves.
+        (when (= (os/getenv "VISUALIZE_ROUTE_TRACE")
+                 (string from "->" to))
+          (eprintf "trace %s->%s start=%j goal=%j" (string from) (string to)
+                   [(math/round x1) (math/round y1)] [(math/round x2) (math/round y2)])
+          (eprintf "  lanes:     %j"
+                   (map (fn [[l r y]] [(math/round l) (math/round r) (math/round y)]) lanes))
+          (eprintf "  augmented: %j"
+                   (map (fn [[l r y]] [(math/round l) (math/round r) (math/round y)]) augmented))
+          (eprintf "  funnel:    %j"
+                   (when-let [p (funnel/path [x1 y1] [x2 y2] augmented)]
+                     (map (fn [[px py]] [(math/round px) (math/round py)]) p))))
         (when out
           (string/join
             (array (string/format "M%.1f,%.1f" x1 y1)
@@ -599,6 +636,34 @@
       # with, so nothing to look inconsistent against. One quadratic, source
       # to target.
       #
+      (do
+      # THE ROUTER GETS FIRST REFUSAL, gates built from obstacles alone. A
+      # bendless edge has no reserved corridor, but the things blocking it
+      # are still regions with sides, and the funnel dodges regions -- the
+      # same machinery the long edges use, minus the rank gates. The bow
+      # below survives as the fallback for edges the obstacle gates cannot
+      # help (an upward edge, or a blocker the funnel model cannot pass).
+      # Under a packed ranking this is most of the difference between a
+      # drawing and a pincushion: dot routes EVERYTHING, and its short
+      # edges dodge like its long ones.
+      (def detour
+        (let [[x1 y1] straight-from
+              [x2 y2] straight-to]
+          (when (< y1 y2)
+            (def gates (with-overhangs [x1 y1] [x2 y2] []))
+            (when (not (empty? gates))
+              (when-let [p (funnel/path [x1 y1] [x2 y2] gates)]
+                (when-let [segs (fit/rounded p gates bend-radius)]
+                  (string/join
+                    (array (string/format "M%.1f,%.1f" x1 y1)
+                           ;(map (fn [[c1 c2 end]]
+                                   (string/format "C%.1f,%.1f %.1f,%.1f %.1f,%.1f"
+                                                  (c1 0) (c1 1) (c2 0) (c2 1)
+                                                  (end 0) (end 1)))
+                                 segs))
+                    " ")))))))
+      (if detour
+        detour
       # WHICH WAY IT BOWS IS CHOSEN BY WHAT IS IN THE WAY. The control point
       # can sit above the straight line or below it, and a fixed choice suits
       # half the graph and hurts the other half: `src/v -> src/layout` has to
@@ -683,7 +748,7 @@
                       (when (< h least) (set least h) (set pick cand)))
                     pick))]
         (string/format "M%.1f,%.1f Q%.1f,%.1f %.1f,%.1f"
-                       x1 y1 (c 0) (c 1) x2 y2))
+                       x1 y1 (c 0) (c 1) x2 y2))))
       # Blocked, the router declined (or the edge runs upward), and the
       # layout reserved a route: follow the bends as a CURVE.
       #

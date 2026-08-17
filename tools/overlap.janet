@@ -62,16 +62,22 @@
   (set at (+ found 8))
   (set found (string/find "<ellipse" svg at)))
 
-# Every edge path's d, with the pair it joins.
+# Every edge path's d, with the pair it joins. Read to the CLOSING QUOTE,
+# not to a guessed chunk size: a heavily-subdivided route under a crowded
+# layout runs past any fixed guess, and a d truncated mid-number walks the
+# curve parser off the end of its tokens -- which presented as a crash in
+# `num`, three calls away from the cause.
 (def paths @[])
 (set at 0)
 (set found (string/find `<g class="edge">` svg at))
 (while found
-  (def chunk (string/slice svg found (min (length svg) (+ found 900))))
-  (def m (peg/match ~(* (thru "<title>") (<- (some (if-not "<" 1)))
-                        (thru `d="`) (<- (some (if-not `"` 1))))
-                    chunk))
-  (when m (array/push paths {:title (m 0) :d (m 1)}))
+  (def title-at (string/find "<title>" svg found))
+  (def title-end (and title-at (string/find "<" svg (+ title-at 7))))
+  (def d-at (and title-end (string/find `d="` svg title-end)))
+  (def d-end (and d-at (string/find `"` svg (+ d-at 3))))
+  (when d-end
+    (array/push paths {:title (string/slice svg (+ title-at 7) title-end)
+                       :d (string/slice svg (+ d-at 3) d-end)}))
   (set at (+ found 16))
   (set found (string/find `<g class="edge">` svg at)))
 
