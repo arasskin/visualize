@@ -32,6 +32,14 @@
 (def- line-height 14)  # a label line, in user units
 (def- char-width 6.1)  # an average glyph at font-size 11 -- see width-of
 
+(def- bend-radius
+  ``How far before its corner a routed edge starts turning, and how far
+  after it stops. THE dial for the character of the long edges: the line
+  runs dead straight between the corners the funnel chose, and each turn
+  occupies this much of the runs either side. Half a rank gap reads as
+  sweeping; a few units reads as plumbing. See fit/rounded.``
+  36)
+
 (def group-inset
   ``How far outside its members a group's box is drawn.
 
@@ -501,33 +509,24 @@
       # not, and gets its spline as before.
       (when (< y1 y2)
         (def augmented (with-overhangs [x1 y1] [x2 y2] lanes))
-        # TANGENTS AIM ONE BEND PAST THE NEAREST. Aimed at the first bend,
-        # the curve leaves the node toward its first PARKING SPOT -- and
-        # when the lane's first slot sits off the journey's line, the curve
-        # visibly hooks toward it before swinging back: `select -> graph`
-        # bulged left for a slot it passed within ten units of anyway. The
-        # second bend says where the edge is GOING rather than where it
-        # first stands, and the slack in the fit absorbs the difference at
-        # the slot itself. Same at the arrival, mirrored.
-        (def aim-out (get bends 1 first-target))
-        (def aim-in (get bends (- (length bends) 2) last-source))
-        (def out (fit/route [x1 y1] [x2 y2] augmented
-                            [(- (aim-out 0) x1) (- (aim-out 1) y1)]
-                            [(- x2 (aim-in 0)) (- y2 (aim-in 1))]))
+        # ROUNDED CORNERS, NOT FITTED ARCS. The scale-ladder fit shaped
+        # whole segments between endpoints it did not choose, so nothing
+        # in it could move WHERE a line turns -- tuning its constants made
+        # everything uniformly rounder or straighter and the bends stayed
+        # put. fit/rounded states the wanted look directly: straight runs
+        # between the funnel's corners, each turn spread `bend-radius`
+        # either side of its corner. The one dial moves the one thing.
+        (def fpath (funnel/path [x1 y1] [x2 y2] augmented))
+        (def out (when fpath (fit/rounded fpath augmented bend-radius)))
         # WHICH EDGES FELL BACK, AND AT WHICH STAGE. A fallback is silent
         # by design -- something still draws -- and that silence has now
         # hidden the router being broken TWICE, each time found only by
         # noticing an edge cut a box it should have rounded. The question
         # "why did this edge fall back" recurs; this answers it without an
         # afternoon of replication.
-        (when (os/getenv "VISUALIZE_ROUTE_DEBUG")
-          (cond
-            out nil
-            (nil? (funnel/path [x1 y1] [x2 y2] augmented))
-            (eprintf "route: %s->%s funnel refused (%d gates)"
-                     (string from) (string to) (length augmented))
-            (eprintf "route: %s->%s fit gave up (%d gates)"
-                     (string from) (string to) (length augmented))))
+        (when (and (os/getenv "VISUALIZE_ROUTE_DEBUG") (nil? out))
+          (eprintf "route: %s->%s funnel refused (%d gates)"
+                   (string from) (string to) (length augmented)))
         (when out
           (string/join
             (array (string/format "M%.1f,%.1f" x1 y1)

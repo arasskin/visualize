@@ -181,7 +181,7 @@
       # reads as a hook. At 0.55 the reach is about a sixth of the chord.
       # The longer scales still follow for curves that genuinely need
       # swing, and the flattest remain the escape valve for tight pinches.
-      (each k [0.55 0.85 1.3 0.3 0.15]
+      (each k [0.15 0.55 0.85 1.3 0.3 0.15]
         (unless fitted
           (def [c1 c2] (fit-one p0 p3 t0 t1 k))
           (def worst (inside? p0 c1 c2 p3 boxes))
@@ -232,6 +232,86 @@
               a (curve left above t0 through (+ depth 1))
               b (curve right below through t1 (+ depth 1))]
           (when (and a b) [;a ;b]))))))
+
+(defn rounded
+  ``The funnel path as straight runs with rounded corners.
+
+  THE BEND IS A PLACE, AND THIS MAKES IT ONE YOU CAN POINT AT. The
+  scale-ladder fit above shapes whole segments between endpoints it does
+  not choose, so no constant in it moves WHERE the line turns -- tuning
+  it only made everything uniformly rounder or straighter, which is
+  exactly the complaint that led here. This generator is the direct
+  statement of the wanted look: the line runs dead straight between the
+  corners the funnel chose, and each turn starts `radius` before its
+  corner and finishes `radius` after. One number, one visible meaning.
+
+  Each corner becomes a quadratic with its control AT the corner point,
+  which is tangent to both straight runs -- no kink at either end of the
+  arc. The arc cuts the corner on the inside of the turn by its sagitta;
+  each corner's radius is halved until that stays within the channel's
+  slack, so a tight gate gets a tight turn rather than a violation.
+
+  `radius` is the dial. Half the rank gap reads as long sweeping turns;
+  a few units reads as nearly-square plumbing.``
+  [path gates radius]
+  (if (< (length path) 3)
+    # No interior corners: the straight line, as one chord cubic.
+    (let [p0 (first path) p3 (last path)]
+      [[[(+ (p0 0) (/ (- (p3 0) (p0 0)) 3)) (+ (p0 1) (/ (- (p3 1) (p0 1)) 3))]
+        [(- (p3 0) (/ (- (p3 0) (p0 0)) 3)) (- (p3 1) (/ (- (p3 1) (p0 1)) 3))]
+        p3]])
+    (do
+      (defn scaled [from to r]
+        (def d (sub to from))
+        (def m (math/sqrt (dot d d)))
+        (if (< m 0.0001) from
+          [(+ (from 0) (* (/ r m) (d 0))) (+ (from 1) (* (/ r m) (d 1)))]))
+      (def out @[])
+      (var cursor (first path))
+      (defn line-to [p]
+        (unless (deep= cursor p)
+          (array/push out
+                      [[(+ (cursor 0) (/ (- (p 0) (cursor 0)) 3))
+                        (+ (cursor 1) (/ (- (p 1) (cursor 1)) 3))]
+                       [(- (p 0) (/ (- (p 0) (cursor 0)) 3))
+                        (- (p 1) (/ (- (p 1) (cursor 1)) 3))]
+                       p])
+          (set cursor p)))
+      (for i 1 (- (length path) 1)
+        (def prev (path (- i 1)))
+        (def corner (path i))
+        (def next (path (+ i 1)))
+        (def len-in (math/sqrt (dot (sub corner prev) (sub corner prev))))
+        (def len-out (math/sqrt (dot (sub next corner) (sub next corner))))
+        # The turn may not eat more than half of either straight run --
+        # the neighbouring corner needs its half too.
+        (var r (min radius (/ len-in 2) (/ len-out 2)))
+        # Shrink until the arc's deepest point respects the channel.
+        (var ok false)
+        (while (and (not ok) (> r 2))
+          (def a (scaled corner prev r))
+          (def b (scaled corner next r))
+          (def mid [(/ (+ (a 0) (* 2 (corner 0)) (b 0)) 4)
+                    (/ (+ (a 1) (* 2 (corner 1)) (b 1)) 4)])
+          (if-let [[l rr] (funnel/channel gates (mid 1))]
+            (if (and (>= (mid 0) (- l 3)) (<= (mid 0) (+ rr 3)))
+              (set ok true)
+              (set r (/ r 2)))
+            (set ok true)))
+        (def a (scaled corner prev r))
+        (def b (scaled corner next r))
+        (line-to a)
+        # The quadratic through the corner, as a cubic: controls at
+        # two-thirds of the way from each arc end to the corner.
+        (array/push out
+                    [[(+ (a 0) (* (/ 2 3) (- (corner 0) (a 0))))
+                      (+ (a 1) (* (/ 2 3) (- (corner 1) (a 1))))]
+                     [(+ (b 0) (* (/ 2 3) (- (corner 0) (b 0))))
+                      (+ (b 1) (* (/ 2 3) (- (corner 1) (b 1))))]
+                     b])
+        (set cursor b))
+      (line-to (last path))
+      out)))
 
 (defn route
   ``The whole router: corridor and endpoints in, bezier segments out.
