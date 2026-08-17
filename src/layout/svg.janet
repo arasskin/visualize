@@ -342,7 +342,7 @@
     outside gate is what tells the funnel the space past the obstacle is
     open. Two obstacles side by side each clip their own side, which is
     how a path threads the channel between them.``
-    [start goal corridor]
+    [start goal corridor &opt extra]
     (do
       (do
         (def [sx sy] start)
@@ -396,6 +396,15 @@
                           [(- (p :y) (s :h)) (p :y) (+ (p :y) (s :h))])
                 (consider (- (p :x) (s :w)) (+ (p :x) (s :w))
                           (- (p :y) (s :h)) (+ (p :y) (s :h)))))))
+        # MANDATORY EXTRAS, no proximity vote: the caller found the routed
+        # curve inside these after the fact. Discovery from the raw path
+        # cannot see where a DETOUR will wander -- `scan -> watch` dodged
+        # its known obstacle straight through two nodes it was never warned
+        # about -- so the router re-routes with the invaded nodes added,
+        # until the result invades nothing.
+        (when extra
+          (each r extra
+            (consider (r :x0) (r :x1) (r :y0) (r :y1))))
         (if (empty? obstacles)
           corridor
           (do
@@ -428,9 +437,20 @@
             # corner there -- distinct corners for distinct lanes, straight
             # lines for lanes that were never in the way.
             (each o obstacles
-              (each [y on-edge?] [[(- (o :y0) 1) false] [(o :y0) true]
-                                  [(o :y1) true] [(+ (o :y1) 1) false]]
-                (when (and (> y sy) (< y gy))
+              # THE BAND IS CLAMPED INTO THE EDGE'S SPAN before stations
+              # are placed. A node standing at the source's or target's own
+              # rank has band edges outside (sy, gy), and stations placed
+              # at the true edges were all filtered out -- the obstacle was
+              # added, silently ignored, and re-added by the dodging loop
+              # forever: `scan -> watch`, one rank tall, invaded two nodes
+              # whose bands both straddled its endpoints. The obstacle
+              # still constrains whatever slice of it the edge crosses;
+              # the stations mark that slice.
+              (def y0c (max (o :y0) (+ sy 0.5)))
+              (def y1c (min (o :y1) (- gy 0.5)))
+              (each [y on-edge?] [[(- y0c 1) false] [y0c true]
+                                  [y1c true] [(+ y1c 1) false]]
+                (when (and (> y sy) (< y gy) (<= y0c y1c))
                   (def [l r] (clipped y))
                   # Only the obstacle's own edges hold the lane; the
                   # stations just outside exist to say the space is open
@@ -534,6 +554,86 @@
       (def bx ((bends i) 0))
       [(max l (- bx 10)) (min r (+ bx 10)) y]))
 
+  (defn invaded-by
+    ``The nodes the fitted segments actually enter, as obstacle rects.
+
+    Discovery before routing works from a path that does not exist yet;
+    this is the check after, on the curve as it will be drawn. Entering
+    means inside the outline with margin to spare -- a graze is the fit's
+    slack at work, not an invasion.``
+    [start segs]
+    (def out @[])
+    (when (and places sizes)
+      (eachp [name p] places
+        (unless (or (= name from) (= name to))
+          (def s (sizes name))
+          (var deepest 99)
+          (var sx (start 0)) (var sy (start 1))
+          (each [c1 c2 end] segs
+            (for k 0 13
+              (def t (/ k 12))
+              (def u (- 1 t))
+              (def px (+ (* u u u sx) (* 3 u u t (c1 0))
+                         (* 3 u t t (c2 0)) (* t t t (end 0))))
+              (def py (+ (* u u u sy) (* 3 u u t (c1 1))
+                         (* 3 u t t (c2 1)) (* t t t (end 1))))
+              (def dx (/ (- px (p :x)) (max 0.001 (s :w))))
+              (def dy (/ (- py (p :y)) (max 0.001 (s :h))))
+              (def d2 (+ (* dx dx) (* dy dy)))
+              (when (< d2 deepest) (set deepest d2)))
+            (set sx (end 0)) (set sy (end 1)))
+          (when (< deepest 0.9)
+            (array/push out {:x0 (- (p :x) (s :w)) :x1 (+ (p :x) (s :w))
+                             :y0 (- (p :y) (s :h)) :y1 (+ (p :y) (s :h))})))))
+    out)
+
+  (defn route-dodging
+    ``Route start to goal through `gates`, iterating obstacle discovery.
+
+    Discovery from the raw path cannot see where a DETOUR will wander:
+    `scan -> watch` dodged the one obstacle it knew about straight through
+    two nodes it was never warned about. So: route, check the RESULT
+    against every node, add the invaded ones as mandatory obstacles,
+    route again -- until clean or the retries run out. The last candidate
+    is returned even if still dirty; it dodges everything it knew, which
+    beats a fallback that dodges nothing.``
+    [start goal gates]
+    (var extra @[])
+    (var accepted nil)
+    (var candidate nil)
+    (var tries 0)
+    (while (and (nil? accepted) (< tries 3))
+      (++ tries)
+      (def aug (with-overhangs start goal gates extra))
+      (if (empty? aug)
+        (set tries 3)
+        (do
+          (def p (funnel/path start goal aug))
+          (def segs (when p (fit/rounded p aug bend-radius)))
+          (if (nil? segs)
+            (set tries 3)
+            (do
+              (set candidate segs)
+              (def invaders (invaded-by start segs))
+              (when (os/getenv "VISUALIZE_ROUTE_DEBUG")
+                (unless (empty? invaders)
+                  (eprintf "dodge: %s->%s try %d invades %d node(s)"
+                           (string from) (string to) tries (length invaders))))
+              (if (empty? invaders)
+                (set accepted segs)
+                (each v invaders (array/push extra v))))))))
+    (or accepted candidate))
+
+  (defn emit-run [start segs]
+    (string/join
+      (array (string/format "M%.1f,%.1f" (start 0) (start 1))
+             ;(map (fn [[c1 c2 end]]
+                     (string/format "C%.1f,%.1f %.1f,%.1f %.1f,%.1f"
+                                    (c1 0) (c1 1) (c2 0) (c2 1)
+                                    (end 0) (end 1)))
+                   segs))
+      " "))
+
   (def straight-from (on-ellipse a (ra :w) (ra :h) (b :x) (b :y) 0))
   (def straight-to (on-ellipse b (rb :w) (rb :h) (a :x) (a :y) 0 turn))
 
@@ -550,7 +650,12 @@
   # pass pulls its lane onto its own straight line, so its routed curve is
   # the straight line, give or take nothing a reader can see.
   (def routed
-    (when (and (not (empty? bends)) (>= (length lanes) 2))
+    # One lane is enough: a two-rank edge has a single bend, and skipping
+    # the router for it -- an early guard asked for two -- sent every
+    # one-bend edge to the obstacle-blind spline, which under a packed
+    # ranking is exactly where the through-nodes clustered. The funnel
+    # handles one gate; the single-narrow-gate case is in its tests.
+    (when (and (not (empty? bends)) (>= (length lanes) 1))
       (def first-target (first bends))
       (def last-source (last bends))
       (def [x1 y1] (on-ellipse a (ra :w) (ra :h)
@@ -560,16 +665,11 @@
       # The gate model runs downward; a back edge's drawn direction does
       # not, and gets its spline as before.
       (when (< y1 y2)
-        (def augmented (with-overhangs [x1 y1] [x2 y2] lanes))
-        # ROUNDED CORNERS, NOT FITTED ARCS. The scale-ladder fit shaped
-        # whole segments between endpoints it did not choose, so nothing
-        # in it could move WHERE a line turns -- tuning its constants made
-        # everything uniformly rounder or straighter and the bends stayed
-        # put. fit/rounded states the wanted look directly: straight runs
-        # between the funnel's corners, each turn spread `bend-radius`
-        # either side of its corner. The one dial moves the one thing.
-        (def fpath (funnel/path [x1 y1] [x2 y2] augmented))
-        (def out (when fpath (fit/rounded fpath augmented bend-radius)))
+        # ROUNDED CORNERS from the iterating router: straight runs between
+        # the funnel's corners, each turn spread `bend-radius` around its
+        # corner, re-routed until the result invades no node it was not
+        # warned about. See route-dodging.
+        (def out (route-dodging [x1 y1] [x2 y2] lanes))
         # WHICH EDGES FELL BACK, AND AT WHICH STAGE. A fallback is silent
         # by design -- something still draws -- and that silence has now
         # hidden the router being broken TWICE, each time found only by
@@ -577,8 +677,8 @@
         # "why did this edge fall back" recurs; this answers it without an
         # afternoon of replication.
         (when (and (os/getenv "VISUALIZE_ROUTE_DEBUG") (nil? out))
-          (eprintf "route: %s->%s funnel refused (%d gates)"
-                   (string from) (string to) (length augmented)))
+          (eprintf "route: %s->%s router declined (%d lanes)"
+                   (string from) (string to) (length lanes)))
         # VISUALIZE_ROUTE_TRACE=from->to dumps one edge's routing inputs:
         # the corridor, the augmented gates, and the funnel's path. The
         # question "what did the router actually see for THIS edge" has
@@ -587,6 +687,7 @@
         # pipeline moves.
         (when (= (os/getenv "VISUALIZE_ROUTE_TRACE")
                  (string from "->" to))
+          (def augmented (with-overhangs [x1 y1] [x2 y2] lanes))
           (eprintf "trace %s->%s start=%j goal=%j" (string from) (string to)
                    [(math/round x1) (math/round y1)] [(math/round x2) (math/round y2)])
           (eprintf "  lanes:     %j"
@@ -596,15 +697,7 @@
           (eprintf "  funnel:    %j"
                    (when-let [p (funnel/path [x1 y1] [x2 y2] augmented)]
                      (map (fn [[px py]] [(math/round px) (math/round py)]) p))))
-        (when out
-          (string/join
-            (array (string/format "M%.1f,%.1f" x1 y1)
-                   ;(map (fn [[c1 c2 end]]
-                           (string/format "C%.1f,%.1f %.1f,%.1f %.1f,%.1f"
-                                          (c1 0) (c1 1) (c2 0) (c2 1)
-                                          (end 0) (end 1)))
-                         out))
-            " ")))))
+        (when out (emit-run [x1 y1] out)))))
 
   (def verdict (when (nil? routed)
                  (hits-anything? (straight-from 0) (straight-from 1)
@@ -650,18 +743,8 @@
         (let [[x1 y1] straight-from
               [x2 y2] straight-to]
           (when (< y1 y2)
-            (def gates (with-overhangs [x1 y1] [x2 y2] []))
-            (when (not (empty? gates))
-              (when-let [p (funnel/path [x1 y1] [x2 y2] gates)]
-                (when-let [segs (fit/rounded p gates bend-radius)]
-                  (string/join
-                    (array (string/format "M%.1f,%.1f" x1 y1)
-                           ;(map (fn [[c1 c2 end]]
-                                   (string/format "C%.1f,%.1f %.1f,%.1f %.1f,%.1f"
-                                                  (c1 0) (c1 1) (c2 0) (c2 1)
-                                                  (end 0) (end 1)))
-                                 segs))
-                    " ")))))))
+            (when-let [segs (route-dodging [x1 y1] [x2 y2] [])]
+              (emit-run [x1 y1] segs)))))
       (if detour
         detour
       # WHICH WAY IT BOWS IS CHOSEN BY WHAT IS IN THE WAY. The control point
