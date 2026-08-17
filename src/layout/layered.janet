@@ -268,6 +268,21 @@
         # shadowing it makes every later (set x v) in this scope a compile
         # error about argument counts, pointing at the assignment rather
         # than at the binding that broke it.
+        # THE CREW CLOSES DOWNWARD ONLY, and the upward version is a
+        # measured refusal rather than an omission. Closing upward too --
+        # inviting any parent level with the seed, so that `term/host`'s
+        # four feeders travel together instead of each counting the others
+        # as stretching edges -- is strictly better by every number this
+        # project tracks: ordering cost 12 -> 6, drawn crossings 12 -> 9,
+        # the best ever measured, still nothing through a node. And the
+        # picture is worse: the term cluster and `web` are flung to the far
+        # right, `watchdog` is stranded away from the cluster it belongs
+        # to, the drawing grows 200px of empty diagonal, and a reader
+        # tracing json's edges crosses the whole frame. Sixth time this
+        # trade has appeared here, and the sixth time the counts lost --
+        # they measure packing, and nothing in them measures whether the
+        # thing reads. Kept one-way; the numbers for the other branch are
+        # here so nobody re-derives them.
         (def crew @{seed true})
         (var grew true)
         (while grew
