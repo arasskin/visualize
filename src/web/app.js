@@ -730,8 +730,8 @@ renderHelp();
 //
 // TYPE ANYWHERE. There is no field to click into first: a printable keystroke
 // on the page opens a bar at the bottom and goes into it, and Enter appends
-// what you wrote to the config as a new line. The parentheses around it are
-// drawn by the page, because every line of the config is a call and typing
+// what you wrote to the config as a new line. The parentheses are added on
+// the way to the file, because every line of the config is a call and typing
 // them is a keystroke that could only ever be one thing.
 
 const compose = document.getElementById('compose');
@@ -766,8 +766,7 @@ function shutCompose() {
 async function commitCompose() {
   const text = composeInput.value.trim();
   if (!text) { shutCompose(); return; }
-  // What you typed goes in as a call: the parentheses you saw are the ones
-  // that get written.
+  // What you typed goes in as a call.
   // RETRYING REPLACES, rather than appending a second copy: while the bar is
   // showing a complaint, the line it is complaining about is already in the
   // config, and fixing a typo should mend that line, not leave the broken

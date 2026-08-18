@@ -10,14 +10,12 @@
 <div id="hud"><span id="zoom"></span><span id="status"></span></div>
 
 <!-- The compose bar. Hidden until you type: start typing anywhere on the
-     page and the keystroke lands here. The parentheses are PRINTED, not
-     typed -- every line of the config is a call, so they are furniture
-     rather than something to remember. -->
+     page and the keystroke lands here. What you write is wrapped in
+     parentheses on its way to the file -- every line of the config is a
+     call, so they are not something to type. -->
 <div id="compose" class="shut">
-  <div id="compose-line">
-    <span class="paren">(</span><input id="compose-input" spellcheck="false"
-      autocomplete="off" aria-label="add a config line"><span class="paren">)</span>
-  </div>
+  <input id="compose-input" spellcheck="false"
+    autocomplete="off" aria-label="add a config line">
   <!-- Why the line was refused, under the bar. Empty until something is. -->
   <p id="compose-fault" role="status" aria-live="polite"></p>
 </div>
