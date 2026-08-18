@@ -302,6 +302,24 @@ function icon(glyph, title, cls) {
   return b;
 }
 
+// Strip one leading `#`, and the single space after it that a hand-written
+// comment usually has -- but only when what follows is not itself indented,
+// since the button writes its hash BEFORE the indent and eating a space
+// there would shorten a line every time it was toggled.
+//
+// Only ONE hash: `##` is a comment someone wrote deliberately, and
+// uncommenting it should give back `#`, not the line inside it.
+function uncomment(text) {
+  const at = text.indexOf('#');
+  const head = text.slice(0, at);
+  let rest = text.slice(at + 1);
+  // A lone space right after the hash is comment spacing; two or more is the
+  // line's own indentation showing through.
+  if (rest.startsWith(' ') && !rest.startsWith('  ')) rest = rest.slice(1);
+  else if (rest.startsWith('\t')) rest = rest.slice(1);
+  return head + rest;
+}
+
 function draw() {
   rows.replaceChildren();
   lines.forEach((text, i) => {
@@ -331,15 +349,24 @@ function draw() {
 
     // NO INSERT BUTTONS. A new line comes from the compose bar -- type
     // anywhere and it goes to the end -- so a row's own controls are only
-    // about the row: remove it, or drag it somewhere else.
+    // about the row: comment it out, remove it, or drag it somewhere else.
     //
     // No run button either: every action re-runs the whole file anyway, so a
     // per-line one promised a granularity that never existed. Enter in the
     // field is what commits a typed edit.
+    //
+    // Commenting is a TEXT EDIT, not an action of its own: the button writes
+    // the line the way you would have typed it and sends the file. That is
+    // why the server knows nothing about it -- there is nothing to know.
+    const hash = icon('#', commented ? 'uncomment this line' : 'comment this line out', 'hash');
+    hash.onclick = () => {
+      lines[i] = commented ? uncomment(text) : '#' + text;
+      send('run', i);
+    };
     const del = icon('✕', 'delete this line', 'del');
     del.onclick = () => send('delete', i);
 
-    row.append(box, del, hold);
+    row.append(box, hash, del, hold);
 
     // The line and anything wrong with it travel together, so the message sits
     // directly beneath the input that caused it.

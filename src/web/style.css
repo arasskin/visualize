@@ -276,9 +276,17 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 .row input:focus {
   outline: none; border-color: var(--line-strong); background: var(--wash-strong);
 }
+/* A commented line is still there, just not doing anything -- so the whole
+   row recedes together rather than the text fading while its buttons stay
+   bright. The hash itself keeps a little more weight than the rest, since it
+   is the control that brings the line back. */
 .row.comment input { opacity: .55; font-style: italic; }
+.row.comment .del { opacity: .4; }
+.row.comment .hash { opacity: .6; }
+.row.comment .del:hover:not(:disabled),
+.row.comment .hash:hover:not(:disabled) { opacity: 1; }
 
-/* Square, quiet buttons -- four per row would shout otherwise. */
+/* Square, quiet buttons -- several per row would shout otherwise. */
 .row button {
   font: inherit; line-height: 1; padding: .22rem .4rem; min-width: 1.8rem;
   border: 1px solid var(--line-strong); background: var(--wash);
