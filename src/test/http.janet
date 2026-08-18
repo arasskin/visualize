@@ -10,7 +10,7 @@
 # by name. That is only safe if a name cannot describe a path, which is what
 # most of these assertions are about.
 
-(import ../src/http)
+(import ../visualize/http)
 (import ./harness :as t)
 
 (t/test "a plain filename in web/ is served"

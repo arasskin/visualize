@@ -193,7 +193,7 @@
                      (setdyn :serving (request :path))
                      (respond conn status content-type body (not (request :close)))
                      (when (request :close) (set serving false)))))
-               ([err fib]
+               ([err fib
                  # A bug in a handler must not take the server down with it --
                  # the browser would see only "failed to fetch" and the next
                  # request would find nothing listening.
@@ -233,7 +233,7 @@
                      (try
                        (respond conn "500 Internal Server Error" "text/plain"
                                 (string err))
-                       ([_] nil)))))))))))])
+                       ([_] nil))))])))))))])
 
 # -- serving files out of web/ ------------------------------------------------
 
@@ -276,4 +276,3 @@
                            (content-types suffix)))
             (keys content-types))
       "text/plain; charset=utf-8"))
-

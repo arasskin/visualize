@@ -20,6 +20,16 @@
 
 (import ./scan)
 
+# The config file is not source. It sits in the root being watched -- a
+# visualize pointed at its own repo scans `config.janet` like any other Janet
+# file -- but it describes the VIEW, not the tree, and editing it through the
+# page WRITES it. That closed a loop: the page saved a config edit, the
+# fingerprint changed, the watcher announced that the source had moved, the
+# page redrew and saved again, and the server span at 7% CPU printing
+# nothing. A change to the config already redraws the page by the path that
+# made the change; the watcher's job is to notice edits nobody told it about.
+(def- config-name "config.janet")
+
 (defn- fingerprint
   ``One number standing for the state of the tree: every file's mtime and
   size, summed with its path. Different content, different number -- and
@@ -33,7 +43,7 @@
   (var sum 0)
   (var count 0)
   (each job (scan/find-files root specs)
-    (def stats (os/stat (job :path)))
+    (def stats (unless (= (job :rel) config-name) (os/stat (job :path))))
     (when stats
       (++ count)
       # The path contributes too, so a rename with identical timestamps is

@@ -4,14 +4,6 @@
 #
 #     ./visualize                 the current directory
 #     ./visualize ~/code/project  somewhere else
-#     ./visualize --no-dev [dir]  ...without the repl into the live server
-#
-# This is the entry point to use. `./build` runs underneath it and does
-# nothing when the runtime is already compiled, so the first run pays a few
-# seconds and every run after it starts immediately.
-#
-# The script and the tool share a name on purpose: `./visualize` is what the
-# README says to type, and the directory it lives in is what it draws.
 
 set -e
 
@@ -19,4 +11,4 @@ here=$(cd "$(dirname "$0")" && pwd)
 
 "$here/build"
 
-exec "$here/bin/janet" "$here/src/core.janet" "$@"
+exec "$here/external-src/janet/janet" "$here/src/visualize/core.janet" "$@"

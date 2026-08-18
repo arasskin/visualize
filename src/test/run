@@ -2,7 +2,7 @@
 #
 # Run the test suite against the VENDORED runtime.
 #
-#     ./test/run
+#     ./src/test/run
 #
 # Through bin/janet rather than whatever `janet` happens to be on PATH, so the
 # suite tests the interpreter the tool will actually use. A green run against
@@ -10,8 +10,10 @@
 
 set -e
 
-here=$(cd "$(dirname "$0")/.." && pwd)
+# Two levels up: this script lives in src/test/, and build and the runtime
+# are siblings of src/ rather than of this file.
+here=$(cd "$(dirname "$0")/../.." && pwd)
 
 "$here/build"
 
-"$here/bin/janet" "$here/test/run.janet" "$@"
+"$here/external-src/janet/janet" "$here/src/test/run.janet" "$@"

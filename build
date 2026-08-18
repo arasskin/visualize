@@ -20,13 +20,13 @@
 set -e
 
 here=$(cd "$(dirname "$0")" && pwd)
-src="$here/vendor/janet"
-out="$here/bin/janet"
+janet_src="$here/external-src/janet"
+janet_out="$here/external-src/janet/janet"
 
 case "${1:-}" in
   --clean)
-    rm -f "$out"
-    echo "removed $out"
+    rm -f "$janet_out"
+    echo "removed $janet_out"
     exit 0
     ;;
   --force)
@@ -42,18 +42,18 @@ case "${1:-}" in
 esac
 
 # Already built, and newer than everything it was built from.
-if [ "$force" -eq 0 ] && [ -x "$out" ]; then
+if [ "$force" -eq 0 ] && [ -x "$janet_out" ]; then
   stale=0
-  for file in "$src/janet.c" "$src/janet.h" "$src/shell.c"; do
-    [ "$file" -nt "$out" ] && stale=1
+  for file in "$janet_src/janet.c" "$janet_src/janet.h" "$janet_src/shell.c"; do
+    [ "$file" -nt "$janet_out" ] && stale=1
   done
   if [ "$stale" -eq 0 ]; then
     exit 0
   fi
-  echo "vendored source is newer than $out -- rebuilding"
+  echo "vendored source is newer than $janet_out -- rebuilding"
 fi
 
-for file in "$src/janet.c" "$src/janet.h" "$src/shell.c"; do
+for file in "$janet_src/janet.c" "$janet_src/janet.h" "$janet_src/shell.c"; do
   if [ ! -f "$file" ]; then
     echo "missing $file -- the vendored runtime is incomplete" >&2
     exit 1
@@ -66,9 +66,7 @@ command -v "$CC" >/dev/null 2>&1 || {
   exit 1
 }
 
-mkdir -p "$here/bin"
-
-echo "compiling janet from vendor/janet (a few seconds, once)..."
+echo "compiling janet from external-src/janet..."
 
 # -lm is the only library Janet actually needs everywhere; -lpthread and -ldl
 # are separate libraries on Linux and already inside libc on macOS, where
@@ -77,12 +75,12 @@ echo "compiling janet from vendor/janet (a few seconds, once)..."
 #
 # 2>/dev/null on the first attempt only: a real compile error should be
 # visible, and it will be, because the fallback prints it.
-if ! "$CC" -O2 -std=c99 -fPIC -o "$out" \
-      "$src/janet.c" "$src/shell.c" -I"$src" \
+if ! "$CC" -O2 -std=c99 -fPIC -o "$janet_out" \
+      "$janet_src/janet.c" "$janet_src/shell.c" -I"$janet_src" \
       -lm -lpthread -ldl 2>/dev/null; then
-  "$CC" -O2 -std=c99 -fPIC -o "$out" \
-      "$src/janet.c" "$src/shell.c" -I"$src" \
+  "$CC" -O2 -std=c99 -fPIC -o "$janet_out" \
+      "$janet_src/janet.c" "$janet_src/shell.c" -I"$janet_src" \
       -lm
 fi
 
-echo "built $out ($("$out" -v))"
+echo "built $janet_out ($("$janet_out" -v))"

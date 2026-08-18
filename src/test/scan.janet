@@ -4,12 +4,12 @@
 # port, kept so they cannot go wrong again quietly. Each is a false edge the
 # graph would otherwise have drawn with total confidence.
 
-(import ../src/parser :as parser)
-(import ../src/scan)
-(import ../src/parsers/swift)
-(import ../src/parsers/python)
-(import ../src/parsers/go)
-(import ../src/parsers/javascript :as js)
+(import ../visualize/parser :as parser)
+(import ../visualize/scan)
+(import ../visualize/parsers/swift)
+(import ../visualize/parsers/python)
+(import ../visualize/parsers/go)
+(import ../visualize/parsers/javascript :as js)
 (import ./harness :as t)
 
 (defn- swift [text] (parser/run swift/spec text "T.swift"))

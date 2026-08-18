@@ -4,8 +4,8 @@
 # graphviz subprocess went with the code they covered; what is left is the
 # config language's actual behaviour, which never depended on either.
 
-(import ../src/select)
-(import ../src/color)
+(import ../visualize/select)
+(import ../visualize/color)
 (import ./harness :as t)
 
 # A small graph with the shape that matters: our own files in two directories,
