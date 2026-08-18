@@ -14,8 +14,12 @@
      typed -- every line of the config is a call, so they are furniture
      rather than something to remember. -->
 <div id="compose" class="shut">
-  <span class="paren">(</span><input id="compose-input" spellcheck="false"
-    autocomplete="off" aria-label="add a config line"><span class="paren">)</span>
+  <div id="compose-line">
+    <span class="paren">(</span><input id="compose-input" spellcheck="false"
+      autocomplete="off" aria-label="add a config line"><span class="paren">)</span>
+  </div>
+  <!-- Why the line was refused, under the bar. Empty until something is. -->
+  <p id="compose-fault" role="status" aria-live="polite"></p>
 </div>
 
 <!-- The help panel. Empty here: its content is the verb table from

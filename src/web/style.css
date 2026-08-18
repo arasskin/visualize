@@ -407,13 +407,29 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 #compose {
   position: fixed; bottom: 2.5rem; left: 50%; transform: translateX(-50%);
   z-index: 15;
-  display: flex; align-items: baseline; gap: .1rem;
-  padding: .5rem .85rem;
-  min-width: min(30rem, 80vw);
+  min-width: min(30rem, 80vw); max-width: min(46rem, 90vw);
   background: var(--canvas);
   border: 1px solid var(--line-strong);
   box-shadow: var(--shadow);
   font: 14px/1.5 ui-monospace, monospace;
+}
+#compose-line {
+  display: flex; align-items: baseline; gap: .1rem;
+  padding: .5rem .85rem;
+}
+
+/* The complaint, under the line it is about. The bar turns red rather than
+   growing an icon: there is one thing here to be wrong, so saying WHICH
+   thing would be saying nothing. */
+#compose-fault {
+  margin: 0; padding: 0 .85rem .5rem;
+  font: 12px/1.45 var(--font-ui);
+  color: var(--bad);
+}
+#compose-fault:empty { display: none; }
+#compose:has(#compose-fault:not(:empty)) {
+  border-color: var(--bad);
+  background: var(--bad-wash);
 }
 #compose.shut { display: none; }
 

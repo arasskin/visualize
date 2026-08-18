@@ -726,11 +726,18 @@ renderHelp();
 
 const compose = document.getElementById('compose');
 const composeInput = document.getElementById('compose-input');
+const composeFault = document.getElementById('compose-fault');
 
 function composing() { return !compose.classList.contains('shut'); }
 
+// Which line the bar is editing, or null when it is composing a new one.
+// Set when a commit leaves a complaint on screen, cleared when the bar
+// closes -- so a fix mends the line and a fresh keystroke starts another.
+let composeAt = null;
+
 function openCompose(seed) {
   compose.classList.remove('shut');
+  composeFault.textContent = '';
   composeInput.value = seed || '';
   composeInput.focus();
   // Caret after the seeded character rather than before it.
@@ -741,6 +748,8 @@ function openCompose(seed) {
 function shutCompose() {
   compose.classList.add('shut');
   composeInput.value = '';
+  composeFault.textContent = '';
+  composeAt = null;
   composeInput.blur();
 }
 
@@ -749,11 +758,28 @@ async function commitCompose() {
   if (!text) { shutCompose(); return; }
   // What you typed goes in as a call: the parentheses you saw are the ones
   // that get written.
-  lines = lines.concat([`(${text})`]);
-  shutCompose();
+  // RETRYING REPLACES, rather than appending a second copy: while the bar is
+  // showing a complaint, the line it is complaining about is already in the
+  // config, and fixing a typo should mend that line, not leave the broken
+  // one behind with a corrected twin under it.
+  const at = composeAt === null ? lines.length : composeAt;
+  composeAt = at;
+  lines = lines.slice(0, at).concat([`(${text})`], lines.slice(at + 1));
+  composeFault.textContent = '';
   await send('run', -1);
-  // The new line is the last one, and a complaint about it is worth seeing.
-  if (Object.keys(faults).length && panel.classList.contains('shut')) bar.click();
+  // THE LINE STAYS IN THE BAR IF IT WAS WRONG. The config took it either
+  // way -- every line is its own program, so a bad one costs the others
+  // nothing -- but closing the bar on a complaint would put the thing you
+  // just mistyped somewhere you now have to go and find. Here it is still
+  // under the cursor, still editable, with the reason underneath.
+  const why = faults[at];
+  if (why) {
+    composeFault.textContent = why;
+    composeInput.focus();
+    composeInput.setSelectionRange(text.length, text.length);
+  } else {
+    shutCompose();
+  }
 }
 
 composeInput.addEventListener('keydown', (e) => {
