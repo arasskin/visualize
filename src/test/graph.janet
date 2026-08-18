@@ -5,31 +5,31 @@
 
 (def- scratch "/tmp/visualize-graph-test.janet")
 
-(defn- roundtrip [text]
-  (spit scratch text)
-  (graph/read-config scratch))
+(t/test "reading a config gives one entry per written line"
+  # A trailing newline is one empty string on the end, and it is dropped --
+  # it is how a text file ends, not a line someone wrote.
+  (spit scratch "(show-lines)\n(hide src.test)\n")
+  (t/is= ["(show-lines)" "(hide src.test)"] (graph/read-config scratch))
+  (spit scratch "(show-lines)")
+  (t/is= ["(show-lines)"] (graph/read-config scratch)
+         "a file with no trailing newline reads the same"))
 
-(t/test "the file always ends in one blank line"
-  # THE LAST LINE IS A REAL LINE. The editor shows the file, so the row you
-  # type into has to exist on disk -- that is where a new line gets written,
-  # and it is why there is no `insert below` any more.
-  (t/is= ["(show-lines)" ""] (roundtrip "(show-lines)\n"))
-  (t/is= ["(show-lines)" ""] (roundtrip "(show-lines)")
-         "a file with no trailing newline still gets the row")
-  # Exactly one, so reading and writing does not grow a tail of them.
-  (t/is= ["(show-lines)" ""] (roundtrip "(show-lines)\n\n\n\n"))
-  (t/is= [""] (roundtrip "") "an empty file is one blank row"))
-
-(t/test "writing keeps what the editor showed"
+(t/test "a config round trips unchanged"
   (spit scratch "(show-lines)\n(hide src.test)\n")
   (def lines (graph/read-config scratch))
   (graph/write-config scratch lines)
-  (t/is= lines (graph/read-config scratch) "a round trip is stable")
-  (t/ok (string/has-suffix? "\n\n" (slurp scratch))
-        "the blank line is on disk, not just in the panel")
-  # A caller that hands over lines without the blank still gets a file with
-  # one, so the panel and the file cannot disagree.
-  (graph/write-config scratch ["(show-lines)"])
-  (t/is= ["(show-lines)" ""] (graph/read-config scratch)))
+  (t/is= lines (graph/read-config scratch))
+  (t/is= "(show-lines)\n(hide src.test)\n" (string (slurp scratch))
+         "and the file is the lines, newline-terminated"))
+
+(t/test "the editor's actions are the ones the page can send"
+  # A new line does not come through `edit` at all: the compose bar sends the
+  # whole list with the line already in it, as `run`.
+  (t/is= ["a" "b"] (graph/edit ["a" "b"] "run" -1))
+  (t/is= ["b"] (graph/edit ["a" "b"] "delete" 0))
+  (t/is= ["a" "b"] (graph/edit ["a" "b"] "delete" 9)
+         "an index off the end deletes nothing")
+  (t/ok (try (do (graph/edit ["a"] "insert-below" 0) false) ([_] true))
+        "inserting is no longer an action"))
 
 (os/rm scratch)

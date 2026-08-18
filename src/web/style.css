@@ -277,9 +277,6 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   outline: none; border-color: var(--line-strong); background: var(--wash-strong);
 }
 .row.comment input { opacity: .55; font-style: italic; }
-/* The trailing blank: a row to type into, so it does not advertise itself
-   with the controls a written line carries. */
-.row.tail input { opacity: .55; }
 
 /* Square, quiet buttons -- four per row would shout otherwise. */
 .row button {

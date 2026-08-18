@@ -50,45 +50,28 @@
 # next edit through the page appends to it -- so the file is normalised on the
 # way to disk exactly as `write-config` does it.
 
-(defn- with-blank-end
-  ``The lines, ending in exactly one empty one.
-
-  THE LAST LINE IS ALWAYS BLANK, and it is a real line in the real file --
-  the editor shows the file, so a row you can type into has to be a row that
-  exists. It is where a new line gets written, which is why `insert below`
-  is gone: the place to add one is always already there.
-
-  Exactly one, so repeated reads and writes do not grow a tail of them, and
-  a file that ends in several blanks is tidied to a single one.``
-  [lines]
-  (var out (array ;lines))
-  (while (and (> (length out) 0) (= "" (string/trim (last out))))
-    (array/pop out))
-  (array/push out "")
-  out)
-
 (defn read-config
   "The config file as a list of lines, creating it if it is not there."
   [path]
   (unless (os/stat path :mode)
     (spit path (string (string/trimr starter "\n") "\n")))
   (def text (try (slurp path) ([_] "")))
-  # A trailing newline is one empty string on the end. That empty string is
-  # KEPT -- it is the blank line the editor types into.
-  (with-blank-end (string/split "\n" text)))
+  # A trailing newline is one empty string on the end, which would show as a
+  # phantom blank row in the editor.
+  (def lines (string/split "\n" text))
+  (if (and (> (length lines) 0) (= "" (last lines)))
+    (slice lines 0 -2)
+    lines))
 
 (defn write-config
-  ``Write the lines back, as a real edit to the real file.
-
-  Normalised to end in one blank line on the way out, so what is on disk is
-  what the editor showed -- the file and the panel are the same list.``
+  "Write the lines back, as a real edit to the real file."
   [path lines]
-  (spit path (string (string/join (with-blank-end lines) "\n") "\n")))
+  (spit path (string (string/join lines "\n") "\n")))
 
-# Which actions are worth a redraw. Inserting adds an EMPTY line, which by
-# definition draws the same graph -- so it saves and returns immediately
-# instead of making you wait to see nothing change. Deleting is not here by
-# oversight: removing a line really can change the picture.
+# Which actions are worth a redraw -- all of them, now that inserting an
+# empty line is not one. Kept as a table rather than folded away because it
+# is the list the reply consults, and an action that changes no text would
+# belong here as `false` rather than as a special case at the call site.
 (def draws {"run" true "delete" true "reorder" true "regenerate" true})
 
 (defn edit
@@ -99,13 +82,13 @@
   separate save step to forget.
 
   'run', 'reorder' and 'regenerate' change no text: every action re-runs the
-  file anyway, so running IS just saving what is on screen.``
+  file anyway, so running IS just saving what is on screen. A new line does
+  not arrive through here at all -- the compose bar sends the whole list
+  with the line already in it, as `run`.``
   [lines action index]
   (def out (array ;lines))
   (cond
     (or (= action "run") (= action "reorder") (= action "regenerate")) out
-    (= action "insert-above") (array/insert out (max 0 index) "")
-    (= action "insert-below") (array/insert out (min (length out) (+ index 1)) "")
     (= action "delete") (if (and (>= index 0) (< index (length out)))
                           (array/remove out index)
                           out)
@@ -232,10 +215,8 @@
   []
   (set cached nil))
 
-# Which actions are worth a redraw. Inserting adds an EMPTY line, which by
-# definition draws the same graph -- so it saves and returns immediately
-# instead of making you wait to see nothing change. Deleting is not here by
-# oversight: removing a line really can change the picture.
+# Which actions are worth a redraw -- all of them, now that inserting an
+# empty line is not an action.
 (def- draws {"run" true "delete" true "reorder" true "regenerate" true})
 
 (defn config-edit
@@ -250,10 +231,7 @@
   (def sent (json/decode body))
   (def action (string (get sent "action" "")))
   (def index (math/floor (or (get sent "index") -1)))
-  # Normalised HERE rather than only inside write-config, so the lines that
-  # go back to the page are the lines that went to disk -- the panel shows
-  # the file, and it would otherwise lose the blank row until a reload.
-  (def lines (with-blank-end (edit (map string (get sent "lines" [])) action index)))
+  (def lines (edit (map string (get sent "lines" [])) action index))
   # Save first: the file is the thing being edited, and it should hold what
   # you just did even if drawing it then fails.
   (write-config config-path lines)
