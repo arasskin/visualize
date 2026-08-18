@@ -30,29 +30,25 @@
 (defn expand
   ``A config name as the node-name prefix it selects.
 
-  `~` IS THE PROJECT, the way a shell expands `~` to a home directory:
-  `~.OttoClip` is the OttoClip directory, `~.a.b` is that one file, and `~`
-  alone is everything of ours. Every other name is literal, so `SwiftUI` is
-  the framework -- which is what lets an external be grouped and hidden like
-  any other node.
+  A name is the dotted path, and every name is literal: `src.visualize` is
+  that directory, `src.visualize.color` is that file, and `SwiftUI` is the
+  external -- which is what lets an import be grouped and hidden like any
+  other node.
 
-  `~` alone expands to the EMPTY prefix, and the empty prefix matching
-  everything is exactly right for (show-only ~) -- with one catch: it would
-  match the externals too. `matches?` below handles that by membership rather
-  than by string prefix, which is why this can stay a pure string function.``
+  `~` HAS NO MEANING HERE, and used to have two. `~.a.b` was a prefix for
+  "inside the project", which said nothing once node names became dotted
+  paths -- it stripped to `a.b`, the same string wearing two more characters.
+  `~` alone was "everything of ours", and that is the EMPTY prefix now:
+  `matches?` reads it by membership rather than as a string test, so
+  `(show-only "")` keeps your files and drops the externals.
+
+  The config is plain Janet, so `~` is quasiquote and nothing else. A config
+  wanting a short name for the project binds one -- `(def home "src")` --
+  and uses it with an unquote.``
   [name]
   (def text (string/trim name))
   (cond
     (empty? text) ""
-    (= text "~") ""
-    # SLASHES AND DOTS BOTH, because a node shows one and this used to
-    # accept only the other. A label reads `src/test` -- that is the path,
-    # wrapped a segment per line -- while the node's IDENTITY is the
-    # flattened `src_test`, and a config could only say `src.test`. The dots
-    # came from pydeps, where a module path really is dotted; for a file tree
-    # they are a translation nobody asked for, and a reader who types what
-    # the picture shows deserves a match rather than silence.
-    (string/has-prefix? "~." text) (flatten-separators (string/slice text 2))
     (flatten-separators text)))
 
 (defn matches?
@@ -72,23 +68,23 @@
 
   A TRAILING DOT means "the contents, not the thing itself":
 
-      (hide ~.OttoClip)     the directory and every file in it
-      (hide ~.OttoClip.)    the files only
+      (hide src.visualize)     the directory and every file in it
+      (hide src.visualize.)    the files only
 
   That is a longer prefix rather than a special case -- contents-only matches
-  `OttoClip_`, with the separator that goes between a directory and its files.
-  For a directory the two are nearly the same thing, since there is no node
-  for the directory itself; the form is kept because `(hide ~.Otto.)` hides
-  Otto/'s files while leaving OttoClip's alone, which a plain prefix cannot
-  express.``
+  `src.visualize.`, with the separator that goes between a directory and its
+  files. For a directory the two are nearly the same thing, since there is no
+  node for the directory itself; the form is kept because `(hide src.)` hides
+  src/'s files while leaving a sibling `srcgen` alone, which a plain prefix
+  cannot express.``
   [name ours]
   (def contents-only (string/has-suffix? "." (string/trim name)))
   (var prefix (expand name))
-  # An empty prefix is `~`, which means ours. A trailing dot cannot make it
-  # longer, and appending one would turn "everything of ours" into a literal
-  # underscore that matches nothing.
+  # The empty prefix means OURS. A trailing dot cannot make it longer, and
+  # appending one would turn "everything of ours" into a literal dot that
+  # matches nothing.
   (when (and contents-only (not (empty? prefix)))
-    (set prefix (string prefix "_")))
+    (set prefix (string prefix ".")))
   (fn [node] (matches? node prefix ours)))
 
 (defn keep
