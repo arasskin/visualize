@@ -33,16 +33,15 @@
 
 # Written on first run so there is something to edit rather than a blank pane.
 # Comments survive a round-trip through the editor, so they are worth having.
+# THE STARTER no longer lists the verbs. It used to, and that made it the
+# third place that had to be remembered when one changed -- `font` outlived
+# its deletion here. The `?` in the corner is generated from the grammar and
+# is therefore always right, so this points at it instead.
 (def starter
-  ``# (group prefix & color), (hide prefix), (show-only prefix)
-# (prefix token path), (fill-color), (show-lines), (show-lines-coloring)
-# A prefix is the dotted path a node shows: (group src.parsers) boxes that
+  ``# One verb per line. Press ? for the full list.
+# A name is the dotted path a node shows: (group src.parsers) boxes that
 # directory, (hide src.test) drops it. Any other name is literal, so
 # (group SwiftUI) groups the framework. Comment out with '#'.
-# (prefix ~ src.visualize) gives that path a short name: the nodes under it
-# read ~.color instead, and (hide ~.color) means the same as the long form.
-# colors: red green orange purple blue yellow orange-red teal magenta
-#         yellow-green pink dark-blue grey
 (show-lines)
 ``)
 
@@ -189,7 +188,11 @@
                 (string/replace "{{TITLE}}" title)
                 (string/replace "{{CONFIG_NAME}}" config-title)
                 (string/replace "{{CONFIG_LINES}}" (json/encode lines))
-                (string/replace "{{CONFIG_PROBLEMS}}" (json/encode problems))))
+                (string/replace "{{CONFIG_PROBLEMS}}" (json/encode problems))
+                # The help panel's content, generated from the grammar's own
+                # verb table -- so the list cannot describe a verb the parser
+                # does not have, or miss one it does.
+                (string/replace "{{CONFIG_DOCS}}" (json/encode (config/docs)))))
   (eachp [key value] fill
     (set out (string/replace (string "{{" key "}}") value out)))
   # The SVG goes in last, and with a function rather than a literal:

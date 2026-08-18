@@ -99,6 +99,64 @@
                   {:prefix (g :prefix) :color hue})))
             (state :groups))))
 
+# THE VERBS, and the one place that knows them.
+#
+# Name, the arguments it takes, and what it does -- and every use of that is
+# derived from here: the PEG's alternatives are built from `:args` below, the
+# "there is no verb X, try..." message lists these names, and the page's help
+# panel is rendered from the whole table. Adding a verb is adding an entry.
+#
+# THIS USED TO BE THREE PLACES. The grammar spelled each verb out, a `verbs`
+# list beside it repeated the names for error messages, and the starter
+# config described them in a comment -- so a new verb meant remembering all
+# three, and `font` outlived its removal in two of them.
+#
+# `:args` is what the verb takes, as PEG rule names, and doubles as the
+# usage line: [:name :color?] is `(group name color?)`. A trailing `?` marks
+# the optional one. Nothing here is prose the parser reads -- `:blurb` is
+# for the reader, and the parser never sees it.
+(def verb-specs
+  [{:name "prefix" :args [:alias :name]
+    :blurb "Give a path a short name. The nodes under it are labelled with the token, and any later name starting with it is expanded -- so with (prefix ~ src.visualize), (hide ~.color) hides src.visualize.color. A token stands for one path; binding it twice is an error."
+    :example "(prefix ~ src.visualize)"}
+   {:name "group" :args [:name :color?]
+    :blurb "Draw a box around everything under a path, and colour it. Without a colour one is chosen from the palette and the others shuffle to stay distinct."
+    :example "(group src.parsers blue)"}
+   {:name "hide" :args [:name]
+    :blurb "Drop everything under a path from the drawing. Its edges go with it."
+    :example "(hide src.test)"}
+   {:name "show-only" :args [:name]
+    :blurb "Narrow to everything under a path. Several narrow to the union. Applied before hide, so (show-only src) then (hide src.test) reads the way it is written."
+    :example "(show-only src)"}
+   {:name "show-lines-coloring" :args []
+    :blurb "Shade nodes by line count instead of by how many edges they have."
+    :example "(show-lines-coloring)"}
+   {:name "show-lines" :args []
+    :blurb "Write each file's line count under its name."
+    :example "(show-lines)"}
+   {:name "fill-color" :args []
+    :blurb "Fill the nodes with their colour instead of just outlining them."
+    :example "(fill-color)"}])
+
+# LONGEST NAME FIRST is not cosmetic: a PEG alternation takes the first
+# branch that matches, so with "show-lines" ahead of "show-lines-coloring"
+# the longer verb would match the shorter rule and leave "-coloring"
+# unparsed. Sorting by length removes the need to remember that when adding
+# a verb -- which is exactly the kind of ordering a hand-written list gets
+# wrong once and then keeps.
+(def- verb-rules
+  (map (fn [spec]
+         (def parts @[~(constant ,(keyword (spec :name))) (spec :name)])
+         (if (empty? (spec :args))
+           (array/push parts :space)
+           (each arg (spec :args)
+             (case arg
+               :alias (do (array/push parts :space) (array/push parts :alias))
+               :name (array/push parts :name)
+               :color? (array/push parts ~(? :color)))))
+         (tuple ;(array '* ;parts)))
+       (sorted-by |(- (length ($ :name))) verb-specs)))
+
 # THE GRAMMAR. Every form the language has, in one readable place.
 #
 # A NAME is the dotted path plus the characters a real directory can carry --
@@ -131,16 +189,9 @@
     :color (* :space (+ :quoted (<- (* "#" (some (range "09" "af" "AF"))))
                         :bare)
               :space)
-    :verb (* "("
-             :space
-             (+ (* (constant :prefix) "prefix" :space :alias :name)
-                (* (constant :group) "group" :name (? :color))
-                (* (constant :hide) "hide" :name)
-                (* (constant :show-only) "show-only" :name)
-                (* (constant :show-lines-coloring) "show-lines-coloring" :space)
-                (* (constant :show-lines) "show-lines" :space)
-                (* (constant :fill-color) "fill-color" :space))
-             ")")
+    # `,` so the alternation is spliced in when this table is BUILT, not
+    # left as a literal for the PEG compiler to choke on.
+    :verb (* "(" :space ,(tuple ;(array '+ ;verb-rules)) ")")
     # A TRAILING COMMENT is part of the line, not a syntax error. `#` to
     # end of line, the way it works in Janet and the shell -- and the way
     # the config's own file is written, since the default one ships with
@@ -148,9 +199,40 @@
     :comment (* "#" (any 1))
     :main (* :space (any (* :verb :space)) (? :comment) -1)})
 
-(def- verbs
-  ["prefix" "group" "hide" "show-only"
-   "show-lines" "show-lines-coloring" "fill-color"])
+(def- verbs (map |($ :name) verb-specs))
+
+(defn usage
+  ``One verb's call shape, from the same `:args` the parser was built from.
+
+  `(group name color?)`. The `?` marks the optional argument, and an alias
+  argument is called `token` because that is what it is -- a spelling you
+  pick, not a path.``
+  [spec]
+  (def parts
+    (map (fn [arg]
+           (case arg
+             :alias "token"
+             :name "name"
+             :color? "color?"
+             (string arg)))
+         (spec :args)))
+  (string "(" (string/join (array (spec :name) ;parts) " ") ")"))
+
+(defn docs
+  ``Every verb as {:name :usage :blurb :example}, in the order they are
+  written above.
+
+  FROM THE GRAMMAR'S OWN TABLE, so the help the page shows cannot describe a
+  verb the parser does not have, or miss one it does. That is the whole
+  reason `verb-specs` is a table of data rather than seven lines of PEG:
+  documentation that is derived cannot go stale.``
+  []
+  (map (fn [spec]
+         {:name (spec :name)
+          :usage (usage spec)
+          :blurb (spec :blurb)
+          :example (spec :example)})
+       verb-specs))
 
 (defn- normalise
   ``A name as the prefix it selects: slashes to dots, edges trimmed.

@@ -646,3 +646,77 @@ if (Object.keys(faults).length) requestAnimationFrame(() => bar.click());
 // And from here on the graph keeps up with the files by itself.
 watchSource();
 
+
+// -- help ------------------------------------------------------------------
+//
+// The verb list is NOT written here. It arrives as window.CONFIG_DOCS, built
+// by config/docs from the same table the PEG's alternatives are generated
+// from, so a verb cannot exist without appearing here and cannot appear here
+// without existing. Adding one to that table is the whole job.
+
+const help = document.getElementById('help');
+const helpOpen = document.getElementById('help-open');
+
+function renderHelp() {
+  const verbs = window.CONFIG_DOCS || [];
+  const into = document.getElementById('help-verbs');
+  for (const verb of verbs) {
+    const row = document.createElement('div');
+    row.className = 'help-verb';
+
+    const usage = document.createElement('code');
+    usage.className = 'help-usage';
+    usage.textContent = verb.usage;
+    row.appendChild(usage);
+
+    const blurb = document.createElement('p');
+    blurb.textContent = verb.blurb;
+    row.appendChild(blurb);
+
+    // Clicking an example writes it into the config, which is the shortest
+    // path from reading about a verb to having used it.
+    const example = document.createElement('button');
+    example.className = 'help-example';
+    example.textContent = verb.example;
+    example.title = 'add this line to the config';
+    example.addEventListener('click', () => {
+      lines = lines.concat([verb.example]);
+      send('run', -1);
+      shutHelp();
+      if (panel.classList.contains('shut')) bar.click();
+    });
+    row.appendChild(example);
+
+    into.appendChild(row);
+  }
+}
+
+// What had focus before the dialog opened, so closing puts it back.
+let helpCloseTarget = null;
+
+function openHelp() {
+  help.classList.remove('shut');
+  helpCloseTarget = document.activeElement;
+  help.focus();
+}
+
+function shutHelp() {
+  help.classList.add('shut');
+  if (helpCloseTarget && helpCloseTarget.focus) helpCloseTarget.focus();
+  helpCloseTarget = null;
+}
+
+helpOpen.addEventListener('click', openHelp);
+// The dim IS the dismiss target, but a click inside the card is not a click
+// on the backdrop -- so only the backdrop itself closes.
+help.addEventListener('click', (e) => { if (e.target === help) shutHelp(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !help.classList.contains('shut')) {
+    shutHelp();
+    return;
+  }
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.key === '?') openHelp();
+});
+
+renderHelp();

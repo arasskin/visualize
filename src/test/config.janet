@@ -204,3 +204,45 @@
   (t/ok (p1 0) "a token with nothing to stand for")
   (def [_ p2] (run "(prefix)"))
   (t/ok (p2 0) "neither half"))
+
+(t/test "the docs are generated from the grammar"
+  # THE POINT of the verb table: help that cannot describe a verb the parser
+  # does not have, or miss one it does. Asserted as a set equality rather
+  # than a fixed list, so adding a verb does not have to touch this test --
+  # which is the same property the table itself is for.
+  (def documented (map |($ :name) (config/docs)))
+  (each name documented
+    (def [_ problems] (run (string "(" name " src.a x)")))
+    # It parses as SOMETHING -- either cleanly, or with an argument
+    # complaint. What it must never be is "there is no verb".
+    (when (problems 0)
+      (t/ok (not (string/find "there is no verb" (problems 0)))
+            (string name " is documented, so it must exist"))))
+  # And every verb the parser knows is documented: an undocumented verb is
+  # invisible to anyone reading the help.
+  (def [_ unknown] (run "(no-such-verb x)"))
+  (each name documented
+    (t/ok (string/find name (unknown 0))
+          (string name " must be offered when a verb is misspelled"))))
+
+(t/test "a usage line comes from the arguments the parser takes"
+  (def by-name (tabseq [d :in (config/docs)] (d :name) d))
+  (t/is= "(prefix token name)" (get-in by-name ["prefix" :usage]))
+  (t/is= "(group name color?)" (get-in by-name ["group" :usage])
+         "the optional colour is marked")
+  (t/is= "(show-lines)" (get-in by-name ["show-lines" :usage])
+         "a verb with no arguments")
+  # Every example must be a line the parser actually accepts. A help panel
+  # offering a line that does not parse is worse than no help.
+  (each d (config/docs)
+    (def [_ problems] (run (d :example)))
+    (t/is= @{} problems (string (d :example) " must parse"))))
+
+(t/test "the longer of two verbs sharing a head still parses"
+  # `show-lines` is a prefix of `show-lines-coloring`, and a PEG takes the
+  # first alternative that matches -- so the rules are built longest name
+  # first. Without that, `(show-lines-coloring)` matches the `show-lines`
+  # rule and the rest of the line fails.
+  (def state (state-of "(show-lines-coloring)"))
+  (t/ok (state :sized-coloring))
+  (t/ok (state :sized)))

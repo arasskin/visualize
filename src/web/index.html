@@ -9,6 +9,23 @@
 <div id="graph">{{GRAPH}}<div id="edgelabel"></div></div>
 <div id="hud"><span id="zoom"></span><span id="status"></span></div>
 
+<!-- The help panel. Empty here: its content is the verb table from
+     src/visualize/config.janet, rendered by app.js, because a list of verbs
+     written out in HTML is a list that goes stale the first time one
+     changes. -->
+<button id="help-open" title="what the config can say (?)" aria-label="help">?</button>
+<div id="help" class="shut" role="dialog" aria-modal="true" aria-labelledby="help-title">
+  <div id="help-card">
+    <h2 id="help-title">config verbs</h2>
+    <div id="help-verbs"></div>
+    <p id="help-foot">
+      One verb per line. <code>#</code> starts a comment.
+      A <b>name</b> is a dotted path like <code>src.visualize</code> &mdash;
+      it matches that node and everything under it.
+    </p>
+  </div>
+</div>
+
 <div id="config" class="panel shut">
   <div id="bar" class="bar" title="click to open, drag to move">
     <span class="name">{{CONFIG_NAME}}</span>
@@ -24,6 +41,8 @@
 // on the same lines the graph came from.
 window.CONFIG_LINES = {{CONFIG_LINES}};
 window.CONFIG_PROBLEMS = {{CONFIG_PROBLEMS}};
+// The verbs, generated from the grammar. See config/docs.
+window.CONFIG_DOCS = {{CONFIG_DOCS}};
 // The secret the write endpoints require. Here rather than in a cookie so
 // it dies with the tab and is never sent to another origin.
 window.TOKEN = {{TOKEN}};
