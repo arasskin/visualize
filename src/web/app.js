@@ -745,10 +745,21 @@ function composing() { return !compose.classList.contains('shut'); }
 // closes -- so a fix mends the line and a fresh keystroke starts another.
 let composeAt = null;
 
+// The field is as wide as its text, so the closing paren sits just after
+// what you wrote rather than at the far edge of the box. Width in `ch`
+// rather than the `size` attribute, because `size` is a hint the flex
+// layout can overrule -- and it did, letting a long line push the closing
+// paren out through the border.
+function sizeCompose() {
+  const n = Math.max(1, composeInput.value.length);
+  composeInput.style.width = n + 'ch';
+}
+
 function openCompose(seed) {
   compose.classList.remove('shut');
   composeFault.textContent = '';
   composeInput.value = seed || '';
+  sizeCompose();
   composeInput.focus();
   // Caret after the seeded character rather than before it.
   const end = composeInput.value.length;
@@ -790,6 +801,8 @@ async function commitCompose() {
     shutCompose();
   }
 }
+
+composeInput.addEventListener('input', sizeCompose);
 
 composeInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') { e.preventDefault(); commitCompose(); }

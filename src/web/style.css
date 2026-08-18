@@ -417,20 +417,40 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 }
 #compose.shut { display: none; }
 
-/* The bar IS the field: one box, nothing flanking it. */
-#compose-input {
-  display: block; width: 100%;
-  /* An explicit height rather than text plus padding, so resizing the bar is
-     one number and not an arithmetic. */
-  height: var(--field-h); padding: 0 .7rem;
-  /* A GROUND OF ITS OWN. --canvas is the page's colour, so a field painted
-     with it is opaque and still reads as a hole -- the graph does not show
-     through, but nothing says where the field starts either. --field is a
-     step off the canvas in each theme, so the box is visibly a box. */
+/* THE BOX carries the border and the ground, and the parens sit inside it
+   with the field between them. A GROUND OF ITS OWN: --canvas is the page's
+   colour, so a box painted with it is opaque and still reads as a hole --
+   nothing shows through, but nothing says where the box starts either.
+   --field is a step off the canvas in each theme. */
+#compose-box {
+  display: flex; align-items: center;
+  /* min-width:0 on the row so the field's own min-content width cannot push
+     the closing paren out past the border on a long line. */
+  min-width: 0; overflow: hidden;
+  height: var(--field-h); padding: 0 .55rem;
   background: var(--field);
   border: 1px solid var(--line-strong);
-  box-shadow: var(--shadow);
-  outline: none;
+}
+
+/* Fixtures. Same size and colour as what you type, because they are part of
+   the line -- they just are not yours to edit. The closing one HUGS THE
+   TEXT rather than sitting at the far edge: the pair reads as brackets
+   around what you wrote, not as the ends of the box. */
+#compose .paren {
+  color: var(--ink); opacity: .45;
+  user-select: none;
+  margin: 0 .1rem;
+}
+
+#compose-input {
+  /* Sized to its content by sizeCompose, and allowed to shrink no further
+     than the box: flex-shrink keeps a long line inside the border, and the
+     text scrolls within the field once it gets there. */
+  flex: 0 1 auto; min-width: 0;
+  /* No padding: the width is set in `ch` from the character count, and any
+     padding on top of that pushes the text under the opening paren. The
+     gap to the brackets comes from their own margin instead. */
+  border: 0; background: none; outline: none; padding: 0;
   font: inherit; color: var(--ink);
 }
 
@@ -444,7 +464,7 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   text-align: center;
 }
 #compose-fault:empty { display: none; }
-#compose:has(#compose-fault:not(:empty)) #compose-input {
+#compose:has(#compose-fault:not(:empty)) #compose-box {
   border-color: var(--bad);
   background: var(--bad-wash);
 }

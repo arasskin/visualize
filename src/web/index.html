@@ -14,8 +14,13 @@
      parentheses on its way to the file -- every line of the config is a
      call, so they are not something to type. -->
 <div id="compose" class="shut">
-  <input id="compose-input" spellcheck="false"
-    autocomplete="off" aria-label="add a config line">
+  <!-- The box is the bordered thing; the parens live INSIDE it, one at each
+       end of the line. Printed, not typed -- every line of the config is a
+       call, so they are the shape of what you are writing. -->
+  <div id="compose-box">
+    <span class="paren">(</span><input id="compose-input" spellcheck="false"
+      autocomplete="off" aria-label="add a config line"><span class="paren">)</span>
+  </div>
   <!-- Why the line was refused, under the bar. Empty until something is. -->
   <p id="compose-fault" role="status" aria-live="polite"></p>
 </div>
