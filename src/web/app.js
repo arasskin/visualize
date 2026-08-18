@@ -309,6 +309,13 @@ function draw() {
     const commented = text.trim().startsWith('#');
     row.className = 'row' + (commented ? ' comment' : '');
 
+    // The line number, 1-based, because that is how a file is counted
+    // everywhere else. It is a label, not a control: no pointer events, so
+    // dragging across it selects nothing and clicking it does nothing.
+    const num = document.createElement('span');
+    num.className = 'num';
+    num.textContent = i + 1;
+
     // Only the handle starts a drag, not the whole row -- otherwise text
     // selection inside the input would be impossible. Pointer events rather
     // than HTML5 drag-and-drop: native DnD gives a ghost image you cannot
@@ -339,7 +346,7 @@ function draw() {
     const del = icon('✕', 'delete this line', 'del');
     del.onclick = () => send('delete', i);
 
-    row.append(box, del, hold);
+    row.append(num, box, del, hold);
 
     // The line and anything wrong with it travel together, so the message sits
     // directly beneath the input that caused it.
