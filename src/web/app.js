@@ -292,6 +292,11 @@ let lines = [];
 // rather than collected into a list that names line numbers.
 let faults = {};
 let busy = false;
+// WHICH LINE IS SELECTED, by index, or -1 for none. It survives the panel
+// closing and opening -- the selection is a place in the file, not a piece
+// of the panel's furniture, and coming back to a config you were working on
+// should come back to where you were.
+let picked = -1;
 
 function icon(glyph, title, cls) {
   const b = document.createElement('button');
@@ -321,11 +326,17 @@ function uncomment(text) {
 }
 
 function draw() {
+  // A DELETE CAN LEAVE THE SELECTION PAST THE END. Clamp before drawing, so
+  // the picked row is always one that exists and the next j moves from where
+  // the selection visibly is.
+  if (picked >= lines.length) picked = lines.length - 1;
+  if (!lines.length) picked = -1;
   rows.replaceChildren();
   lines.forEach((text, i) => {
     const row = document.createElement('div');
     const commented = text.trim().startsWith('#');
-    row.className = 'row' + (commented ? ' comment' : '');
+    row.className = 'row' + (commented ? ' comment' : '')
+                          + (i === picked ? ' picked' : '');
 
     // Only the handle starts a drag, not the whole row -- otherwise text
     // selection inside the input would be impossible. Pointer events rather
@@ -343,6 +354,10 @@ function draw() {
     // Typing edits the array; nothing reaches disk until a button says so, so
     // a half-typed form never gets evaluated.
     box.oninput = () => { lines[i] = box.value; };
+    // Clicking into a line is choosing it. The class is set directly rather
+    // than by redrawing, because a redraw would replace the input the click
+    // just put the caret in.
+    box.onfocus = () => { pick(i, false); };
     box.onkeydown = (e) => {
       if (e.key === 'Enter') { e.preventDefault(); send('run', i); }
     };
@@ -902,10 +917,46 @@ let altAt = 0;
 // just leaves it up. Only the no-chord case depends on this at all.
 const ALT_HOLD_MS = 400;
 
+// Select a line, and optionally put the caret in it. `focus` is false when
+// the selection came FROM a focus, so choosing a row does not fight the
+// click that chose it.
+function pick(at, focus = true) {
+  if (!lines.length) { picked = -1; return; }
+  // WRAPS. Past the end is the top and before the start is the bottom, which
+  // is what makes j/k a way to cycle a short list rather than a way to get
+  // stuck at one end.
+  picked = ((at % lines.length) + lines.length) % lines.length;
+  const slots = [...rows.children];
+  slots.forEach((slot, i) => {
+    slot.querySelector('.row')?.classList.toggle('picked', i === picked);
+  });
+  const box = slots[picked]?.querySelector('input');
+  if (box) {
+    // Into view, because a selection you cannot see is not a selection --
+    // `nearest` so a pick that is already on screen does not jump the list.
+    box.scrollIntoView({ block: 'nearest' });
+    if (focus) box.focus();
+  }
+}
+
+// j/k and the arrows, while alt is held. Alt is what makes them movement
+// rather than text: without it, `j` is the first character of a config line.
+function altChord(e) {
+  const down = e.key === 'j' || e.key === 'ArrowDown';
+  const up = e.key === 'k' || e.key === 'ArrowUp';
+  if (!down && !up) return false;
+  e.preventDefault();
+  // The panel has to be up to be moving around in it -- holding alt already
+  // put it there, and this is the case where it was open beforehand.
+  if (configPanel.shut) configPanel.open();
+  pick(picked < 0 ? (down ? 0 : -1) : picked + (down ? 1 : -1));
+  return true;
+}
+
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Alt') {
     // Any other key during the hold makes it a chord, not a tap.
-    if (altDown) altUsed = true;
+    if (altDown) { altUsed = true; altChord(e); }
     return;
   }
   // Auto-repeat while held: the press has already been handled.

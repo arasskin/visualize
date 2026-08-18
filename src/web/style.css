@@ -276,6 +276,16 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 .row input:focus {
   outline: none; border-color: var(--line-strong); background: var(--wash-strong);
 }
+
+/* The selected line. A bar down the left edge rather than a fill, so a
+   selection reads over a commented row and a faulted one without fighting
+   the colours those already carry. */
+.row.picked { position: relative; }
+.row.picked::before {
+  content: ''; position: absolute; left: -.45rem; top: 0; bottom: 0;
+  width: 2px; background: var(--ink); opacity: .55;
+}
+.row.picked input { background: var(--wash-strong); }
 /* A commented line is still there, just not doing anything -- so the whole
    row recedes together rather than the text fading while its buttons stay
    bright. The hash itself keeps a little more weight than the rest, since it
