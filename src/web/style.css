@@ -369,7 +369,8 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   background: #000000d4;
   overflow-y: auto;
   color: #f2f2f0;
-  font-size: 13px;
+  /* The compose line's size. What you read here is what you then type. */
+  font-size: 17px;
   /* Centred as a block AND as text. With no title, no footnote and no card,
      the verbs are the whole content, and a centred column has no edge to be
      ragged against. */
@@ -387,19 +388,20 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 .help-verb {
   /* A short measure, and shorter than prose usually wants, because the text
      is CENTRED: a ragged-both-edges block is read by finding each line's
-     start, and the further the starts move the harder that is. */
-  max-width: 30rem;
+     start, and the further the starts move the harder that is. Measured in
+     rem so it tracks the 17px text rather than pinning a pixel width. */
+  max-width: 34rem;
   padding: .55rem 0;
 }
 /* The list centres as a whole rather than each row centring inside a full
    width box, which would leave the short verbs adrift from the long ones. */
-#help-verbs { max-width: 30rem; }
+#help-verbs { max-width: 34rem; }
 .help-verb p {
   margin: .15rem 0 0;
   opacity: .72;
 }
 .help-usage {
-  font: 600 13px/1.5 ui-monospace, monospace;
+  font: 600 17px/1.5 ui-monospace, monospace;
 }
 
 
