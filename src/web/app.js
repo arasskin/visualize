@@ -689,6 +689,9 @@ function renderHelp() {
 let helpCloseTarget = null;
 
 function openHelp() {
+  // The bar is not left open behind the dim: opening the help is a move away
+  // from writing a line, the same as clicking off it.
+  if (composing()) shutCompose();
   help.classList.remove('shut');
   helpCloseTarget = document.activeElement;
   help.focus();
@@ -801,6 +804,22 @@ async function commitCompose() {
     shutCompose();
   }
 }
+
+// A CLICK ELSEWHERE PUTS IT AWAY. The bar has no chrome to dismiss it and
+// nothing anchors it to the page, so clicking off it is the gesture that
+// means "not this after all" -- the same one that closes the help.
+//
+// `mousedown` rather than `click`, so the bar goes as the press lands and
+// the graph underneath gets the rest of the gesture: pressing to drag the
+// graph should not need a second press once the bar is gone.
+//
+// Anything inside #compose is the bar itself, INCLUDING the complaint under
+// it, so reading an error does not dismiss what it is about.
+document.addEventListener('mousedown', (e) => {
+  if (!composing()) return;
+  if (compose.contains(e.target)) return;
+  shutCompose();
+});
 
 composeInput.addEventListener('input', sizeCompose);
 
