@@ -359,11 +359,11 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 #help {
   position: fixed; inset: 0; z-index: 20;
   padding: 3rem clamp(1.5rem, 8vw, 7rem);
-  /* Deep, because the graph is directly behind the WORDS now -- with no card
-     to sit on, node labels and edges cross the lines of text and a lighter
-     dim leaves them legible enough to compete. The drawing stays visible as
-     shape, not as detail. */
-  background: #000000ed;
+  /* The graph stays READABLE AS A GRAPH behind the words -- you can still
+     see the shape of what you are configuring while you read what to type.
+     The text carries itself instead: it is the only bright thing on the
+     screen, and the drawing sits well below it. */
+  background: #000000d4;
   overflow-y: auto;
   color: #f2f2f0;
   font-size: 13px;
