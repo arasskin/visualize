@@ -399,8 +399,14 @@
   editor can point at.
 
   A COMMENT IS A LINE THAT DOES NOTHING, and so is a blank one. `#` starts a
-  comment, as it does in Janet and in the shell.``
-  [line state]
+  comment, as it does in Janet and in the shell.
+
+  `only` names the one verb to apply, or nil for every verb but that one.
+  That is how `run` gets its two passes -- see the note there. It selects on
+  the VERB rather than the line, because a line may hold several forms and
+  `(prefix ~ src) (hide ~.a)` must bind on the first pass and hide on the
+  second.``
+  [line state &opt only]
   (def text (string/trim line))
   (cond
     (empty? text) nil
@@ -418,7 +424,8 @@
           (while (and (< i (length forms)) (string? (forms i)))
             (array/push args (forms i))
             (++ i))
-          (unless wrong
+          (def mine (if only (= verb only) (not= verb :prefix)))
+          (when (and mine (not wrong))
             (set wrong (apply-verb state [verb ;args]))))
         wrong)
       (complain text))))
@@ -427,11 +434,31 @@
   ``Every line, in order, against one fresh state.
 
   Returns [state problems], where `problems` maps a line's INDEX to what went
-  wrong with it -- the index because that is what the editor draws against.``
+  wrong with it -- the index because that is what the editor draws against.
+
+  TWO PASSES, and `prefix` is the reason. A prefix binds a token that other
+  lines then spell names with, so it has to be known before any of them are
+  read -- otherwise `(hide ~.color)` above `(prefix ~ src.visualize)` hides a
+  node literally called `~.color`, silently, because an unbound token is a
+  name like any other. Declaring a prefix at the foot of the file is a
+  reasonable thing to do, and where it sits should not change what the file
+  means.
+
+  So: every `prefix` first, in order, then everything else, in order. Within
+  each pass the file still reads top to bottom, which is what `group` needs
+  for its colours and what makes "the first binding of a token wins" true.
+  Nothing else here is order-dependent across the two.``
   [lines]
   (def state (new-state))
   (def problems @{})
+  # Pass one: the bindings. A complaint here is the prefix line's own.
+  (eachp [i line] lines
+    (when-let [wrong (eval-line line state :prefix)]
+      (put problems i wrong)))
+  # Pass two: everything else, now that every token stands for something.
   (eachp [i line] lines
     (when-let [wrong (eval-line line state)]
-      (put problems i wrong)))
+      # A line whose prefix already failed keeps that complaint rather than
+      # collecting a second one for the same text.
+      (unless (problems i) (put problems i wrong))))
   [state problems])

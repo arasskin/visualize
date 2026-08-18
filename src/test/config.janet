@@ -246,3 +246,32 @@
   (def state (state-of "(show-lines-coloring)"))
   (t/ok (state :sized-coloring))
   (t/ok (state :sized)))
+
+(t/test "a prefix binds before any line that uses it"
+  # WHERE IT SITS DOES NOT CHANGE WHAT THE FILE MEANS. A prefix declared at
+  # the foot of the file used to bind after every line above it had already
+  # matched, so (hide ~.color) hid a node literally called `~.color` --
+  # silently, because an unbound token is a name like any other.
+  (def below (state-of "(hide ~.color)" "(prefix ~ src.visualize)"))
+  (t/is= ["src.visualize.color"] (below :hidden))
+  (def above (state-of "(prefix ~ src.visualize)" "(hide ~.color)"))
+  (t/is= (above :hidden) (below :hidden) "the same file either way round")
+  # Selected by verb, not by line: a line may hold several forms, and the
+  # binding on it has to land before the use beside it.
+  (def together (state-of "(hide ~.a)" "(prefix ~ src) (hide ~.b)"))
+  (t/is= ["src.a" "src.b"] (together :hidden)))
+
+(t/test "two passes do not double-report a line"
+  (def [_ bad] (run "(prefix ~)"))
+  (t/is= 1 (length bad) "a bad prefix line complains once")
+  # The rebinding complaint still lands on the second prefix, not the first.
+  (def [state rebound] (run "(prefix ~ src)" "(prefix ~ test)" "(hide ~.a)"))
+  (t/ok (string/find "already bound" (rebound 1)))
+  (t/is= nil (rebound 0))
+  (t/is= ["src.a"] (state :hidden)))
+
+(t/test "the file still reads top to bottom within a pass"
+  # Only `prefix` is hoisted. Everything else keeps its order, which is what
+  # group needs for its colours.
+  (def state (state-of "(group a)" "(prefix ~ src)" "(group b)"))
+  (t/is= ["a" "b"] (map |($ :prefix) (state :groups))))
