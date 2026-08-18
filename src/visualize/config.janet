@@ -112,7 +112,7 @@
 # three, and `font` outlived its removal in two of them.
 #
 # `:args` is what the verb takes, as PEG rule names, and doubles as the
-# usage line: [:name :color?] is `(group name color?)`. A trailing `?` marks
+# usage line: [:name :color?] is `(group p color?)`. A trailing `?` marks
 # the optional one. Nothing here is prose the parser reads -- `:blurb` is
 # for the reader, and the parser never sees it.
 (def verb-specs
@@ -197,15 +197,17 @@
 (defn usage
   ``One verb's call shape, from the same `:args` the parser was built from.
 
-  `(group name color?)`. The `?` marks the optional argument, and an alias
-  argument is called `token` because that is what it is -- a spelling you
-  pick, not a path.``
+  `(group p color?)`. The `?` marks the optional argument. A path argument is
+  `p` -- short, because it appears in nearly every verb and a long word
+  repeated down the list is read as noise rather than as a placeholder. An
+  alias argument is `token`, because that is what it is: a spelling you pick,
+  not a path.``
   [spec]
   (def parts
     (map (fn [arg]
            (case arg
              :alias "token"
-             :name "name"
+             :name "p"
              :color? "color?"
              (string arg)))
          (spec :args)))

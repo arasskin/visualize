@@ -382,12 +382,15 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 /* One column now. The examples are gone -- the call shape says what a verb
    takes, and a second column of sample lines was repeating it wider. */
 .help-verb {
-  max-width: 46rem;
+  /* A short measure, and shorter than prose usually wants, because the text
+     is CENTRED: a ragged-both-edges block is read by finding each line's
+     start, and the further the starts move the harder that is. */
+  max-width: 30rem;
   padding: .55rem 0;
 }
 /* The list centres as a whole rather than each row centring inside a full
    width box, which would leave the short verbs adrift from the long ones. */
-#help-verbs { max-width: 46rem; }
+#help-verbs { max-width: 30rem; }
 .help-verb p {
   margin: .15rem 0 0;
   opacity: .72;

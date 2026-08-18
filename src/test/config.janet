@@ -227,8 +227,8 @@
 
 (t/test "a usage line comes from the arguments the parser takes"
   (def by-name (tabseq [d :in (config/docs)] (d :name) d))
-  (t/is= "(prefix token name)" (get-in by-name ["prefix" :usage]))
-  (t/is= "(group name color?)" (get-in by-name ["group" :usage])
+  (t/is= "(prefix token p)" (get-in by-name ["prefix" :usage]))
+  (t/is= "(group p color?)" (get-in by-name ["group" :usage])
          "the optional colour is marked")
   (t/is= "(show-lines)" (get-in by-name ["show-lines" :usage])
          "a verb with no arguments")
