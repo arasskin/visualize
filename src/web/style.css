@@ -24,6 +24,8 @@
      so a dark canvas restates them instead. See the dark block below. */
   --canvas: #fbfbfa;
   --ink: #222;
+  /* An input's ground, a step off the canvas so a field reads as a field. */
+  --field: #ffffff;
 
   --line: #8883;
   --line-strong: #8886;
@@ -45,6 +47,7 @@
 @media (prefers-color-scheme: dark) {
   :root {
     --canvas: #171715;
+    --field: #23231f;
     --ink: #ddd;
 
     --bad: #ff8a7a;
@@ -421,8 +424,8 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   display: flex; align-items: center; gap: .35rem;
 }
 #compose .paren {
-  font: 300 3.2rem/1 ui-monospace, monospace;
-  color: var(--ink); opacity: .3;
+  font: 300 2.1rem/1 ui-monospace, monospace;
+  color: var(--ink); opacity: .35;
   user-select: none;
   /* No optical nudge. A parenthesis is symmetric about its own midline, so
      the flex centring already lands it -- both directions were tried and
@@ -434,8 +437,12 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    what is framed is what you can edit. */
 #compose-input {
   flex: 1; min-width: 0;
-  padding: .5rem .7rem;
-  background: var(--canvas);
+  padding: .8rem .75rem;
+  /* A GROUND OF ITS OWN. --canvas is the page's colour, so a field painted
+     with it is opaque and still reads as a hole -- the graph does not show
+     through, but nothing says where the field starts either. --field is a
+     step off the canvas in each theme, so the box is visibly a box. */
+  background: var(--field);
   border: 1px solid var(--line-strong);
   box-shadow: var(--shadow);
   outline: none;
@@ -458,8 +465,3 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   background: var(--bad-wash);
 }
 
-#compose-input {
-  flex: 1; min-width: 0;
-  border: 0; background: none; outline: none; padding: 0;
-  font: inherit; color: var(--ink);
-}
