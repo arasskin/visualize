@@ -333,13 +333,21 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    low-contrast until hovered: it is here for the first five minutes of using
    the config, and should not compete with the graph after that. */
 #help-open {
-  position: fixed; top: .75rem; right: .75rem; z-index: 6;
-  width: 1.9rem; height: 1.9rem; padding: 0;
-  border-radius: 50%; line-height: 1;
-  font: 14px/1 var(--font-config);
-  color: var(--ink); opacity: .45;
+  position: fixed; top: .5rem; right: .9rem; z-index: 6;
+  /* Bare glyph: the generic button rule gives every button a border and a
+     wash, and both are undone here. A chrome-less mark reads as part of the
+     page the way the HUD does, where a bordered circle reads as a control
+     placed on top of the drawing. */
+  border: 0; background: none;
+  /* Padding is the HIT TARGET, not decoration. With the circle gone the
+     glyph is eleven pixels wide, which is a hard thing to hit and was --
+     the first click after removing the border missed it. The mark stays
+     bare; the area around it is just clickable. */
+  padding: .35rem .5rem;
+  font: 700 20px/1 var(--font-config);
+  color: var(--ink); opacity: .55;
 }
-#help-open:hover { opacity: 1; }
+#help-open:hover, #help-open:focus-visible { background: none; opacity: 1; }
 
 /* The dim. Fixed and covering everything, so the graph is plainly BEHIND the
    dialog rather than beside it -- and clicking it anywhere gets you out. */
