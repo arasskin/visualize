@@ -410,13 +410,11 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 #compose {
   position: fixed; bottom: 5.5rem; left: 50%; transform: translateX(-50%);
   z-index: 15;
-  /* The parenthesis's size, and the field's height measured FROM it. The
-     field sits a little inside the glyph's reach rather than flush with it,
-     so the brackets read as holding the box; both still move together from
-     this one number. */
+  /* ONE HEIGHT, worn by both. The parenthesis is set at this size and the
+     field is given it outright, so they match by construction rather than by
+     a padding that happens to add up -- and changing the size is one edit. */
   --bracket: 1.4rem;
-  --field-h: calc(var(--bracket) - .18rem);
-  min-width: min(30rem, 80vw); max-width: min(46rem, 90vw);
+  min-width: min(24rem, 76vw); max-width: min(36rem, 86vw);
   font: 14px/1.5 ui-monospace, monospace;
 }
 #compose.shut { display: none; }
@@ -445,7 +443,7 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   flex: 1; min-width: 0;
   /* Height from the bracket, not from padding: a field sized by its text
      plus padding drifts from the glyph beside it the moment either changes. */
-  height: var(--field-h); padding: 0 .6rem;
+  height: var(--bracket); padding: 0 .6rem;
   /* A GROUND OF ITS OWN. --canvas is the page's colour, so a field painted
      with it is opaque and still reads as a hole -- the graph does not show
      through, but nothing says where the field starts either. --field is a
