@@ -716,7 +716,12 @@ document.addEventListener('keydown', (e) => {
   // text like any other character: the compose handler below runs only
   // while composing, this one only while not.
   if (composing()) return;
-  if (e.key === '?' || e.key === 'F1') { e.preventDefault(); openHelp(); }
+  if (e.key === '?' || e.key === 'F1') {
+    e.preventDefault();
+    // The same key closes it. Reading about the verbs and then pressing the
+    // key that got you there should not leave you where you already are.
+    if (help.classList.contains('shut')) openHelp(); else shutHelp();
+  }
 });
 
 renderHelp();
@@ -812,5 +817,9 @@ document.addEventListener('keydown', (e) => {
   // one list of what is a shortcut.
   if (e.defaultPrevented) return;
   e.preventDefault();
+  // TYPING LEAVES THE HELP. The panel is something you consulted, not a mode
+  // you have to dismiss: reaching for a verb you just read about should put
+  // you straight in the bar with the first letter already in it.
+  if (!help.classList.contains('shut')) shutHelp();
   openCompose(e.key);
 });
