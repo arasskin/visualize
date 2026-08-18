@@ -98,14 +98,19 @@ for (const done of ['pointerup', 'pointercancel']) {
 // Drops the cached scan, so the next draw re-reads the sources. The one action
 // that is about the SOURCE changing rather than the config.
 
+// The view keys take a modifier now that a bare keystroke is TEXT. `0` used
+// to fit the graph, and it still does with the platform's modifier held --
+// but on its own it is the first character of a line, because typing
+// anywhere is the way the config is written.
 document.addEventListener('keydown', (e) => {
   // The editor owns the keyboard while it has focus -- typing `(group ...)`
   // must not also zoom the graph.
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (!(e.metaKey || e.ctrlKey)) return;
   const c = { x: pane.clientWidth / 2, y: pane.clientHeight / 2 };
-  if (e.key === '0') fit();
-  else if (e.key === '+' || e.key === '=') zoomAt(1.2, c.x, c.y);
-  else if (e.key === '-') zoomAt(1 / 1.2, c.x, c.y);
+  if (e.key === '0') { e.preventDefault(); fit(); }
+  else if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomAt(1.2, c.x, c.y); }
+  else if (e.key === '-') { e.preventDefault(); zoomAt(1 / 1.2, c.x, c.y); }
 });
 
 // Two frames: the pane is absolutely positioned, so its height is only real
@@ -475,7 +480,10 @@ async function send(action, index, keepView) {
   status.textContent = draws ? 'drawing...' : 'saving...';
   const t0 = performance.now();
   try {
-    const r = await fetch('/config', {
+    // The token goes in the query, which is where the server looks for it
+    // (see the `k` check in core.janet). Without it every write is a 403 --
+    // which is exactly what the panel's buttons were getting.
+    const r = await fetch(`/config?k=${encodeURIComponent(window.TOKEN)}`, {
       method: 'POST',
       body: JSON.stringify({ action, index, lines }),
     });
@@ -701,8 +709,72 @@ document.addEventListener('keydown', (e) => {
     shutHelp();
     return;
   }
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-  if (e.key === '?') openHelp();
+  // F1, not `?`. A question mark is a printable character and now starts a
+  // config line like any other; the mark in the corner is the way in.
+  if (e.key === 'F1') { e.preventDefault(); openHelp(); }
 });
 
 renderHelp();
+
+// -- compose ---------------------------------------------------------------
+//
+// TYPE ANYWHERE. There is no field to click into first: a printable keystroke
+// on the page opens a bar at the bottom and goes into it, and Enter appends
+// what you wrote to the config as a new line. The parentheses around it are
+// drawn by the page, because every line of the config is a call and typing
+// them is a keystroke that could only ever be one thing.
+
+const compose = document.getElementById('compose');
+const composeInput = document.getElementById('compose-input');
+
+function composing() { return !compose.classList.contains('shut'); }
+
+function openCompose(seed) {
+  compose.classList.remove('shut');
+  composeInput.value = seed || '';
+  composeInput.focus();
+  // Caret after the seeded character rather than before it.
+  const end = composeInput.value.length;
+  composeInput.setSelectionRange(end, end);
+}
+
+function shutCompose() {
+  compose.classList.add('shut');
+  composeInput.value = '';
+  composeInput.blur();
+}
+
+async function commitCompose() {
+  const text = composeInput.value.trim();
+  if (!text) { shutCompose(); return; }
+  // What you typed goes in as a call: the parentheses you saw are the ones
+  // that get written.
+  lines = lines.concat([`(${text})`]);
+  shutCompose();
+  await send('run', -1);
+  // The new line is the last one, and a complaint about it is worth seeing.
+  if (Object.keys(faults).length && panel.classList.contains('shut')) bar.click();
+}
+
+composeInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); commitCompose(); }
+  else if (e.key === 'Escape') { e.preventDefault(); shutCompose(); }
+  // Backspacing past the start closes the bar, so an accidental keystroke is
+  // undone by the same key that would undo a character.
+  else if (e.key === 'Backspace' && composeInput.value === '') shutCompose();
+});
+
+// The page-level catch. A bare printable key with no modifier is text; keys
+// with Meta or Ctrl are shortcuts and stay the browser's.
+document.addEventListener('keydown', (e) => {
+  if (composing()) return;
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (!compose.isConnected) return;
+  // A single printable character. Everything longer is a named key -- Tab,
+  // ArrowLeft, F5 -- and none of those should start a line.
+  if (e.key.length !== 1) return;
+  if (e.key === ' ') return;
+  e.preventDefault();
+  openCompose(e.key);
+});

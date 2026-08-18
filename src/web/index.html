@@ -9,11 +9,20 @@
 <div id="graph">{{GRAPH}}<div id="edgelabel"></div></div>
 <div id="hud"><span id="zoom"></span><span id="status"></span></div>
 
+<!-- The compose bar. Hidden until you type: start typing anywhere on the
+     page and the keystroke lands here. The parentheses are PRINTED, not
+     typed -- every line of the config is a call, so they are furniture
+     rather than something to remember. -->
+<div id="compose" class="shut">
+  <span class="paren">(</span><input id="compose-input" spellcheck="false"
+    autocomplete="off" aria-label="add a config line"><span class="paren">)</span>
+</div>
+
 <!-- The help panel. Empty here: its content is the verb table from
      src/visualize/config.janet, rendered by app.js, because a list of verbs
      written out in HTML is a list that goes stale the first time one
      changes. -->
-<button id="help-open" title="what the config can say (?)" aria-label="help">?</button>
+<button id="help-open" title="what the config can say" aria-label="help">?</button>
 <!-- aria-label rather than aria-labelledby: there is no heading to point at,
      but a dialog still has to announce itself as something. -->
 <div id="help" class="shut" role="dialog" aria-modal="true" aria-label="config verbs">

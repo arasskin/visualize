@@ -399,3 +399,30 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   font: 600 13px/1.5 ui-monospace, monospace;
 }
 
+
+/* -- compose ---------------------------------------------------------------
+   Centred at the bottom, over the graph. It is not there until you type, and
+   it is the only thing on screen with a solid ground -- what you are typing
+   should be the one place the eye goes. */
+#compose {
+  position: fixed; bottom: 2.5rem; left: 50%; transform: translateX(-50%);
+  z-index: 15;
+  display: flex; align-items: baseline; gap: .1rem;
+  padding: .5rem .85rem;
+  min-width: min(30rem, 80vw);
+  background: var(--canvas);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow);
+  font: 14px/1.5 ui-monospace, monospace;
+}
+#compose.shut { display: none; }
+
+/* The parentheses are the page's, not yours. Dimmed, because they are the
+   frame around what you are writing rather than part of it. */
+#compose .paren { color: var(--ink); opacity: .4; }
+
+#compose-input {
+  flex: 1; min-width: 0;
+  border: 0; background: none; outline: none; padding: 0;
+  font: inherit; color: var(--ink);
+}
