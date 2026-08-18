@@ -853,3 +853,54 @@ document.addEventListener('keydown', (e) => {
   if (!help.classList.contains('shut')) shutHelp();
   openCompose(e.key);
 });
+
+// -- alt -------------------------------------------------------------------
+//
+// TAP OPENS, HOLD PEEKS. Press and release Alt on its own and the config
+// stays up; hold it and the config shows for as long as you hold, then goes
+// when you let go. One key, and which one you meant is decided by what you
+// did while it was down -- a tap is a hold you ended without doing anything.
+//
+// The hold is the interesting half: it is a peek that is about to become a
+// chord, since the keys pressed WHILE Alt is down are where subsequent
+// commands will attach. Nothing uses that yet; this is the shape it needs.
+
+// Whether this Alt press has been used for anything. Set by any other key
+// arriving while Alt is down, which is what makes the press a chord rather
+// than a tap.
+let altUsed = false;
+// Whether the current press opened the panel, so releasing only closes what
+// the hold itself put up -- letting go over a config you had already opened
+// should not shut it.
+let altOpened = false;
+let altDown = false;
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Alt') {
+    // Any other key during the hold makes it a chord, not a tap.
+    if (altDown) altUsed = true;
+    return;
+  }
+  // Auto-repeat while held: the press has already been handled.
+  if (altDown) return;
+  altDown = true;
+  altUsed = false;
+  altOpened = configPanel.shut;
+  if (altOpened) configPanel.open();
+});
+
+document.addEventListener('keyup', (e) => {
+  if (e.key !== 'Alt') return;
+  altDown = false;
+  // A TAP LEAVES IT OPEN. Nothing happened while the key was down, so the
+  // press meant "show me the config" rather than "show it while I work".
+  if (!altUsed) return;
+  if (altOpened) configPanel.toggle();
+});
+
+// Alt released outside the window never reaches us -- the keyup goes to
+// whatever took focus -- so a peek would stay up with no key holding it.
+window.addEventListener('blur', () => {
+  if (altDown && altUsed && altOpened) configPanel.toggle();
+  altDown = false;
+});
