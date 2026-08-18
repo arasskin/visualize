@@ -35,12 +35,12 @@
 # Comments survive a round-trip through the editor, so they are worth having.
 (def starter
   ``# (group prefix & color), (hide prefix), (show-only prefix)
-# (fill-color), (show-lines), (show-lines-coloring)
-# `~` is this project: ~.Sub is the Sub directory. Any other name is literal,
-# so (group SwiftUI) groups the framework. Comment out with '#'.
+# (fill-color), (show-lines), (show-lines-coloring), (font name)
+# A prefix is the dotted path a node shows: (group src.parsers) boxes that
+# directory, (hide src.test) drops it. Any other name is literal, so
+# (group SwiftUI) groups the framework. Comment out with '#'.
 # colors: red green orange purple blue yellow orange-red teal magenta
 #         yellow-green pink dark-blue grey
-(show-only ~)
 (show-lines)
 ``)
 
