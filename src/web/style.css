@@ -411,7 +411,7 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   position: fixed; bottom: 5.5rem; left: 50%; transform: translateX(-50%);
   z-index: 15;
   /* The field's height. One number, so the bar is resized in one place. */
-  --field-h: 2.2rem;
+  --field-h: 2.6rem;
   min-width: min(22rem, 74vw); max-width: min(32rem, 84vw);
   /* Set on the bar, so the field and the brackets letter alike -- and the
      `ch` width the field is measured in follows from it. */
