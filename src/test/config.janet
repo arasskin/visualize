@@ -232,11 +232,11 @@
          "the optional colour is marked")
   (t/is= "(show-lines)" (get-in by-name ["show-lines" :usage])
          "a verb with no arguments")
-  # Every example must be a line the parser actually accepts. A help panel
-  # offering a line that does not parse is worse than no help.
+  # Every verb documented must carry a blurb -- a usage line alone says the
+  # shape and not the meaning.
   (each d (config/docs)
-    (def [_ problems] (run (d :example)))
-    (t/is= @{} problems (string (d :example) " must parse"))))
+    (t/ok (and (d :blurb) (not (empty? (d :blurb))))
+          (string (d :name) " must say what it does"))))
 
 (t/test "the longer of two verbs sharing a head still parses"
   # `show-lines` is a prefix of `show-lines-coloring`, and a PEG takes the

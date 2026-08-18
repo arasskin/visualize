@@ -117,26 +117,19 @@
 # for the reader, and the parser never sees it.
 (def verb-specs
   [{:name "prefix" :args [:alias :name]
-    :blurb "Give a path a short name. The nodes under it are labelled with the token, and any later name starting with it is expanded -- so with (prefix ~ src.visualize), (hide ~.color) hides src.visualize.color. A token stands for one path; binding it twice is an error."
-    :example "(prefix ~ src.visualize)"}
+    :blurb "Give a path a short name. The nodes under it are labelled with the token, and any later name starting with it is expanded -- so with (prefix ~ src.visualize), (hide ~.color) hides src.visualize.color. A token stands for one path; binding it twice is an error."}
    {:name "group" :args [:name :color?]
-    :blurb "Draw a box around everything under a path, and colour it. Without a colour one is chosen from the palette and the others shuffle to stay distinct."
-    :example "(group src.parsers blue)"}
+    :blurb "Draw a box around everything under a path, and colour it. Without a colour one is chosen from the palette and the others shuffle to stay distinct."}
    {:name "hide" :args [:name]
-    :blurb "Drop everything under a path from the drawing. Its edges go with it."
-    :example "(hide src.test)"}
+    :blurb "Drop everything under a path from the drawing. Its edges go with it."}
    {:name "show-only" :args [:name]
-    :blurb "Narrow to everything under a path. Several narrow to the union. Applied before hide, so (show-only src) then (hide src.test) reads the way it is written."
-    :example "(show-only src)"}
+    :blurb "Narrow to everything under a path. Several narrow to the union. Applied before hide, so (show-only src) then (hide src.test) reads the way it is written."}
    {:name "show-lines-coloring" :args []
-    :blurb "Shade nodes by line count instead of by how many edges they have."
-    :example "(show-lines-coloring)"}
+    :blurb "Shade nodes by line count instead of by how many edges they have."}
    {:name "show-lines" :args []
-    :blurb "Write each file's line count under its name."
-    :example "(show-lines)"}
+    :blurb "Write each file's line count under its name."}
    {:name "fill-color" :args []
-    :blurb "Fill the nodes with their colour instead of just outlining them."
-    :example "(fill-color)"}])
+    :blurb "Fill the nodes with their colour instead of just outlining them."}])
 
 # LONGEST NAME FIRST is not cosmetic: a PEG alternation takes the first
 # branch that matches, so with "show-lines" ahead of "show-lines-coloring"
@@ -219,8 +212,7 @@
   (string "(" (string/join (array (spec :name) ;parts) " ") ")"))
 
 (defn docs
-  ``Every verb as {:name :usage :blurb :example}, in the order they are
-  written above.
+  ``Every verb as {:name :usage :blurb}, in the order they are written above.
 
   FROM THE GRAMMAR'S OWN TABLE, so the help the page shows cannot describe a
   verb the parser does not have, or miss one it does. That is the whole
@@ -230,8 +222,7 @@
   (map (fn [spec]
          {:name (spec :name)
           :usage (usage spec)
-          :blurb (spec :blurb)
-          :example (spec :example)})
+          :blurb (spec :blurb)})
        verb-specs))
 
 (defn- normalise

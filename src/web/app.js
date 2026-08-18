@@ -673,15 +673,6 @@ function renderHelp() {
     blurb.textContent = verb.blurb;
     row.appendChild(blurb);
 
-    // The example is TEXT. It was a button that appended the line to the
-    // config -- which made a reference panel something that edits your file,
-    // so glancing at what a verb takes was one stray click from changing the
-    // drawing. Read it, then type it.
-    const example = document.createElement('code');
-    example.className = 'help-example';
-    example.textContent = verb.example;
-    row.appendChild(example);
-
     into.appendChild(row);
   }
 }

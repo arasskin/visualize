@@ -349,54 +349,54 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 }
 #help-open:hover, #help-open:focus-visible { background: none; opacity: 1; }
 
-/* The dim. Fixed and covering everything, so the graph is plainly BEHIND the
-   dialog rather than beside it -- and clicking it anywhere gets you out. */
+/* The dim, and the page itself. There is no card: the verbs sit directly on
+   the darkened graph, so opening the help does not put a document on top of
+   your work -- it just turns the screen down and writes on it.
+   
+   That means the text is on a DARK GROUND IN BOTH THEMES, so it cannot use
+   --ink, which is near-black in light mode. The colours here are fixed to
+   the dim rather than to the theme, because what is behind them is the dim. */
 #help {
   position: fixed; inset: 0; z-index: 20;
-  display: flex; align-items: center; justify-content: center;
-  padding: 2rem;
-  background: #0007;
+  padding: 3rem clamp(1.5rem, 8vw, 7rem);
+  /* Deep, because the graph is directly behind the WORDS now -- with no card
+     to sit on, node labels and edges cross the lines of text and a lighter
+     dim leaves them legible enough to compete. The drawing stays visible as
+     shape, not as detail. */
+  background: #000000ed;
   overflow-y: auto;
+  color: #f2f2f0;
+  font-size: 13px;
 }
 #help.shut { display: none; }
 
-#help-card {
-  background: var(--canvas); color: var(--ink);
-  border: 1px solid var(--line-strong); box-shadow: var(--shadow);
-  padding: 1.25rem 1.5rem; max-width: 40rem; width: 100%;
-  max-height: 100%; overflow-y: auto;
-}
-#help-card h2 {
-  margin: 0 0 .25rem; font: 15px/1.4 var(--font-config); font-weight: 600;
+#help-title {
+  margin: 0 0 1.4rem;
+  font: 600 15px/1.4 var(--font-config);
+  opacity: .55;
 }
 
+/* One column now. The examples are gone -- the call shape says what a verb
+   takes, and a second column of sample lines was repeating it wider. */
 .help-verb {
-  padding: .7rem 0;
-  border-top: 1px solid var(--line);
-  display: grid; grid-template-columns: 1fr auto; gap: .15rem .75rem;
+  max-width: 46rem;
+  padding: .55rem 0;
 }
 .help-verb p {
-  grid-column: 1; margin: 0; font-size: 13px; opacity: .8;
+  margin: .15rem 0 0;
+  opacity: .72;
 }
 .help-usage {
-  grid-column: 1; font: 13px/1.4 ui-monospace, monospace; font-weight: 600;
-}
-/* An example of the verb in use, sitting in the second column so the shapes
-   line up down the panel and you can scan them without reading. Inert -- see
-   the note in app.js. */
-.help-example {
-  grid-column: 2; grid-row: 1 / span 2; align-self: center;
-  font: 12px/1.4 ui-monospace, monospace;
-  padding: .3rem .55rem; background: var(--wash);
-  opacity: .7; white-space: nowrap;
+  font: 600 13px/1.5 ui-monospace, monospace;
 }
 
 #help-foot {
-  margin: .9rem 0 0; padding-top: .8rem;
-  border-top: 1px solid var(--line);
-  font-size: 12px; opacity: .7;
+  max-width: 46rem;
+  margin: 1.6rem 0 0; padding-top: .9rem;
+  border-top: 1px solid #ffffff26;
+  opacity: .55;
 }
 #help-foot code {
   font: 12px/1.4 ui-monospace, monospace;
-  background: var(--wash); padding: .05rem .3rem;
+  background: #ffffff1a; padding: .05rem .3rem;
 }
