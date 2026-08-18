@@ -405,37 +405,58 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    it is the only thing on screen with a solid ground -- what you are typing
    should be the one place the eye goes. */
 #compose {
-  position: fixed; bottom: 2.5rem; left: 50%; transform: translateX(-50%);
+  position: fixed; bottom: 5.5rem; left: 50%; transform: translateX(-50%);
   z-index: 15;
   min-width: min(30rem, 80vw); max-width: min(46rem, 90vw);
-  background: var(--canvas);
-  border: 1px solid var(--line-strong);
-  box-shadow: var(--shadow);
   font: 14px/1.5 ui-monospace, monospace;
-}
-#compose-line {
-  display: flex; align-items: baseline; gap: .1rem;
-  padding: .5rem .85rem;
-}
-
-/* The complaint, under the line it is about. The bar turns red rather than
-   growing an icon: there is one thing here to be wrong, so saying WHICH
-   thing would be saying nothing. */
-#compose-fault {
-  margin: 0; padding: 0 .85rem .5rem;
-  font: 12px/1.45 var(--font-ui);
-  color: var(--bad);
-}
-#compose-fault:empty { display: none; }
-#compose:has(#compose-fault:not(:empty)) {
-  border-color: var(--bad);
-  background: var(--bad-wash);
 }
 #compose.shut { display: none; }
 
-/* The parentheses are the page's, not yours. Dimmed, because they are the
-   frame around what you are writing rather than part of it. */
-#compose .paren { color: var(--ink); opacity: .4; }
+/* THE PARENTHESES ARE OUTSIDE THE BOX, one at each end, big enough that the
+   field sits between their arms. They are the page's, not yours -- every
+   line of the config is a call, so they are the shape of the thing you are
+   writing rather than characters to type. Dimmed and unselectable, because
+   nothing about them is editable. */
+#compose-line {
+  display: flex; align-items: center; gap: .35rem;
+}
+#compose .paren {
+  font: 300 3.2rem/1 ui-monospace, monospace;
+  color: var(--ink); opacity: .3;
+  user-select: none;
+  /* No optical nudge. A parenthesis is symmetric about its own midline, so
+     the flex centring already lands it -- both directions were tried and
+     each was off by the same 3px, which is what a correction to something
+     already centred looks like. */
+}
+
+/* The border belongs to the FIELD now that the parens are outside it, so
+   what is framed is what you can edit. */
+#compose-input {
+  flex: 1; min-width: 0;
+  padding: .5rem .7rem;
+  background: var(--canvas);
+  border: 1px solid var(--line-strong);
+  box-shadow: var(--shadow);
+  outline: none;
+  font: inherit; color: var(--ink);
+}
+
+/* The complaint, under the line it is about. The FIELD turns red rather than
+   growing an icon: there is one thing here to be wrong, so saying WHICH
+   thing would be saying nothing. Indented past the paren so it lines up with
+   the text it is about. */
+#compose-fault {
+  margin: .4rem 0 0; padding: 0 2rem;
+  font: 12px/1.45 var(--font-ui);
+  color: var(--bad);
+  text-align: center;
+}
+#compose-fault:empty { display: none; }
+#compose:has(#compose-fault:not(:empty)) #compose-input {
+  border-color: var(--bad);
+  background: var(--bad-wash);
+}
 
 #compose-input {
   flex: 1; min-width: 0;
