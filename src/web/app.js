@@ -309,13 +309,6 @@ function draw() {
     const commented = text.trim().startsWith('#');
     row.className = 'row' + (commented ? ' comment' : '');
 
-    // The line number, 1-based, because that is how a file is counted
-    // everywhere else. It is a label, not a control: no pointer events, so
-    // dragging across it selects nothing and clicking it does nothing.
-    const num = document.createElement('span');
-    num.className = 'num';
-    num.textContent = i + 1;
-
     // Only the handle starts a drag, not the whole row -- otherwise text
     // selection inside the input would be impossible. Pointer events rather
     // than HTML5 drag-and-drop: native DnD gives a ghost image you cannot
@@ -346,7 +339,7 @@ function draw() {
     const del = icon('✕', 'delete this line', 'del');
     del.onclick = () => send('delete', i);
 
-    row.append(num, box, del, hold);
+    row.append(box, del, hold);
 
     // The line and anything wrong with it travel together, so the message sits
     // directly beneath the input that caused it.
@@ -868,20 +861,18 @@ document.addEventListener('keydown', (e) => {
 // Whether this Alt press has been used for anything -- another key arriving
 // while Alt is down, which is what a chord is.
 let altUsed = false;
-// Whether the current press opened the panel, so releasing only closes what
-// the hold itself put up -- letting go over a config you had already opened
-// should not shut it.
+// Whether the current press opened the panel, so a hold only puts away what
+// it itself put up -- letting go over a config you had already opened should
+// leave it alone.
 let altOpened = false;
 let altDown = false;
 // When the press started. A HOLD IS A PRESS THAT LASTED, which is the only
-// thing separating it from a tap when no chord was struck: without this, a
-// long press with nothing pressed during it is indistinguishable from a tap
-// and stays open. A chord still counts as a hold however brief it was.
+// thing separating it from a tap when no chord was struck. A chord counts as
+// a hold however brief it was.
 let altAt = 0;
 // Generous, because the cost is asymmetric: a slow tap misread as a hold
-// closes a panel you asked to keep, while a quick hold misread as a tap just
-// leaves it up for one more keystroke. Struck a chord and it is a hold at
-// any speed, so this only decides the no-chord case.
+// puts away a panel you asked to keep, while a quick hold misread as a tap
+// just leaves it up. Only the no-chord case depends on this at all.
 const ALT_HOLD_MS = 400;
 
 document.addEventListener('keydown', (e) => {
@@ -896,17 +887,25 @@ document.addEventListener('keydown', (e) => {
   altUsed = false;
   altAt = performance.now();
   altOpened = configPanel.shut;
+  // Opening on the way DOWN, so a hold shows the config for as long as it is
+  // held. A tap over an open panel closes it instead -- see the keyup, which
+  // is where a tap is finally told from a hold.
   if (altOpened) configPanel.open();
 });
 
 document.addEventListener('keyup', (e) => {
   if (e.key !== 'Alt') return;
   altDown = false;
-  const held = performance.now() - altAt >= ALT_HOLD_MS;
-  // A TAP LEAVES IT OPEN: over in an instant with nothing struck, so the
-  // press meant "show me the config" rather than "show it while I work".
-  if (!altUsed && !held) return;
-  if (altOpened) configPanel.toggle();
+  const held = altUsed || performance.now() - altAt >= ALT_HOLD_MS;
+  if (held) {
+    // A HOLD IS A PEEK: it puts away what it put up, and leaves alone what
+    // was already there.
+    if (altOpened) configPanel.toggle();
+    return;
+  }
+  // A TAP IS A TOGGLE. Pressing down already opened a shut panel, so that
+  // half is done; tapping over one that was open is what closes it.
+  if (!altOpened) configPanel.toggle();
 });
 
 window.addEventListener('blur', () => {
