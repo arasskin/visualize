@@ -415,7 +415,7 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   min-width: min(22rem, 74vw); max-width: min(32rem, 84vw);
   /* Set on the bar, so the field and the brackets letter alike -- and the
      `ch` width the field is measured in follows from it. */
-  font: 16px/1.5 ui-monospace, monospace;
+  font: 18px/1.5 ui-monospace, monospace;
 }
 #compose.shut { display: none; }
 
