@@ -170,25 +170,39 @@
     joined))
 
 (defn safe-name
-  ``A path or module specifier as a flat node name.
+  ``A path or module specifier as a node name: separators become dots.
 
-  Everything that is not a letter, digit or underscore becomes an underscore,
-  so `github.com/lib/pq`, `./store` and `@scope/pkg` all become names with no
-  separator in them.
+  `src/visualize/color.janet` -> `src.visualize.color`, `github.com/lib/pq`
+  -> `github.com.lib.pq`, `./store` -> `store`.
 
-  THIS OUTLIVED ITS ORIGINAL REASON and is kept for a better one. It existed
-  because a bare DOT identifier admits only those characters -- a directory
-  called `demo-api` produced `demo-api_worker`, which graphviz rejected with a
-  syntax error pointing at the hyphen. v has no such restriction: a bare word
-  there is anything that is not a delimiter, so `demo-api_worker` would parse
-  fine. What keeps the flattening is the CONFIG language: every prefix test
-  downstream (see src/select.janet) compares against these strings, and `~.a.b`
-  expands to `a_b` because that is the shape a node name has. Changing it now
-  would be changing the config language, not the output format.``
+  ONE SPELLING EVERYWHERE, which is the point. This used to flatten to
+  UNDERSCORES -- `src_visualize_color` -- while the label showed
+  `src/visualize/color` and the config was written `src.visualize.color`, so
+  a path had three forms and only one of them was ever visible. The dot is
+  the one the config already used, it survives a DOT identifier as long as
+  the name is quoted (which `layout/to-dot` does), and it is what a reader
+  types after seeing the picture.
+
+  Leading and trailing dots are trimmed and runs collapsed, so `./store` and
+  `@scope/pkg` do not come back wearing punctuation they never had.
+
+  HYPHENS SURVIVE. A directory called `demo-api` is one name, not two: with
+  the hyphen swept into a dot it became `demo.api.worker`, which reads as a
+  directory `demo` that does not exist and breaks the prefix a config would
+  write. The old underscore flattening had the same bug in reverse (it made
+  `demo-api_worker`, which graphviz then rejected) -- quoting the name is
+  what lets the hyphen simply stay.``
   [text]
-  (string
-    (peg/replace-all ~(if-not (+ (range "AZ") (range "az") (range "09") "_") 1)
-                     "_" text)))
+  (def dotted
+    (string
+      (peg/replace-all ~(if-not (+ (range "AZ") (range "az") (range "09") "_" "-" ".") 1)
+                       "." text)))
+  # `./store` becomes `..store` on the way through; collapse and trim so the
+  # name is the shape the config language expects.
+  (var out dotted)
+  (while (string/find ".." out)
+    (set out (string/replace-all ".." "." out)))
+  (string/trim out "."))
 
 (defn node-name
   ``A file's path as its DOT node name.
@@ -218,7 +232,9 @@
   graphviz's own line break inside a quoted label. v strings decode their
   escapes when they parse, so a label arrives at the renderer carrying actual
   newlines and the renderer splits on them (see layout/svg.janet). The
-  separator stays on the line above so a wrapped path still reads as a path.``
+  DOTS, MATCHING THE NODE NAME. The label used to show the path with its
+  slashes while the node answered to something else entirely; now both are
+  the dotted form, so what you read is what you type into the config.``
   [rel]
   (def without-ext
     (if-let [dot (last (string/find-all "." rel))]
@@ -226,7 +242,7 @@
         (string/slice rel 0 dot)
         rel)
       rel))
-  (string/join (string/split "/" without-ext) "/\n"))
+  (string/join (string/split "/" without-ext) ".\n"))
 
 (defn build
   ``Turn parsed files into a graph: nodes, edges, and each file's size.

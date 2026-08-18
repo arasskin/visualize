@@ -113,25 +113,35 @@ const fs = require('fs')
   (t/ok (not (index-of "nope" (got :imports))))
   (t/ok (not (index-of "T" (got :imports))) "the binding is not the module"))
 
-(t/test "node names are flat, with no separator left in them"
-  # This began as a DOT constraint -- a real directory called `demo-api`
-  # produced `demo-api_worker`, and graphviz rejected the whole graph with a
-  # syntax error at the hyphen. v would take that name unquoted, so the
-  # syntax reason is gone; what keeps the flattening is the CONFIG language,
-  # where `~.a.b` expands to the prefix `a_b` and every (hide)/(group) test
-  # compares against these strings. Import specifiers are the hard cases:
-  # `github.com/lib/pq`, `./store`, `@scope/pkg`.
-  (t/is= "demo_api_worker" (scan/node-name "demo-api/worker.js"))
-  (t/is= "OttoClip_CartWebView" (scan/node-name "OttoClip/CartWebView.swift"))
-  (t/is= "github_com_lib_pq" (scan/safe-name "github.com/lib/pq"))
-  (t/is= "__store" (scan/safe-name "./store") "both the dot and the slash go")
-  (t/is= "_scope_pkg" (scan/safe-name "@scope/pkg"))
+(t/test "a node name is the path, dotted"
+  # ONE SPELLING. The name, the label and the config prefix are all the
+  # dotted path now: a node reads `src.visualize.color`, answers to
+  # `src.visualize.color`, and is grouped by typing what is on it. Names used
+  # to flatten to underscores while labels showed slashes, so a path had
+  # three forms and only one was ever visible.
+  #
+  # Import specifiers are the hard cases: `github.com/lib/pq`, `./store`,
+  # `@scope/pkg` -- and a directory called `demo-api`, whose hyphen is part
+  # of one name rather than a separator between two.
+  (t/is= "demo-api.worker" (scan/node-name "demo-api/worker.js")
+         "a hyphen is part of the name, not a separator")
+  (t/is= "OttoClip.CartWebView" (scan/node-name "OttoClip/CartWebView.swift"))
+  (t/is= "github.com.lib.pq" (scan/safe-name "github.com/lib/pq"))
+  (t/is= "store" (scan/safe-name "./store")
+         "a leading ./ leaves no punctuation behind")
+  (t/is= "scope.pkg" (scan/safe-name "@scope/pkg"))
   (each name [(scan/node-name "demo-api/worker.js")
               (scan/safe-name "github.com/lib/pq")
               (scan/safe-name "@scope/pkg")]
-    (t/ok (peg/match ~(* (some (+ (range "AZ") (range "az") (range "09") "_")) -1)
+    (t/ok (peg/match ~(* (some (+ (range "AZ") (range "az") (range "09")
+                                  "_" "-" "."))
+                         -1)
                      name)
-          (string name " must be a flat name the config can prefix-match"))))
+          (string name " must be a name the config can prefix-match"))
+    (t/ok (not (string/find ".." name))
+          (string name " must not carry a run of dots"))
+    (t/ok (not (string/has-prefix? "." name))
+          (string name " must not start with a dot"))))
 
 (t/test "a relative import resolves to the file it names"
   # Flattened as written, `../visualize/color` becomes the node `___visualize_color`

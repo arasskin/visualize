@@ -18,12 +18,14 @@
 (import ./color)
 
 (defn- flatten-separators
-  ``A config name with every path separator turned into the underscore that
-  node names use. `src/test`, `src.test` and `src_test` all arrive as
-  `src_test`, so a config can be written the way the label reads.``
+  ``A config name as the node-name prefix it selects.
+
+  Node names are dotted -- `src.visualize.color` -- and so are labels, so a
+  config name is usually already in the right shape and this only trims the
+  edges. A slash is accepted and converted because a path is a natural thing
+  to type and there is no reason to refuse it.``
   [text]
-  (string/replace-all "/" "_"
-                      (string/replace-all "." "_" (string/trim text "./"))))
+  (string/replace-all "/" "." (string/trim text "./")))
 
 (defn expand
   ``A config name as the node-name prefix it selects.

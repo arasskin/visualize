@@ -24,19 +24,19 @@
 (t/test "~ expands to the project, other names are literal"
   (t/is= "" (select/expand "~") "~ alone is the empty prefix -- everything of ours")
   (t/is= "Otto" (select/expand "~.Otto"))
-  (t/is= "Otto_Shared" (select/expand "~.Otto.Shared"))
+  (t/is= "Otto.Shared" (select/expand "~.Otto.Shared"))
   (t/is= "SwiftUI" (select/expand "SwiftUI") "a plain name means the external"))
 
-(t/test "a config name may be written the way the label reads"
-  # A node LABELS itself with the path -- `src/test` -- while its identity is
-  # the flattened `src_test`, and the config used to accept only the dotted
-  # `src.test`, which came from pydeps where a module path really is dotted.
-  # Someone typing what the picture shows deserves a match rather than
-  # silence, so both separators arrive at the same prefix.
-  (t/is= "src_test" (select/expand "src/test") "slashes, as the label shows them")
-  (t/is= "src_test" (select/expand "src.test") "dots, as pydeps wrote them")
-  (t/is= "src_test" (select/expand "src_test") "or the flat name itself")
-  (t/is= "src_test" (select/expand "~.src/test") "and the same under ~.")
+(t/test "a config name is the dotted path, which is what the node shows"
+  # ONE SPELLING. The node reads `src.test`, answers to `src.test`, and is
+  # selected by typing `src.test` -- there is no translation step left to get
+  # wrong. A slash is still accepted, because a path is a natural thing to
+  # type and refusing it would buy nothing.
+  (t/is= "src.test" (select/expand "src.test") "as the label shows it")
+  (t/is= "src.test" (select/expand "src/test") "a slash is taken too")
+  (t/is= "src.test" (select/expand "~.src.test") "and the same under ~.")
+  (t/is= "demo-api.worker" (select/expand "demo-api.worker")
+         "a hyphen inside a name survives")
   (t/is= "" (select/expand "~") "~ alone is still everything of ours"))
 
 (t/test "the empty prefix means OURS, not everything"
