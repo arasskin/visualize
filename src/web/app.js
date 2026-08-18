@@ -709,9 +709,14 @@ document.addEventListener('keydown', (e) => {
     shutHelp();
     return;
   }
-  // F1, not `?`. A question mark is a printable character and now starts a
-  // config line like any other; the mark in the corner is the way in.
-  if (e.key === 'F1') { e.preventDefault(); openHelp(); }
+  // `?` OPENS THE HELP, and F1 with it. A question mark is a printable
+  // character, so it is also a keystroke that could start a config line --
+  // but no verb begins with one, and the mark in the corner is a `?`, so
+  // pressing it is the obvious thing to try. Once the bar IS open it is
+  // text like any other character: the compose handler below runs only
+  // while composing, this one only while not.
+  if (composing()) return;
+  if (e.key === '?' || e.key === 'F1') { e.preventDefault(); openHelp(); }
 });
 
 renderHelp();
@@ -801,6 +806,11 @@ document.addEventListener('keydown', (e) => {
   // ArrowLeft, F5 -- and none of those should start a line.
   if (e.key.length !== 1) return;
   if (e.key === ' ') return;
+  // Already claimed. The help handler runs FIRST and calls preventDefault on
+  // `?`, so without this the mark would open the help and then start a line
+  // behind it. Checking the flag rather than repeating the key here keeps
+  // one list of what is a shortcut.
+  if (e.defaultPrevented) return;
   e.preventDefault();
   openCompose(e.key);
 });
