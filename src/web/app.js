@@ -673,18 +673,13 @@ function renderHelp() {
     blurb.textContent = verb.blurb;
     row.appendChild(blurb);
 
-    // Clicking an example writes it into the config, which is the shortest
-    // path from reading about a verb to having used it.
-    const example = document.createElement('button');
+    // The example is TEXT. It was a button that appended the line to the
+    // config -- which made a reference panel something that edits your file,
+    // so glancing at what a verb takes was one stray click from changing the
+    // drawing. Read it, then type it.
+    const example = document.createElement('code');
     example.className = 'help-example';
     example.textContent = verb.example;
-    example.title = 'add this line to the config';
-    example.addEventListener('click', () => {
-      lines = lines.concat([verb.example]);
-      send('run', -1);
-      shutHelp();
-      if (panel.classList.contains('shut')) bar.click();
-    });
     row.appendChild(example);
 
     into.appendChild(row);
