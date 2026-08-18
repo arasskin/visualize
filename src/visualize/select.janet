@@ -17,6 +17,14 @@
 
 (import ./color)
 
+(defn- flatten-separators
+  ``A config name with every path separator turned into the underscore that
+  node names use. `src/test`, `src.test` and `src_test` all arrive as
+  `src_test`, so a config can be written the way the label reads.``
+  [text]
+  (string/replace-all "/" "_"
+                      (string/replace-all "." "_" (string/trim text "./"))))
+
 (defn expand
   ``A config name as the node-name prefix it selects.
 
@@ -35,9 +43,15 @@
   (cond
     (empty? text) ""
     (= text "~") ""
-    (string/has-prefix? "~." text) (string/replace-all "." "_"
-                                                       (string/trim (string/slice text 2) "."))
-    (string/replace-all "." "_" (string/trim text "."))))
+    # SLASHES AND DOTS BOTH, because a node shows one and this used to
+    # accept only the other. A label reads `src/test` -- that is the path,
+    # wrapped a segment per line -- while the node's IDENTITY is the
+    # flattened `src_test`, and a config could only say `src.test`. The dots
+    # came from pydeps, where a module path really is dotted; for a file tree
+    # they are a translation nobody asked for, and a reader who types what
+    # the picture shows deserves a match rather than silence.
+    (string/has-prefix? "~." text) (flatten-separators (string/slice text 2))
+    (flatten-separators text)))
 
 (defn matches?
   ``Does this node match this prefix?

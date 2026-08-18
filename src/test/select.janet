@@ -27,6 +27,18 @@
   (t/is= "Otto_Shared" (select/expand "~.Otto.Shared"))
   (t/is= "SwiftUI" (select/expand "SwiftUI") "a plain name means the external"))
 
+(t/test "a config name may be written the way the label reads"
+  # A node LABELS itself with the path -- `src/test` -- while its identity is
+  # the flattened `src_test`, and the config used to accept only the dotted
+  # `src.test`, which came from pydeps where a module path really is dotted.
+  # Someone typing what the picture shows deserves a match rather than
+  # silence, so both separators arrive at the same prefix.
+  (t/is= "src_test" (select/expand "src/test") "slashes, as the label shows them")
+  (t/is= "src_test" (select/expand "src.test") "dots, as pydeps wrote them")
+  (t/is= "src_test" (select/expand "src_test") "or the flat name itself")
+  (t/is= "src_test" (select/expand "~.src/test") "and the same under ~.")
+  (t/is= "" (select/expand "~") "~ alone is still everything of ours"))
+
 (t/test "the empty prefix means OURS, not everything"
   # Without this, (show-only ~) would keep the externals too and mean nothing.
   (def ours {"Otto_App" true})
