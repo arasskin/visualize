@@ -669,7 +669,14 @@ function raise(root) { root.style.zIndex = ++topmost; }
 
 const configPanel = makePanel(panel, {
   minWidth: 240, minHeight: 120,
-  onOpen: () => body.querySelector('input')?.focus(),
+  // FOCUS THE SELECTED LINE, not the first one. Focusing an input selects
+  // it, so opening on the first row was overwriting the selection every
+  // time the panel came back -- the thing that was meant to persist was
+  // being destroyed by the act of looking at it.
+  onOpen: () => {
+    const boxes = body.querySelectorAll('input');
+    (boxes[picked >= 0 ? picked : 0])?.focus();
+  },
 });
 
 // Start under the header, top-left. After a frame, so the collapsed bar has a
@@ -942,8 +949,12 @@ function pick(at, focus = true) {
 // j/k and the arrows, while alt is held. Alt is what makes them movement
 // rather than text: without it, `j` is the first character of a config line.
 function altChord(e) {
-  const down = e.key === 'j' || e.key === 'ArrowDown';
-  const up = e.key === 'k' || e.key === 'ArrowUp';
+  // BY PHYSICAL KEY, not by `e.key`. macOS composes alt with a letter into a
+  // character -- alt+j is `∆`, alt+k is `˚` -- so matching on `e.key` never
+  // saw the letter at all and the chord silently did nothing. `e.code` is
+  // the key that was pressed, whatever the OS decided it should type.
+  const down = e.code === 'KeyJ' || e.code === 'ArrowDown';
+  const up = e.code === 'KeyK' || e.code === 'ArrowUp';
   if (!down && !up) return false;
   e.preventDefault();
   // The panel has to be up to be moving around in it -- holding alt already
