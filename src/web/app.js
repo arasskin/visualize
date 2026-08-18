@@ -329,17 +329,18 @@ function draw() {
       if (e.key === 'Enter') { e.preventDefault(); send('run', i); }
     };
 
+    // NO `insert below`. The file always ends in a blank line, so the place
+    // to add one at the bottom is already there -- and everywhere else,
+    // `insert above` on the row beneath is the same edit. One arrow.
     const up = icon('↑', 'insert a line above', 'up');
     up.onclick = () => send('insert-above', i);
-    const down = icon('↓', 'insert a line below', 'down');
-    down.onclick = () => send('insert-below', i);
     const del = icon('✕', 'delete this line', 'del');
     del.onclick = () => send('delete', i);
 
     // No run button: every action re-runs the whole file anyway, so a per-line
     // one promised a granularity that never existed. Enter in the field is
     // what commits a typed edit.
-    row.append(box, up, down, del, hold);
+    row.append(box, up, del, hold);
 
     // The line and anything wrong with it travel together, so the message sits
     // directly beneath the input that caused it.
@@ -348,6 +349,14 @@ function draw() {
     slot.appendChild(row);
     slot.dataset.at = i;
     if (!busy) hold.onpointerdown = (e) => lift(e, i, slot);
+
+    // The trailing blank is where you type, not a line in its own right:
+    // deleting it or dragging it would leave the list with nowhere to add.
+    if (i === lines.length - 1 && text.trim() === '') {
+      row.classList.add('tail');
+      del.remove();
+      hold.remove();
+    }
 
     if (faults[i]) {
       row.classList.add('bad');
@@ -359,14 +368,6 @@ function draw() {
     rows.appendChild(slot);
   });
 
-  if (!lines.length) {
-    const row = document.createElement('div');
-    row.className = 'row';
-    const add = icon('+', 'add the first line', 'up');
-    add.onclick = () => send('insert-below', -1);
-    row.append(add);
-    rows.appendChild(row);
-  }
 }
 
 // Pick a row up and carry it. A clone follows the pointer while the real row
@@ -476,7 +477,7 @@ async function send(action, index, keepView) {
   draw();
   // Inserting only saves; saying 'drawing' would be a lie, and the request
   // comes back too fast for the message to be read anyway.
-  const draws = action !== 'insert-above' && action !== 'insert-below';
+  const draws = action !== 'insert-above';
   status.textContent = draws ? 'drawing...' : 'saving...';
   const t0 = performance.now();
   try {
@@ -781,11 +782,17 @@ async function commitCompose() {
   const text = composeInput.value.trim();
   if (!text) { shutCompose(); return; }
   // What you typed goes in as a call.
+  // BEFORE THE TRAILING BLANK, not after it: the file ends in an empty line
+  // and a composed line belongs above it, the way it would if you had typed
+  // into that row.
+  //
   // RETRYING REPLACES, rather than appending a second copy: while the bar is
   // showing a complaint, the line it is complaining about is already in the
   // config, and fixing a typo should mend that line, not leave the broken
   // one behind with a corrected twin under it.
-  const at = composeAt === null ? lines.length : composeAt;
+  const end = (lines.length && lines[lines.length - 1].trim() === '')
+    ? lines.length - 1 : lines.length;
+  const at = composeAt === null ? end : composeAt;
   composeAt = at;
   lines = lines.slice(0, at).concat([`(${text})`], lines.slice(at + 1));
   composeFault.textContent = '';

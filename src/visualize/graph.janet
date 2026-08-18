@@ -50,23 +50,40 @@
 # next edit through the page appends to it -- so the file is normalised on the
 # way to disk exactly as `write-config` does it.
 
+(defn- with-blank-end
+  ``The lines, ending in exactly one empty one.
+
+  THE LAST LINE IS ALWAYS BLANK, and it is a real line in the real file --
+  the editor shows the file, so a row you can type into has to be a row that
+  exists. It is where a new line gets written, which is why `insert below`
+  is gone: the place to add one is always already there.
+
+  Exactly one, so repeated reads and writes do not grow a tail of them, and
+  a file that ends in several blanks is tidied to a single one.``
+  [lines]
+  (var out (array ;lines))
+  (while (and (> (length out) 0) (= "" (string/trim (last out))))
+    (array/pop out))
+  (array/push out "")
+  out)
+
 (defn read-config
   "The config file as a list of lines, creating it if it is not there."
   [path]
   (unless (os/stat path :mode)
     (spit path (string (string/trimr starter "\n") "\n")))
   (def text (try (slurp path) ([_] "")))
-  # A trailing newline is one empty string on the end, which would show as a
-  # phantom blank row in the editor.
-  (def lines (string/split "\n" text))
-  (if (and (> (length lines) 0) (= "" (last lines)))
-    (slice lines 0 -2)
-    lines))
+  # A trailing newline is one empty string on the end. That empty string is
+  # KEPT -- it is the blank line the editor types into.
+  (with-blank-end (string/split "\n" text)))
 
 (defn write-config
-  "Write the lines back, as a real edit to the real file."
+  ``Write the lines back, as a real edit to the real file.
+
+  Normalised to end in one blank line on the way out, so what is on disk is
+  what the editor showed -- the file and the panel are the same list.``
   [path lines]
-  (spit path (string (string/join lines "\n") "\n")))
+  (spit path (string (string/join (with-blank-end lines) "\n") "\n")))
 
 # Which actions are worth a redraw. Inserting adds an EMPTY line, which by
 # definition draws the same graph -- so it saves and returns immediately
@@ -233,7 +250,10 @@
   (def sent (json/decode body))
   (def action (string (get sent "action" "")))
   (def index (math/floor (or (get sent "index") -1)))
-  (def lines (edit (map string (get sent "lines" [])) action index))
+  # Normalised HERE rather than only inside write-config, so the lines that
+  # go back to the page are the lines that went to disk -- the panel shows
+  # the file, and it would otherwise lose the blank row until a reload.
+  (def lines (with-blank-end (edit (map string (get sent "lines" [])) action index)))
   # Save first: the file is the thing being edited, and it should hold what
   # you just did even if drawing it then fails.
   (write-config config-path lines)
