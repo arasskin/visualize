@@ -428,11 +428,15 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    writing rather than characters to type. Dimmed and unselectable, because
    nothing about them is editable. */
 #compose-line {
-  display: flex; align-items: center; gap: .35rem;
+  display: flex; align-items: center; gap: .1rem;
 }
 #compose .paren {
-  font: 300 var(--bracket)/1 ui-monospace, monospace;
-  color: var(--ink); opacity: .35;
+  /* Weight 400 rather than 300, at full strength: these read as drawn marks
+     now, not as faint furniture. --ink rather than literal black, because
+     the page has a dark theme where black is invisible -- --ink is the
+     page's darkest text colour in each. */
+  font: 400 calc(var(--bracket) * .88)/1 ui-monospace, monospace;
+  color: var(--ink);
   user-select: none;
   /* No optical nudge. A parenthesis is symmetric about its own midline, so
      the flex centring already lands it -- both directions were tried and
