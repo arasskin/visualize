@@ -1,0 +1,362 @@
+# The config language: seven verbs, parsed by a PEG.
+#
+#     (show-lines)
+#     (group src.visualize)
+#     (group web "#22a6f2")
+#     (hide src.test)
+#     (prefix ~ src.visualize)
+#
+# A CLOSED LANGUAGE, which is the point of the grammar below. Every form the
+# config can take is written out in `grammar` -- a verb, its arguments, and
+# nothing else. There is no evaluation: a line is matched, and what it
+# matched is applied. A config cannot loop, cannot define, cannot call, and
+# cannot reach the machine, because the grammar has no way to say any of it.
+#
+# WHAT THIS REPLACED, twice. First the verbs lived in a hand-built Janet
+# environment with fifty whitelisted builtins and a pass that rewrote unbound
+# symbols into strings; then they were macros in a real environment, which
+# made bare names free but handed a config the whole language -- and the
+# config is edited through a web page, so that was a real exposure. Both
+# versions inherited every feature Janet grew, whether or not it made sense
+# for a file that says which directories to box. A grammar cannot grow
+# features by accident.
+#
+# WHAT A NAME IS. The dotted path the node shows: `src.visualize.color`. A
+# slash is accepted too, since a path is a natural thing to type. Names are
+# bare -- no quotes -- because a config is mostly names and quoting them all
+# is noise. A colour is `#rrggbb` or one of the names in src/visualize/color.
+#
+# A NAME MAY START WITH A PREFIX TOKEN. `(prefix this as)` binds a token to
+# a path -- `(prefix ~ src.visualize)` -- and from then on a name whose HEAD
+# is that token is expanded, and the nodes under the path wear the token as
+# their label. Only the head: substitution that reached into the middle of a
+# name would not be a prefix substitution.
+#
+# EACH LINE IS ITS OWN PROGRAM, so a mistake on line three does not cost you
+# lines one and two, and the editor can point at the line that failed. That
+# is why `run` takes a list of lines rather than a file.
+
+(import ./color)
+
+(defn new-state
+  ``What the config has said about the graph so far.
+
+  Every field is ordered so that re-running a program is deterministic.``
+  []
+  @{:hidden @[]
+    :groups @[]
+    # Prefixes whose colour the program named outright. They keep it; the rest
+    # are reassigned around them whenever the set changes.
+    :chosen @{}
+    # Line counts: whether to write them on the labels, and whether to shade
+    # by them instead of by edge count. Separate because they answer separate
+    # questions -- the number is exact, the colour is a glance -- and either is
+    # useful without the other.
+    :sized false
+    :sized-coloring false
+    # Whether nodes carry their colour as a fill or just an outline. Outlines
+    # by default: a wall of saturated boxes is harder to read the EDGES over.
+    :filled false
+    # Prefixes to narrow to. Empty means no filter, which is the WHOLE graph --
+    # so a config saying nothing shows the externals too.
+    :only @[]
+    # ALIASES, longest prefix first. `(prefix ~ src.visualize)` binds `~` to
+    # that path: the nodes under it are RELABELLED to wear the alias, and
+    # any later name starting with it is expanded before matching. Kept
+    # sorted by the length of what they stand for, because with several
+    # defined the most specific should win and for prefixes that is simply
+    # the longest.
+    :aliases @[]})
+
+(defn- reflow
+  ``Give every automatic group a hue no other group is using.
+
+  Done over the whole list rather than once at assignment, because a colour
+  named LATER can collide with one already handed out automatically --
+  `(group a) (group b red)` where `a` happened to draw red. An explicit
+  colour always wins and the automatic ones move out of its way, so the set of
+  boxes stays distinguishable however the program was written.``
+  [state]
+  # `ungrouped` is reserved: a group wearing it would be invisible AS a group,
+  # since every node outside a box already wears it.
+  (def spoken @{color/ungrouped true})
+  (each g (state :groups)
+    (when ((state :chosen) (g :prefix)) (put spoken (g :color) true)))
+  (def free (filter |(not (spoken $)) color/palette))
+  (def spare (filter |(not= $ color/ungrouped) color/palette))
+  (var taken 0)
+  (put state :groups
+       (map (fn [g]
+              (if ((state :chosen) (g :prefix))
+                g
+                (let [hue (if (< taken (length free))
+                            (free taken)
+                            # More groups than free hues: walk the palette so
+                            # the colours repeat predictably rather than every
+                            # extra group sharing one.
+                            (spare (% taken (length spare))))]
+                  (++ taken)
+                  {:prefix (g :prefix) :color hue})))
+            (state :groups))))
+
+# THE GRAMMAR. Every form the language has, in one readable place.
+#
+# A NAME is the dotted path plus the characters a real directory can carry --
+# letters, digits, underscore, hyphen, dot, and slash for someone typing a
+# path. It may be written bare or quoted; quoting exists for a name with a
+# space in it, not as the normal case.
+#
+# The captures are shaped so `apply` below reads them as [verb & args]: the
+# verb name as a keyword, then its arguments as strings.
+(def- grammar
+  ~{:space (any (set " \t"))
+    # A NAME MAY WEAR AN ALIAS, so the character set is "anything a path or
+    # an alias token can hold" rather than the path characters alone: with
+    # `~` bound, `~.color` is a name. The grammar cannot know which tokens
+    # are bound -- that is state, and this is a parse -- so it accepts the
+    # shape and `expand-aliases` decides the meaning. An unbound token simply
+    # matches no node, which is what a wrong path does too.
+    :bare (<- (some (if-not (+ (set " \t()\"#") -1) 1)))
+    # AN ALIAS IS ANY SHORT TOKEN, not a name: the whole point is to pick a
+    # character a path never contains, so `~` and `@` and `#lib` are all
+    # fair. Parens and whitespace end it, and `#` would start a comment at
+    # the head of a line, so the alias is read where a comment cannot begin.
+    :alias (<- (some (if-not (+ (set " \t()\"") -1) 1)))
+    :quoted (* `"` (<- (any (if-not `"` 1))) `"`)
+    :name (* :space (+ :quoted :bare) :space)
+    # A colour is a name too as far as the shape goes -- `red` and `#22a6f2`
+    # both arrive as text and src/visualize/color decides. The `#` has to be
+    # spelled here because it is not in :bare, and it is not in :bare because
+    # a name never starts with one.
+    :color (* :space (+ :quoted (<- (* "#" (some (range "09" "af" "AF"))))
+                        :bare)
+              :space)
+    :verb (* "("
+             :space
+             (+ (* (constant :prefix) "prefix" :space :alias :name)
+                (* (constant :group) "group" :name (? :color))
+                (* (constant :hide) "hide" :name)
+                (* (constant :show-only) "show-only" :name)
+                (* (constant :show-lines-coloring) "show-lines-coloring" :space)
+                (* (constant :show-lines) "show-lines" :space)
+                (* (constant :fill-color) "fill-color" :space))
+             ")")
+    # A TRAILING COMMENT is part of the line, not a syntax error. `#` to
+    # end of line, the way it works in Janet and the shell -- and the way
+    # the config's own file is written, since the default one ships with
+    # explanatory lines in it.
+    :comment (* "#" (any 1))
+    :main (* :space (any (* :verb :space)) (? :comment) -1)})
+
+(def- verbs
+  ["prefix" "group" "hide" "show-only"
+   "show-lines" "show-lines-coloring" "fill-color"])
+
+(defn- normalise
+  ``A name as the prefix it selects: slashes to dots, edges trimmed.
+
+  Node names are dotted paths, so a config name is usually already the right
+  shape and this only tidies. See src/visualize/select.janet, which does the
+  matching.``
+  [text]
+  (string/replace-all "/" "." (string/trim text "./")))
+
+(defn expand-aliases
+  ``A name with its alias replaced by what the alias stands for.
+
+  `(prefix ~ src.visualize)` then `(hide ~.color)` hides
+  `src.visualize.color`; `~` alone is `src.visualize` itself.
+
+  ONLY IN PREFIX POSITION, which is the whole rule and the reason the verb
+  is called `prefix`. The token has to be the HEAD of the name and nothing
+  more is asked of it -- with `~` bound to `src.config`, `~~.something`
+  expands to `src.config~.something`: the first `~` is the prefix, and the
+  second is an ordinary character in the rest of the name, because a
+  substitution anywhere but the head would not be a prefix substitution.
+  No segment boundary is required; a prefix is a prefix.
+
+  One pass, never re-scanned. What an alias stands for is a path, not more
+  aliases, so expanding the result again could only find tokens that were
+  part of the name the user wrote.
+
+  LONGEST FIRST, which is what "most specific wins" means for prefixes: with
+  both `~` and `~~` bound, `~~.color` is the longer token's. The list is kept
+  sorted by the length of the ALIAS, so the longer one is tried first.
+
+  Exported because the same expansion has to happen to a label -- see
+  `alias-label` -- and doing it twice from two spellings is how the two
+  would drift apart.``
+  [aliases text]
+  (var out text)
+  (var done false)
+  (each entry aliases
+    (unless done
+      (def token (entry :alias))
+      (when (string/has-prefix? token text)
+        (set out (string (entry :prefix) (string/slice text (length token))))
+        (set done true))))
+  out)
+
+(defn alias-label
+  ``A node name written the shortest way a config could say it, or nil.
+
+  The mirror of `expand-aliases`: with `~` bound to `src.visualize`, the node
+  `src.visualize.color` LABELS itself `~.color`, so the picture reads in the
+  same vocabulary the config is written in. Longest prefix first, again --
+  the alias that covers most of the name is the one that shortens it most.``
+  [aliases name]
+  (var out nil)
+  (each entry aliases
+    (unless out
+      (def full (entry :prefix))
+      (cond
+        (= name full) (set out (entry :alias))
+        (string/has-prefix? (string full ".") name)
+        (set out (string (entry :alias) (string/slice name (length full)))))))
+  out)
+
+(defn- apply-verb
+  "One matched form against the state. Returns nil, or a complaint."
+  [state form]
+  (def [verb & args] form)
+  (case verb
+    :hide
+    (let [text (normalise (expand-aliases (state :aliases) (first args)))]
+      (unless (index-of text (state :hidden))
+        (array/push (state :hidden) text))
+      nil)
+
+    :show-only
+    (let [text (normalise (expand-aliases (state :aliases) (first args)))]
+      (unless (index-of text (state :only))
+        (array/push (state :only) text))
+      nil)
+
+    :group
+    (let [text (normalise (expand-aliases (state :aliases) (first args)))
+          wanted (get args 1)]
+      (var hue "")
+      (var wrong nil)
+      (if wanted
+        (let [resolved (color/as-hex wanted)]
+          (cond
+            (not resolved)
+            (set wrong (string "'" wanted "' is not a colour -- "
+                               "use #rrggbb or a name like blue"))
+            (= resolved color/ungrouped)
+            (set wrong (string color/ungrouped " is what ungrouped nodes "
+                               "already wear -- the group would be invisible; "
+                               "pick another colour"))
+            (do (put (state :chosen) text true)
+                (set hue resolved))))
+        (put (state :chosen) text nil))
+      (or wrong
+          (do
+            (put state :groups
+                 (array ;(filter |(not= ($ :prefix) text) (state :groups))
+                        {:prefix text :color hue}))
+            (reflow state)
+            nil)))
+
+    :prefix
+    (let [token (first args)
+          full (normalise (get args 1))
+          bound (find |(= ($ :alias) token) (state :aliases))]
+      (cond
+        (empty? token)
+        "a prefix needs something to bind -- (prefix this as), like (prefix ~ src.visualize)"
+
+        (empty? full)
+        "a prefix needs a path to stand for -- (prefix this as), like (prefix ~ src.visualize)"
+
+        # REBINDING IS AN ERROR, not a replacement. A config is read top to
+        # bottom and every line is its own program, so a second binding would
+        # silently change what the lines above it meant. Say it instead.
+        bound
+        (string "`" token "` is already bound to `" (bound :prefix)
+                "` -- a token stands for one path")
+
+        (do
+          (put state :aliases
+               (sorted-by |(- (length ($ :alias)))
+                          (array ;(state :aliases) {:alias token :prefix full})))
+          nil)))
+
+    :fill-color (do (put state :filled true) nil)
+    :show-lines (do (put state :sized true) nil)
+    :show-lines-coloring (do (put state :sized true)
+                             (put state :sized-coloring true)
+                             nil)))
+
+(defn- complain
+  ``What is wrong with a line the grammar refused.
+
+  The grammar knows only that it did not match, which is not something to
+  show somebody editing a config in a browser. These are the mistakes worth
+  naming; anything else gets the list of verbs, which is short enough to be
+  an answer in itself.``
+  [line]
+  (def text (string/trim line))
+  (def named (peg/match ~(* "(" (any (set " \t")) (<- (some (range "az" "AZ" "--")))) text))
+  (def verb (and named (first named)))
+  (cond
+    (not (string/has-prefix? "(" text))
+    "a config line is a form in parentheses, like (hide src.test)"
+
+    (not (string/has-suffix? ")" text))
+    "this line is missing its closing parenthesis"
+
+    (and verb (not (index-of verb verbs)))
+    (string "there is no verb `" verb "` -- try " (string/join verbs ", "))
+
+    (and verb (index-of verb verbs))
+    (string "`" verb "` did not take these arguments -- a name is a dotted "
+            "path like src.visualize, and a colour is #rrggbb or a name")
+
+    (string "not a config form -- try " (string/join verbs ", "))))
+
+(defn eval-line
+  ``Run one line against `state`. Returns nil, or a complaint about the line.
+
+  ONE LINE IS THE UNIT. A config is a list of independent statements, so the
+  line is what gets matched, what gets applied, and what a complaint is
+  attributed to -- which is what makes "this line is wrong" a thing the
+  editor can point at.
+
+  A COMMENT IS A LINE THAT DOES NOTHING, and so is a blank one. `#` starts a
+  comment, as it does in Janet and in the shell.``
+  [line state]
+  (def text (string/trim line))
+  (cond
+    (empty? text) nil
+    (string/has-prefix? "#" text) nil
+    (if-let [forms (peg/match grammar text)]
+      (do
+        (var wrong nil)
+        # A line may hold more than one form -- `(group test) (hide test)` --
+        # and the first complaint is the one worth reporting.
+        (var i 0)
+        (while (< i (length forms))
+          (def verb (forms i))
+          (def args @[])
+          (++ i)
+          (while (and (< i (length forms)) (string? (forms i)))
+            (array/push args (forms i))
+            (++ i))
+          (unless wrong
+            (set wrong (apply-verb state [verb ;args]))))
+        wrong)
+      (complain text))))
+
+(defn run
+  ``Every line, in order, against one fresh state.
+
+  Returns [state problems], where `problems` maps a line's INDEX to what went
+  wrong with it -- the index because that is what the editor draws against.``
+  [lines]
+  (def state (new-state))
+  (def problems @{})
+  (eachp [i line] lines
+    (when-let [wrong (eval-line line state)]
+      (put problems i wrong)))
+  [state problems])

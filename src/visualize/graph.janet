@@ -35,10 +35,12 @@
 # Comments survive a round-trip through the editor, so they are worth having.
 (def starter
   ``# (group prefix & color), (hide prefix), (show-only prefix)
-# (fill-color), (show-lines), (show-lines-coloring), (font name)
+# (prefix token path), (fill-color), (show-lines), (show-lines-coloring)
 # A prefix is the dotted path a node shows: (group src.parsers) boxes that
 # directory, (hide src.test) drops it. Any other name is literal, so
 # (group SwiftUI) groups the framework. Comment out with '#'.
+# (prefix ~ src.visualize) gives that path a short name: the nodes under it
+# read ~.color instead, and (hide ~.color) means the same as the long form.
 # colors: red green orange purple blue yellow orange-red teal magenta
 #         yellow-green pink dark-blue grey
 (show-lines)
@@ -138,23 +140,40 @@
           # rather than inside a renderer: it is a fact about the graph, and
           # both layouts want the same one.
           (select/weights-for trimmed)))
+      # AN ALIAS RELABELS THE NODES IT COVERS. `(prefix ~ src.visualize)`
+      # makes `src.visualize.color` read `~.color`, so the picture speaks the
+      # vocabulary the config is written in -- which is most of the point of
+      # naming a prefix at all, since the shared head is the part that is the
+      # same on every node and tells you nothing.
+      #
+      # The NAME is untouched: it is the node's identity, what edges point at
+      # and what the config matches. Only the label changes.
+      (def aliased
+        (if (empty? (state :aliases))
+          trimmed
+          (merge trimmed
+                 {:nodes (map (fn [node]
+                                (if-let [short (config/alias-label (state :aliases)
+                                                                   (node :name))]
+                                  (merge node {:label (string/join (string/split "." short) ".\n")})
+                                  node))
+                              (trimmed :nodes))})))
       # The label carries the line count when (show-lines) asked for it. Done
       # on the graph rather than in a renderer, so both layouts get it and
-      # the v text that goes between them already says what the box reads.
+      # the text that goes between them already says what the box reads.
       (def labelled
         (if (state :sized)
-          (merge trimmed
+          (merge aliased
                  {:nodes (map (fn [node]
                                 (if-let [size (get (graph :sizes) (node :name))]
                                   (merge node {:label (string (node :label) "\n"
                                                               (select/thousands size))})
                                   node))
-                              (trimmed :nodes))})
-          trimmed))
+                              (aliased :nodes))})
+          aliased))
       (layout/draw labelled {:groups (state :groups)
                              :sized (state :sized)
                              :filled (state :filled)
-                             :font (state :font)
                              :weights weights}))))
 
 

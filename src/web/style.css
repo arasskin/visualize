@@ -13,7 +13,10 @@
      a scratchpad you poke at, not a settings dialog. graphviz names the font
      in the SVG but cannot embed it, so the page is what actually resolves it
      -- see the #graph svg rule below, without which every label falls back to
-     the browser's default and the drawing stops looking like itself. */
+     the browser's default and the drawing stops looking like itself.
+     KEEP IN STEP with `font` in src/visualize/layout.janet, which is what
+     graphviz sizes the ellipses from. Naming a different face here draws
+     labels that do not fit the boxes computed for them. */
   --font-config: "Comic Sans MS", "Chalkboard SE", cursive;
 
   /* Node ink and group colours are baked into the SVG by src/layout.janet,

@@ -1,7 +1,7 @@
 # The graph, drawn by graphviz.
 #
 # WHAT THIS IS. `graph.janet` hands over a parsed graph and the config's
-# decisions -- groups, colours, font, whether nodes are filled -- and gets
+# decisions -- groups, colours, whether nodes are filled -- and gets
 # back [ok svg]. Everything between is DOT: this file writes the graph as a
 # DOT document, runs `dot -Tsvg`, and returns what comes out.
 #
@@ -31,6 +31,22 @@
 (import ./color)
 (import ./select)
 
+# THE FONT, in one place because it has to be true in two.
+#
+# graphviz SIZES every ellipse from this font's metrics, but an SVG only
+# names a font -- it cannot carry one -- so whether the label is DRAWN in it
+# is the page's call. src/web/style.css names the same face in
+# `--font-config` and applies it to `#graph svg`. The two have to agree: name
+# one font here and draw another there, and every box is sized for lettering
+# it does not contain.
+#
+# This USED TO BE A CONFIG VERB, `(font name)`, which could only ever change
+# half of that pair -- the sizing moved and the lettering did not. A config
+# says what is IN the graph; how the drawing looks on your screen is not a
+# fact about your codebase. Changing the face means changing this line and
+# the CSS together, which is the honest amount of work for the change.
+(def- font "Comic Sans MS")
+
 (defn- quoted
   "A DOT string literal: quotes and backslashes escaped, newlines as \\n."
   [text]
@@ -57,7 +73,6 @@
   (def ours (or (graph :ours) {}))
   (def weights (or (opts :weights) {}))
   (def filled (opts :filled))
-  (def font (or (opts :font) "Comic Sans MS"))
   (def out @[])
   (array/push out "digraph G {")
   (array/push out "  rankdir=TB;")
