@@ -865,15 +865,24 @@ document.addEventListener('keydown', (e) => {
 // chord, since the keys pressed WHILE Alt is down are where subsequent
 // commands will attach. Nothing uses that yet; this is the shape it needs.
 
-// Whether this Alt press has been used for anything. Set by any other key
-// arriving while Alt is down, which is what makes the press a chord rather
-// than a tap.
+// Whether this Alt press has been used for anything -- another key arriving
+// while Alt is down, which is what a chord is.
 let altUsed = false;
 // Whether the current press opened the panel, so releasing only closes what
 // the hold itself put up -- letting go over a config you had already opened
 // should not shut it.
 let altOpened = false;
 let altDown = false;
+// When the press started. A HOLD IS A PRESS THAT LASTED, which is the only
+// thing separating it from a tap when no chord was struck: without this, a
+// long press with nothing pressed during it is indistinguishable from a tap
+// and stays open. A chord still counts as a hold however brief it was.
+let altAt = 0;
+// Generous, because the cost is asymmetric: a slow tap misread as a hold
+// closes a panel you asked to keep, while a quick hold misread as a tap just
+// leaves it up for one more keystroke. Struck a chord and it is a hold at
+// any speed, so this only decides the no-chord case.
+const ALT_HOLD_MS = 400;
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Alt') {
@@ -885,6 +894,7 @@ document.addEventListener('keydown', (e) => {
   if (altDown) return;
   altDown = true;
   altUsed = false;
+  altAt = performance.now();
   altOpened = configPanel.shut;
   if (altOpened) configPanel.open();
 });
@@ -892,15 +902,14 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('keyup', (e) => {
   if (e.key !== 'Alt') return;
   altDown = false;
-  // A TAP LEAVES IT OPEN. Nothing happened while the key was down, so the
+  const held = performance.now() - altAt >= ALT_HOLD_MS;
+  // A TAP LEAVES IT OPEN: over in an instant with nothing struck, so the
   // press meant "show me the config" rather than "show it while I work".
-  if (!altUsed) return;
+  if (!altUsed && !held) return;
   if (altOpened) configPanel.toggle();
 });
 
-// Alt released outside the window never reaches us -- the keyup goes to
-// whatever took focus -- so a peek would stay up with no key holding it.
 window.addEventListener('blur', () => {
-  if (altDown && altUsed && altOpened) configPanel.toggle();
+  if (altDown && altOpened) configPanel.toggle();
   altDown = false;
 });
