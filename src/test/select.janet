@@ -101,14 +101,23 @@
                       {:name "a.c" :label "c"}
                       {:name "x" :label "x"}]
               :ours {"a.b" true "a.c" true "x" true}})
-  (def out (select/resolve graph [{:prefix "a" :color "#111111"}] {"x" true}))
+  # A STUB PALETTE, which is the point of passing one: this file tests what
+  # resolve puts on a node, not what the real palette computes.
+  (def palette {:ungrouped "#999999"
+                :ink |(string $ "-ink")
+                :tint |(string $ "-fill")})
+  (def out (select/resolve graph [{:prefix "a" :color "#111111"}] {"x" true} palette))
   (def by-name (tabseq [n :in (out :nodes)] (n :name) n))
 
   (t/is= "a" (get-in by-name ["a.b" :box]) "a node under the prefix is boxed")
   (t/is= "#111111" (get-in by-name ["a.b" :colour]) "and wears the box's colour")
   (t/is= nil (get-in by-name ["x" :box]) "one outside it is not")
-  (t/is= color/ungrouped (get-in by-name ["x" :colour])
-         "and wears the ungrouped colour")
+  (t/is= "#999999" (get-in by-name ["x" :colour])
+         "and wears the ungrouped colour the palette named")
+
+  # EXACT COLOURS, so the renderer prints rather than computes.
+  (t/is= "#111111-ink" (get-in by-name ["a.b" :ink]) "the ink is resolved")
+  (t/is= "#111111-fill" (get-in by-name ["a.b" :fill]) "and so is the flash fill")
 
   (t/ok (get-in by-name ["x" :fresh]) "a moved file is flagged")
   (t/ok (not (get-in by-name ["a.b" :fresh])) "an unmoved one is not")

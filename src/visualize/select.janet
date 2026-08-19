@@ -13,7 +13,6 @@
 # hiding, boxing and colouring happen on the graph and nothing has to parse
 # back what it just printed.
 
-(import ./color)
 
 (defn- flatten-separators
   ``A config name as the node-name prefix it selects.
@@ -143,24 +142,6 @@
     (when (counts b) (put counts b (+ 1 (counts b)))))
   counts)
 
-(defn ramp-of
-  ``The brightness ramp for a set of line counts.
-
-  Ranked, not scaled -- see `color/ramp`. File sizes are long-tailed for the
-  same reason edge counts are: one 1300-line view against a floor of 40-line
-  ones, so a straight ratio would leave everything but the giant looking
-  identical.``
-  [sizes]
-  (color/ramp sizes))
-
-(defn weights-for
-  ``The default shading: how entangled each node is, ranked.
-
-  A property of the graph rather than of a drawing, so it lives with the
-  other graph functions and the renderer asks for it.``
-  [graph]
-  (color/ramp (degrees graph)))
-
 (defn group-for
   ``Which box claims this node, if any.
 
@@ -201,18 +182,35 @@
   Adds to each node:
 
     :box     the prefix of the box it belongs in, or nil
-    :colour  that box's colour, or the ungrouped one
+    :colour  the box's colour, or the ungrouped one
+    :ink     that colour deepened until it reads against the page
+    :fill    that colour tinted, for the flash
     :fresh   true when its file moved since the last drawing
+
+  EXACT COLOURS, not a hue to derive them from. The renderer used to take
+  the hue and ask the palette for its ink and its tint, which meant a module
+  that writes DOT had to import a module that does contrast arithmetic.
+  Resolved here, every colour on the node is a string the renderer prints.
+
+  `palette` supplies the three answers this cannot compute: the ungrouped
+  colour, and the two derivations. Passed in rather than imported, so the
+  only module that knows what a colour IS is the one that owns them.
 
   Leaves :name and :label alone -- identity and text are already right by
   the time this runs.``
-  [graph groups flashing]
+  [graph groups flashing palette]
   (def ours (get graph :ours {}))
+  (def ungrouped (palette :ungrouped))
+  (def ink (palette :ink))
+  (def tint (palette :tint))
   (merge graph
          {:nodes (map (fn [node]
                         (def claimed (group-for (node :name) groups ours))
+                        (def hue (if claimed (claimed :color) ungrouped))
                         (merge node
                                {:box (when claimed (claimed :prefix))
-                                :colour (if claimed (claimed :color) color/ungrouped)
+                                :colour hue
+                                :ink (ink hue)
+                                :fill (tint hue)
                                 :fresh (truthy? (get flashing (node :name)))}))
                       (get graph :nodes []))}))

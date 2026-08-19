@@ -28,7 +28,6 @@
 # it is where the convention came from -- except that it encodes the arrow
 # as `-&#45;&gt;`, which `graph.janet` normalises on the way out.
 
-(import ./color)
 
 # THE FONT, in one place because it has to be true in two.
 #
@@ -88,26 +87,27 @@
   # wall of saturated boxes is harder to read the edges over, which is why
   # the fill was never the default and is now not an option.
   #
-  # READ OFF THE NODE. Which box claims it and what colour that makes it are
-  # questions about the config, answered by select/resolve before any of this
-  # runs -- so this file has no opinion about prefixes and does not import
-  # the module that does.
+  # READ OFF THE NODE, exact colours and all. Which box claims a node, what
+  # colour that makes it, and what ink reads against the page are questions
+  # answered by select/resolve before any of this runs -- so this file has no
+  # opinion about prefixes, does no contrast arithmetic, and prints the
+  # strings it is handed.
   (defn node-line [node indent]
     (def name (node :name))
-    (def hue (get node :colour color/ungrouped))
+    (def ink (node :ink))
     (def fresh (node :fresh))
     (array/push out
                 (string indent "\"" (quoted name) "\""
                         (attrs
                           [["label" (quoted (node :label))]
-                           ["color" (color/ink-on-page hue)]
-                           ["fontcolor" (color/ink-on-page hue)]
+                           ["color" ink]
+                           ["fontcolor" ink]
                            # The group's own hue, tinted well down: the flash
                            # is a node breathing in its own colour, not one
                            # lit up, and the page fades this in and out again.
                            ;(if fresh
                               [["style" "filled"]
-                               ["fillcolor" (color/tint hue 0.3)]
+                               ["fillcolor" (node :fill)]
                                ["class" "fresh"]]
                               [])])
                         ";")))
@@ -125,7 +125,7 @@
       (put by-box key (array/push (or (by-box key) @[]) node))))
 
   (eachp [key members] by-box
-    (def hue (get (first members) :colour color/ungrouped))
+    (def hue ((first members) :colour))
     (array/push out (string "  subgraph \"cluster_" (quoted key) "\" {"))
     (array/push out (string "    label=\"" (quoted key) "\"; style=dashed;"
                             " color=\"" hue "\";"
