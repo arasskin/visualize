@@ -2,7 +2,7 @@
 #
 #     (show-lines)
 #     (group src.visualize)
-#     (group web "#22a6f2")
+#     (group web 22a6f2)
 #     (hide src.test)
 #     (prefix ~ src.visualize)
 #
@@ -24,7 +24,8 @@
 # WHAT A NAME IS. The dotted path the node shows: `src.visualize.color`. A
 # slash is accepted too, since a path is a natural thing to type. Names are
 # bare -- no quotes -- because a config is mostly names and quoting them all
-# is noise. A colour is `#rrggbb` or one of the names in src/visualize/color.
+# is noise. A colour is `rrggbb` -- six hex digits, no hash, because a hash
+# starts a comment -- or one of the names in src/visualize/color.
 #
 # A NAME MAY START WITH A PREFIX TOKEN. `(prefix this as)` binds a token to
 # a path -- `(prefix ~ src.visualize)` -- and from then on a name whose HEAD
@@ -119,7 +120,7 @@
   [{:name "prefix" :args [:alias :name]
     :blurb "Give a path a short name. The nodes under it are labelled with the token, and any later name starting with it is expanded -- so with (prefix ~ src.visualize), (hide ~.color) hides src.visualize.color. A token stands for one path; binding it twice is an error."}
    {:name "group" :args [:name :color?]
-    :blurb "Draw a box around everything under a path, and colour it. Without a colour one is chosen from the palette and the others shuffle to stay distinct."}
+    :blurb "Draw a box around everything under a path, and colour it. A colour is a name like blue, or six hex digits written bare -- 22a6f2, no hash, since a hash starts a comment. Without one a colour is chosen from the palette and the others shuffle to stay distinct."}
    {:name "hide" :args [:name]
     :blurb "Drop everything under a path from the drawing. Its edges go with it."}
    {:name "show-only" :args [:name]
@@ -175,13 +176,11 @@
     :alias (<- (some (if-not (+ (set " \t()\"") -1) 1)))
     :quoted (* `"` (<- (any (if-not `"` 1))) `"`)
     :name (* :space (+ :quoted :bare) :space)
-    # A colour is a name too as far as the shape goes -- `red` and `#22a6f2`
-    # both arrive as text and src/visualize/color decides. The `#` has to be
-    # spelled here because it is not in :bare, and it is not in :bare because
-    # a name never starts with one.
-    :color (* :space (+ :quoted (<- (* "#" (some (range "09" "af" "AF"))))
-                        :bare)
-              :space)
+    # A colour is a name as far as the shape goes -- `red` and `22a6f2` both
+    # arrive as text and src/visualize/color decides which, complaining when
+    # it is neither. NO LEADING `#`: that character starts a comment, and one
+    # character means one thing.
+    :color (* :space (+ :quoted :bare) :space)
     # `,` so the alternation is spliced in when this table is BUILT, not
     # left as a literal for the PEG compiler to choke on.
     :verb (* "(" :space ,(tuple ;(array '+ ;verb-rules)) ")")
@@ -191,6 +190,27 @@
     # explanatory lines in it.
     :comment (* "#" (any 1))
     :main (* :space (any (* :verb :space)) (? :comment) -1)})
+
+# A `#` ANYWHERE ENDS THE LINE. The grammar above only allows a comment
+# between verbs, which is where a well-formed one sits -- but `#` is the
+# comment character wherever it appears, so the text is cut at the first one
+# outside quotes before the grammar ever sees it. Without this,
+# `(group web #22a6f2)` was a SYNTAX ERROR rather than a group call with a
+# comment after it, which is a confusing way to learn that colours are
+# written bare.
+#
+# Quotes are respected, so `(hide "a#b")` keeps its hash.
+(defn- code-of [line]
+  (var cut nil)
+  (var quoted false)
+  (var i 0)
+  (while (and (nil? cut) (< i (length line)))
+    (def ch (line i))
+    (cond
+      (= ch (chr `"`)) (set quoted (not quoted))
+      (and (= ch (chr "#")) (not quoted)) (set cut i))
+    (++ i))
+  (if cut (string/slice line 0 cut) line))
 
 (def- verbs (map |($ :name) verb-specs))
 
@@ -317,7 +337,7 @@
           (cond
             (not resolved)
             (set wrong (string "'" wanted "' is not a colour -- "
-                               "use #rrggbb or a name like blue"))
+                               "use rrggbb or a name like blue"))
             (= resolved color/ungrouped)
             (set wrong (string color/ungrouped " is what ungrouped nodes "
                                "already wear -- the group would be invisible; "
@@ -386,7 +406,7 @@
 
     (and verb (index-of verb verbs))
     (string "`" verb "` did not take these arguments -- a name is a dotted "
-            "path like src.visualize, and a colour is #rrggbb or a name")
+            "path like src.visualize, and a colour is rrggbb or a name")
 
     (string "not a config form -- try " (string/join verbs ", "))))
 
@@ -407,7 +427,7 @@
   `(prefix ~ src) (hide ~.a)` must bind on the first pass and hide on the
   second.``
   [line state &opt only]
-  (def text (string/trim line))
+  (def text (string/trim (code-of line)))
   (cond
     (empty? text) nil
     (string/has-prefix? "#" text) nil

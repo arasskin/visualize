@@ -60,7 +60,10 @@
 
 (t/test "the ungrouped colour is refused as a group colour"
   # The box would be the same colour as every ungrouped node and say nothing.
-  (def [_ problems] (run (string "(group \"~.A\" \"" color/ungrouped "\")")))
+  # Written bare, since a hash would comment the line out before it could be
+  # refused for being the wrong colour.
+  (def bare (string/replace "#" "" color/ungrouped))
+  (def [_ problems] (run (string "(group \"~.A\" " bare ")")))
   (t/ok (problems 0))
   (t/ok (string/find "invisible" (problems 0))))
 
@@ -83,21 +86,25 @@
   (t/is= ["src.test"] ((state-of "(hide src/test)") :hidden)
          "a slash is taken too, since a path is a natural thing to type"))
 
-(t/test "a colour needs no quotes, because the reader is ours"
-  # `#22a6f2` was a comment to Janet, so the colour vanished and the group
-  # was drawn in the next palette hue with nothing said. The grammar reads
-  # the whole form itself, so `#` is only special at the START of a line.
-  (t/is= "#22a6f2" (get-in (state-of "(group web #22a6f2)") [:groups 0 :color]))
-  (t/is= "#22a6f2" (get-in (state-of `(group web "#22a6f2")`) [:groups 0 :color]))
-  (t/is= "#ff4d6d" (get-in (state-of "(group web red)") [:groups 0 :color]))
-  # THE HASH IS OPTIONAL. Bare hex digits in the colour position read as hex
-  # too, and the stored form always carries the hash because that is what
-  # SVG wants.
+(t/test "a hex colour is written bare, because a hash starts a comment"
+  # SIX HEX DIGITS, no hash. `#` is the comment character wherever it
+  # appears, so a colour cannot spell itself with one -- and the stored form
+  # gains the hash because that is what SVG wants.
   (t/is= "#22a6f2" (get-in (state-of "(group web 22a6f2)") [:groups 0 :color]))
+  (t/is= "#ff4d6d" (get-in (state-of "(group web red)") [:groups 0 :color]))
+  # A hash in the colour position comments the rest of the line out, which
+  # takes the closing parenthesis with it -- so the line is unclosed, and
+  # that is what it is told.
+  (def [state problems] (run "(group web #22a6f2)"))
+  (t/is= [] (state :groups) "nothing was grouped")
+  (t/ok (string/find "parenthesis" (problems 0)))
+  # Quoted is refused too: the reader keeps the hash, and it is not a colour.
+  (def [_ quoted] (run `(group web "#22a6f2")`))
+  (t/ok (string/find "not a colour" (quoted 0)))
   # Something in the colour position that is neither is refused, rather than
   # silently drawing the group in the next palette hue.
-  (def [_ problems] (run "(group web nonsense)"))
-  (t/ok (problems 0)))
+  (def [_ bad] (run "(group web nonsense)"))
+  (t/ok (bad 0)))
 
 (t/test "a comment is a line that does nothing, wherever it sits"
   (def [state problems] (run "# just a note" "   " "(hide src.test) # and why"))
@@ -148,7 +155,7 @@
   (t/is= ["src.visualize.color"] (state :hidden))
   (t/is= ["src.visualize"] (state :only))
   # Groups too, and the colour survives the expansion.
-  (def grouped (state-of "(prefix ~ src)" "(group ~.test #22a6f2)"))
+  (def grouped (state-of "(prefix ~ src)" "(group ~.test 22a6f2)"))
   (t/is= "src.test" (get-in grouped [:groups 0 :prefix]))
   (t/is= "#22a6f2" (get-in grouped [:groups 0 :color])))
 

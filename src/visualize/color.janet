@@ -54,12 +54,12 @@
    "grey" "#8d99ae"
    "gray" "#8d99ae"})
 
-# The `#` is OPTIONAL, and configs are written without it: `#` is the config
-# language's comment character, so a colour that needed one could not be told
-# from a comment without knowing which position it sat in. `22a6f2` and
-# `#22a6f2` both read; the stored form always carries the hash, because that
-# is what SVG wants.
-(def- hex-color (peg/compile ~(* (? "#") (6 :h) -1)))
+# NO `#` ON THE WAY IN. That character starts a comment in the config
+# language, so `#22a6f2` is a comment and never reaches here as a colour --
+# accepting the spelling anyway would only mean the quoted form `"#22a6f2"`
+# worked while the bare one silently commented the line out. Six hex digits,
+# and the stored form gains the hash because that is what SVG wants.
+(def- hex-color (peg/compile ~(* (6 :h) -1)))
 
 (defn as-hex
   ``One colour as "#rrggbb", or nil if it is not a colour at all.
@@ -67,11 +67,15 @@
   A group carries only this. Every fill drawn from it is a tint at some
   brightness, so there is nothing else to store.``
   [color]
-  (def text (string/trim (string color)))
-  (def border (or (named (string/ascii-lower text)) text))
-  (when (peg/match hex-color border)
-    (def lower (string/ascii-lower border))
-    (if (string/has-prefix? "#" lower) lower (string "#" lower))))
+  (def text (string/ascii-lower (string/trim (string color))))
+  # A NAMED COLOUR IS ALREADY A HEX STRING, hash and all -- the palette above
+  # writes them that way, and those are ours rather than something typed. It
+  # is only what the user WROTE that has to be bare, so the name is resolved
+  # first and returned as it stands.
+  (if-let [hit (named text)]
+    hit
+    (when (peg/match hex-color text)
+      (string "#" text))))
 
 (defn- channels
   "The three bytes of a #rrggbb, as numbers."

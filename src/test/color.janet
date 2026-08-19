@@ -10,11 +10,13 @@
 
 (t/test "as-hex resolves names, hex and rubbish"
   (t/is= "#ff4d6d" (color/as-hex "red"))
-  (t/is= "#aabbcc" (color/as-hex "#AABBCC"))
+  (t/is= "#aabbcc" (color/as-hex "AABBCC") "bare hex, and case does not matter")
+  (t/is= nil (color/as-hex "#aabbcc")
+         "a leading hash is a comment in the config, so it is not a colour here")
   (t/is= "#22a6f2" (color/as-hex "blue"))
   (t/is= "#8d99ae" (color/as-hex "gray") "gray and grey are the same colour")
   (t/is= nil (color/as-hex "nope"))
-  (t/is= nil (color/as-hex "#ff") "a short hex is not a colour"))
+  (t/is= nil (color/as-hex "ff") "a short hex is not a colour"))
 
 (t/test "tint holds the hue and lands on the endpoints Python gives"
   (t/is= "#ff91a4" (color/tint "#ff4d6d" 0))
