@@ -34,10 +34,10 @@
 # it expecting to write one.
 (def config-name "visualize.conf")
 
-# What the panel calls itself. The file is visualize.conf, but the panel is
-# the only config there is, so the extension on its title bar is noise the
-# reader has to skip.
-(def config-title "config")
+# What the panel calls itself: the file, without the extension. The panel IS
+# visualize.conf -- what you type there is what lands in it -- so naming it
+# anything else made the two look like different things.
+(def config-title "visualize")
 
 # Written on first run so there is something to edit rather than a blank pane.
 # Comments survive a round-trip through the editor, so they are worth having.
