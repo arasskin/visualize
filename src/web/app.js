@@ -519,10 +519,26 @@ function move(at, to) {
   const moved = lines.slice();
   moved.splice(to, 0, moved.splice(at, 1)[0]);
   lines = moved;
+  // THE SELECTION FOLLOWS THE LINE, not the slot. It is a place in the file,
+  // and dragging a row does not change which line you were working on --
+  // whether you dragged that row itself or one that slid past it.
+  picked = afterMove(picked, at, to);
   // Order changes what the file does -- a group's colour claimed earlier, or a
   // (hide) reaching a file before the (group) that would have boxed it -- so
   // this redraws.
   send('reorder', -1);
+}
+
+// Where index `i` ends up when the line at `at` is taken out and put back in
+// at `to`. Three cases, and the first is the one worth naming: the dragged
+// line lands where it was dropped, and everything between the two positions
+// shifts one place to fill the gap it left or make the one it needs.
+function afterMove(i, at, to) {
+  if (i < 0) return i;
+  if (i === at) return to;
+  if (at < i && i <= to) return i - 1;
+  if (to <= i && i < at) return i + 1;
+  return i;
 }
 
 // One shape for every button: what to do, and which line to do it to. The
