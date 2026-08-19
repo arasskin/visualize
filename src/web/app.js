@@ -758,6 +758,26 @@ const configPanel = makePanel(panel, {
 const inset = 12;
 requestAnimationFrame(() => configPanel.place(inset, inset));
 
+// ESCAPE PUTS THE PANEL AWAY when you are working in it. "In it" is where the
+// focus is, not merely whether it is open: the panel can sit open while you
+// pan the graph or type in the compose bar, and an escape meant for either of
+// those should not also close the editor behind them.
+//
+// LAST of the escapes. The help sits over everything and takes it first; the
+// compose bar takes it next, closing its list and then itself, since both are
+// in front of the panel. Each of those returns before this runs, so this only
+// ever sees an escape nothing else wanted.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (configPanel.shut) return;
+  if (!panel.contains(document.activeElement)) return;
+  e.preventDefault();
+  // Focus goes with it: left on a row inside a shut panel, the keyboard
+  // would be pointed at something nobody can see.
+  document.activeElement.blur();
+  configPanel.toggle();
+});
+
 lines = window.CONFIG_LINES || [];
 for (const [at, why] of Object.entries(window.CONFIG_PROBLEMS || {})) {
   faults[Number(at)] = why;
