@@ -19,16 +19,19 @@
 # back for no gain.
 
 (import ./scan)
+(import ./graph)
 
 # The config file is not source. It sits in the root being watched -- a
-# visualize pointed at its own repo scans `config.janet` like any other Janet
+# visualize pointed at its own repo scans `visualize.conf` like any other
 # file -- but it describes the VIEW, not the tree, and editing it through the
 # page WRITES it. That closed a loop: the page saved a config edit, the
 # fingerprint changed, the watcher announced that the source had moved, the
 # page redrew and saved again, and the server span at 7% CPU printing
 # nothing. A change to the config already redraws the page by the path that
 # made the change; the watcher's job is to notice edits nobody told it about.
-(def- config-name "config.janet")
+# From graph, not repeated here: this has to be the SAME file the editor
+# writes, and a second spelling of it would drift.
+(def- config-name graph/config-name)
 
 (defn- fingerprint
   ``One number standing for the state of the tree: every file's mtime and

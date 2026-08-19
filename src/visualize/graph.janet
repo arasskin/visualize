@@ -24,11 +24,19 @@
 (import ./config)
 (import ./json)
 
-(def config-name "config.janet")
+# THE ONE SPELLING of the file this program writes into the directory it is
+# pointed at. src/visualize/watch.janet reads it from here rather than
+# keeping its own copy -- it has to skip this file when fingerprinting the
+# tree, and two copies of a filename is one that goes stale.
+#
+# `.conf` rather than `.janet`: the config stopped being Janet when it became
+# a PEG, and a file named for a language it is not misleads anyone who opens
+# it expecting to write one.
+(def config-name "visualize.conf")
 
-# What the panel calls itself. The FILE is config.janet -- Janet is what the
-# config language is -- but the panel is the only config there is, so the
-# extension on its title bar is noise the reader has to skip.
+# What the panel calls itself. The file is visualize.conf, but the panel is
+# the only config there is, so the extension on its title bar is noise the
+# reader has to skip.
 (def config-title "config")
 
 # Written on first run so there is something to edit rather than a blank pane.

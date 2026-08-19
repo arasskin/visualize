@@ -5,7 +5,7 @@
 #     janet src/core.janet [directory]
 #
 # Opens a browser on the first free port at or above 8770. How the graph is
-# drawn lives in `config.janet` in the directory being scanned -- a few
+# drawn lives in `visualize.conf` in the directory being scanned -- a few
 # s-expressions, edited through the page itself:
 #
 #     (hide ~.Tests)          drop it, and every edge touching it
@@ -218,7 +218,7 @@
       (do
         (def [lines problems ok result] (draw))
         ["200 OK" "text/html; charset=utf-8"
-         (graph/page web-dir (string (last (string/split "/" root)) " — visualize")
+         (graph/page web-dir "visualize"
                      lines problems
                      (if ok result (string "<p>could not render: " result "</p>"))
                      # What only the core knows, handed over rather than

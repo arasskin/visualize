@@ -6,11 +6,10 @@ bin/
 # Written into whatever directory is being scanned. One lands here whenever
 # visualize is pointed at its own repo.
 #
-# ANCHORED, so it means this one file and not every config.janet in the tree.
-# Unanchored it also matched src/visualize/config.janet -- the config LANGUAGE,
-# a source file -- and src/test/config.janet, so both sat untracked and
-# invisible while looking committed.
-/config.janet
+# Anchored, so it means this one file and not any visualize.conf deeper in
+# the tree -- and the name no longer collides with src/visualize/config.janet,
+# which an unanchored `config.janet` once swallowed whole.
+/visualize.conf
 
 # Scratch scripts. The scanner skips dot-directories, so a probe here is not
 # a node in the graph it is measuring -- which a file in the repo root is.

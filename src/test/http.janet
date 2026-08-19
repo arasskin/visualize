@@ -22,7 +22,7 @@
 (t/test "a name may not describe a path"
   # `..` and `/` are REFUSED rather than resolved. There is no traversal to
   # get subtly wrong when the answer to anything containing a separator is no.
-  (t/is= nil (http/static-file "/../config.janet"))
+  (t/is= nil (http/static-file "/../visualize.conf"))
   (t/is= nil (http/static-file "/../../etc/passwd"))
   (t/is= nil (http/static-file "/src/pty.janet"))
   (t/is= nil (http/static-file "/web/term.js"))
