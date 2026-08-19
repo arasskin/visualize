@@ -834,14 +834,26 @@ function shutCompose() {
 async function commitCompose() {
   const text = composeInput.value.trim();
   if (!text) { shutCompose(); return; }
-  // What you typed goes in as a call.
+  // What you typed goes in as a call, UNDER THE SELECTED LINE -- the
+  // selection is where you are working, so a new line belongs next to it
+  // rather than at the far end of a file you may be nowhere near. With
+  // nothing selected there is no "next to", and the end is where it goes.
+  //
   // RETRYING REPLACES, rather than appending a second copy: while the bar is
   // showing a complaint, the line it is complaining about is already in the
   // config, and fixing a typo should mend that line, not leave the broken
   // one behind with a corrected twin under it.
-  const at = composeAt === null ? lines.length : composeAt;
+  const fresh = composeAt === null;
+  const at = fresh
+    ? (picked >= 0 && picked < lines.length ? picked + 1 : lines.length)
+    : composeAt;
   composeAt = at;
-  lines = lines.slice(0, at).concat([`(${text})`], lines.slice(at + 1));
+  lines = fresh
+    ? lines.slice(0, at).concat([`(${text})`], lines.slice(at))
+    : lines.slice(0, at).concat([`(${text})`], lines.slice(at + 1));
+  // The line you just wrote is the one you are on now, so the next thing --
+  // another compose, an alt+n, an alt+d -- happens where you are looking.
+  picked = at;
   composeFault.textContent = '';
   await send('run', -1);
   // THE LINE STAYS IN THE BAR IF IT WAS WRONG. The config took it either
