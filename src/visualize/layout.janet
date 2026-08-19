@@ -106,12 +106,12 @@
                           [["label" (quoted (node :label))]
                            ["color" (color/ink-on-page hue)]
                            ["fontcolor" (color/ink-on-page hue)]
-                           # The group's own hue, tinted the way a filled node
-                           # used to be -- a flash in the node's colour rather
-                           # than one colour for every change.
+                           # The group's own hue, tinted well down: the flash
+                           # is a node breathing in its own colour, not one
+                           # lit up, and the page fades this in and out again.
                            ;(if fresh
                               [["style" "filled"]
-                               ["fillcolor" (color/tint hue 0.55)]
+                               ["fillcolor" (color/tint hue 0.3)]
                                ["class" "fresh"]]
                               [])])
                         ";")))

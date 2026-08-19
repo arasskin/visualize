@@ -505,13 +505,22 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 #graph svg g.fresh ellipse,
 #graph svg g.fresh polygon,
 #graph svg g.fresh path {
-  animation: flash 1.1s ease-out forwards;
+  animation: flash 1.6s ease-in-out forwards;
 }
 
+/* IN AND OUT IN EQUAL TIME, and never to full. The fill rises to just over
+   half and comes back down over the same stretch, so a change registers as
+   a node briefly breathing rather than as one being lit up -- and a graph
+   where several files moved at once does not strobe.
+
+   `ease-in-out` on both halves for the same reason the timing is symmetric:
+   an ease-out ramp arrives instantly and leaves slowly, which reads as a
+   flash even when the peak is low. */
 @keyframes flash {
-  /* From the fill graphviz baked in to none, which is what an unchanged node
-     wears. `forwards` holds the end state so a node does not snap back. */
-  from { fill-opacity: 1; }
+  from { fill-opacity: 0; }
+  50% { fill-opacity: .55; }
+  /* To none, which is what an unchanged node wears. `forwards` holds the end
+     state so a node does not snap back. */
   to { fill-opacity: 0; }
 }
 
