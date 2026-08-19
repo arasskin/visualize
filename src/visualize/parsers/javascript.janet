@@ -8,7 +8,7 @@
 # RELATIVE SPECIFIERS ARE THE INTERESTING ONES. `./store` and `../lib/api`
 # name files in the project and become internal edges; `react` and
 # `@scope/pkg` name packages and become externals, which is what lets
-# (group react) and (hide lodash) work. The leading `./` and `../` are kept in
+# (box react) and (hide lodash) work. The leading `./` and `../` are kept in
 # the module name so the two cannot be confused.
 
 (def- line-start '(+ (> -1 "\n") (! (> -1 1))))

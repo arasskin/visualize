@@ -7,7 +7,7 @@
 #
 # The module name is kept WHOLE and dotted (`otto.store`, not `otto`), because
 # the graph's prefix matching is what turns that into structure: `~.store`
-# selects it, `(group ~.store)` boxes it. Truncating to the top package would
+# selects it, `(box ~.store)` boxes it. Truncating to the top package would
 # collapse every module in a project into a single node.
 
 (def- line-start '(+ (> -1 "\n") (! (> -1 1))))

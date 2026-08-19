@@ -103,7 +103,7 @@ for (const done of ['pointerup', 'pointercancel']) {
 // but on its own it is the first character of a line, because typing
 // anywhere is the way the config is written.
 document.addEventListener('keydown', (e) => {
-  // The editor owns the keyboard while it has focus -- typing `(group ...)`
+  // The editor owns the keyboard while it has focus -- typing `(box ...)`
   // must not also zoom the graph.
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   if (!(e.metaKey || e.ctrlKey)) return;

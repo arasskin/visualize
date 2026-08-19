@@ -1,8 +1,8 @@
 # The config language: five verbs, parsed by a PEG.
 #
 #     (lines)
-#     (group src.visualize)
-#     (group web 22a6f2)
+#     (box src.visualize)
+#     (box web 22a6f2)
 #     (hide src.test)
 #     (prefix ~ src.visualize)
 #
@@ -70,7 +70,7 @@
 
   Done over the whole list rather than once at assignment, because a colour
   named LATER can collide with one already handed out automatically --
-  `(group a) (group b red)` where `a` happened to draw red. An explicit
+  `(box a) (box b red)` where `a` happened to draw red. An explicit
   colour always wins and the automatic ones move out of its way, so the set of
   boxes stays distinguishable however the program was written.``
   [state]
@@ -109,13 +109,13 @@
 # three, and `font` outlived its removal in two of them.
 #
 # `:args` is what the verb takes, as PEG rule names, and doubles as the
-# usage line: [:name :color?] is `(group p color?)`. A trailing `?` marks
+# usage line: [:name :color?] is `(box p color?)`. A trailing `?` marks
 # the optional one. Nothing here is prose the parser reads -- `:blurb` is
 # for the reader, and the parser never sees it.
 (def verb-specs
   [{:name "prefix" :args [:alias :name]
     :blurb "Give a path a short name. The nodes under it are labelled with the token, and any later name starting with it is expanded -- so with (prefix ~ src.visualize), (hide ~.color) hides src.visualize.color. A token stands for one path; binding it twice is an error."}
-   {:name "group" :args [:name :color?]
+   {:name "box" :args [:name :color?]
     :blurb "Draw a box around everything under a path, and colour it. A colour is a name like blue, or six hex digits written bare -- 22a6f2, no hash, since a hash starts a comment. Without one a colour is chosen from the palette and the others shuffle to stay distinct."}
    {:name "hide" :args [:name]
     :blurb "Drop everything under a path from the drawing. Its edges go with it."}
@@ -187,7 +187,7 @@
 # between verbs, which is where a well-formed one sits -- but `#` is the
 # comment character wherever it appears, so the text is cut at the first one
 # outside quotes before the grammar ever sees it. Without this,
-# `(group web #22a6f2)` was a SYNTAX ERROR rather than a group call with a
+# `(box web #22a6f2)` was a SYNTAX ERROR rather than a box call with a
 # comment after it, which is a confusing way to learn that colours are
 # written bare.
 #
@@ -209,7 +209,7 @@
 (defn usage
   ``One verb's call shape, from the same `:args` the parser was built from.
 
-  `(group p color?)`. The `?` marks the optional argument. A path argument is
+  `(box p color?)`. The `?` marks the optional argument. A path argument is
   `p` -- short, because it appears in nearly every verb and a long word
   repeated down the list is read as noise rather than as a placeholder. An
   alias argument is `token`, because that is what it is: a spelling you pick,
@@ -319,7 +319,7 @@
         (array/push (state :only) text))
       nil)
 
-    :group
+    :box
     (let [text (normalise (expand-aliases (state :aliases) (first args)))
           wanted (get args 1)]
       (var hue "")
@@ -422,7 +422,7 @@
     (if-let [forms (peg/match grammar text)]
       (do
         (var wrong nil)
-        # A line may hold more than one form -- `(group test) (hide test)` --
+        # A line may hold more than one form -- `(box test) (hide test)` --
         # and the first complaint is the one worth reporting.
         (var i 0)
         (while (< i (length forms))
@@ -453,7 +453,7 @@
   means.
 
   So: every `prefix` first, in order, then everything else, in order. Within
-  each pass the file still reads top to bottom, which is what `group` needs
+  each pass the file still reads top to bottom, which is what `box` needs
   for its colours and what makes "the first binding of a token wins" true.
   Nothing else here is order-dependent across the two.``
   [lines]

@@ -8,7 +8,7 @@
 #
 # The path is kept whole (`github.com/user/repo/pkg`), because that is what
 # prefix matching needs: (hide github.com) drops every third-party package at
-# once, and (group ~.internal) boxes the project's own.
+# once, and (box ~.internal) boxes the project's own.
 
 (def- line-start '(+ (> -1 "\n") (! (> -1 1))))
 (def- space '(any (set " \t")))

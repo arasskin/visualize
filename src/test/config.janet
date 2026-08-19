@@ -24,27 +24,27 @@
   (t/ok (state :sized)))
 
 (t/test "groups take the palette in order and never repeat"
-  (def state (state-of "(group \"~.A\")" "(group \"~.B\")" "(group \"~.C\")"))
+  (def state (state-of "(box \"~.A\")" "(box \"~.B\")" "(box \"~.C\")"))
   (def hues (map |($ :color) (state :groups)))
   (t/is= 3 (length (distinct hues)))
   (t/ok (not (index-of color/ungrouped hues))
         "no group may wear the colour ungrouped nodes already have"))
 
 (t/test "an explicit colour wins and the automatic ones move around it"
-  # (group ~.a) (group ~.b red) where ~.a already drew red: the named colour
+  # (box ~.a) (box ~.b red) where ~.a already drew red: the named colour
   # keeps it and ~.a is reassigned, so the boxes stay distinguishable.
-  (def state (state-of "(group \"~.A\")" "(group \"~.B\" red)"))
+  (def state (state-of "(box \"~.A\")" "(box \"~.B\" red)"))
   (def by-prefix (table ;(mapcat |[($ :prefix) ($ :color)] (state :groups))))
   (t/is= "#ff4d6d" (by-prefix "~.B"))
   (t/ok (not= "#ff4d6d" (by-prefix "~.A"))))
 
 (t/test "regrouping a prefix recolours rather than duplicating"
-  (def state (state-of "(group \"~.A\")" "(group \"~.A\" blue)"))
+  (def state (state-of "(box \"~.A\")" "(box \"~.A\" blue)"))
   (t/is= 1 (length (state :groups)))
   (t/is= "#22a6f2" (((state :groups) 0) :color)))
 
 (t/test "a bad colour complains on its own line and the rest still runs"
-  (def [state problems] (run "(group \"~.A\" nonsense)" "(hide \"~.B\")"))
+  (def [state problems] (run "(box \"~.A\" nonsense)" "(hide \"~.B\")"))
   (t/ok (problems 0) "the bad line is reported")
   (t/ok (string/find "not a colour" (problems 0)))
   (t/is= ["~.B"] (state :hidden) "the good line still took effect")
@@ -55,7 +55,7 @@
   # Written bare, since a hash would comment the line out before it could be
   # refused for being the wrong colour.
   (def bare (string/replace "#" "" color/ungrouped))
-  (def [_ problems] (run (string "(group \"~.A\" " bare ")")))
+  (def [_ problems] (run (string "(box \"~.A\" " bare ")")))
   (t/ok (problems 0))
   (t/ok (string/find "invisible" (problems 0))))
 
@@ -82,20 +82,20 @@
   # SIX HEX DIGITS, no hash. `#` is the comment character wherever it
   # appears, so a colour cannot spell itself with one -- and the stored form
   # gains the hash because that is what SVG wants.
-  (t/is= "#22a6f2" (get-in (state-of "(group web 22a6f2)") [:groups 0 :color]))
-  (t/is= "#ff4d6d" (get-in (state-of "(group web red)") [:groups 0 :color]))
+  (t/is= "#22a6f2" (get-in (state-of "(box web 22a6f2)") [:groups 0 :color]))
+  (t/is= "#ff4d6d" (get-in (state-of "(box web red)") [:groups 0 :color]))
   # A hash in the colour position comments the rest of the line out, which
   # takes the closing parenthesis with it -- so the line is unclosed, and
   # that is what it is told.
-  (def [state problems] (run "(group web #22a6f2)"))
+  (def [state problems] (run "(box web #22a6f2)"))
   (t/is= [] (state :groups) "nothing was grouped")
   (t/ok (string/find "parenthesis" (problems 0)))
   # Quoted is refused too: the reader keeps the hash, and it is not a colour.
-  (def [_ quoted] (run `(group web "#22a6f2")`))
+  (def [_ quoted] (run `(box web "#22a6f2")`))
   (t/ok (string/find "not a colour" (quoted 0)))
   # Something in the colour position that is neither is refused, rather than
   # silently drawing the group in the next palette hue.
-  (def [_ bad] (run "(group web nonsense)"))
+  (def [_ bad] (run "(box web nonsense)"))
   (t/ok (bad 0)))
 
 (t/test "a comment is a line that does nothing, wherever it sits"
@@ -127,7 +127,7 @@
 (t/test "a refusal says what to write instead"
   (def [_ unknown] (run "(explode src)"))
   (t/ok (string/find "no verb" (unknown 0)))
-  (t/ok (string/find "group" (unknown 0)) "and lists the ones there are")
+  (t/ok (string/find "box" (unknown 0)) "and lists the ones there are")
   (def [_ badargs] (run "(hide)"))
   (t/ok (badargs 0) "a verb without its argument is refused")
   (def [_ unclosed] (run "(hide src.test"))
@@ -147,7 +147,7 @@
   (t/is= ["src.visualize.color"] (state :hidden))
   (t/is= ["src.visualize"] (state :only))
   # Groups too, and the colour survives the expansion.
-  (def grouped (state-of "(prefix ~ src)" "(group ~.test 22a6f2)"))
+  (def grouped (state-of "(prefix ~ src)" "(box ~.test 22a6f2)"))
   (t/is= "src.test" (get-in grouped [:groups 0 :prefix]))
   (t/is= "#22a6f2" (get-in grouped [:groups 0 :color])))
 
@@ -174,7 +174,7 @@
   # `prefix` means prefix: the token is the head of the name and the rest is
   # ordinary characters, whatever they are. With `~` bound to src.config,
   # `~~.something` is src.config followed by `~.something`.
-  (def state (state-of "(prefix ~ src.config)" "(group ~~.something)"))
+  (def state (state-of "(prefix ~ src.config)" "(box ~~.something)"))
   (t/is= "src.config~.something" (get-in state [:groups 0 :prefix]))
   # Not in the middle, and not at the end.
   (t/is= ["a.~.b"] ((state-of "(prefix ~ src)" "(hide a.~.b)") :hidden)))
@@ -235,7 +235,7 @@
 (t/test "a usage line comes from the arguments the parser takes"
   (def by-name (tabseq [d :in (config/docs)] (d :name) d))
   (t/is= "(prefix token p)" (get-in by-name ["prefix" :usage]))
-  (t/is= "(group p color?)" (get-in by-name ["group" :usage])
+  (t/is= "(box p color?)" (get-in by-name ["box" :usage])
          "the optional colour is marked")
   (t/is= "(lines)" (get-in by-name ["lines" :usage])
          "a verb with no arguments")
@@ -291,5 +291,5 @@
 (t/test "the file still reads top to bottom within a pass"
   # Only `prefix` is hoisted. Everything else keeps its order, which is what
   # group needs for its colours.
-  (def state (state-of "(group a)" "(prefix ~ src)" "(group b)"))
+  (def state (state-of "(box a)" "(prefix ~ src)" "(box b)"))
   (t/is= ["a" "b"] (map |($ :prefix) (state :groups))))

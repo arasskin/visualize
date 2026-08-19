@@ -11,18 +11,18 @@
 #     (hide ~.Tests)          drop it, and every edge touching it
 #     ;;(hide ~.Tests)        comment it out to put it back
 #     (hide ~.Clip.)          ...trailing dot: its contents, not itself
-#     (group ~.Clip)          box its members, next palette colour
-#     (group ~.Shared red)    ...or a colour you name
+#     (box ~.Clip)            draw a box round its members, next palette colour
+#     (box ~.Shared red)      ...or a colour you name
 #     (only ~)                narrow to our own files -- the everyday setting
 #     (lines)                 write each file's line count on it
 #
 # `~` IS THE PROJECT, the way a shell expands ~ to a home directory. Every
-# other name is literal, so (group SwiftUI) and (hide WebKit) work on the
+# other name is literal, so (box SwiftUI) and (hide WebKit) work on the
 # imported frameworks exactly as they do on our own files.
 #
 # The config is real Janet, so it is not limited to the list above:
 #
-#     (each n ["Core" "UI" "Net"] (group (string "~." n)))
+#     (each n ["Core" "UI" "Net"] (box (string "~." n)))
 #
 # The page runs that file on load, so the view you left is the view you return
 # to. Every button press is a real edit to the real file.

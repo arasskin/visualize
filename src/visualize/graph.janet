@@ -47,9 +47,9 @@
 # is therefore always right, so this points at it instead.
 (def starter
   ``# One verb per line. Press ? for the full list.
-# A name is the dotted path a node shows: (group src.parsers) boxes that
-# directory, (hide src.test) drops it. Any other name is literal, so
-# (group SwiftUI) groups the framework. Comment out with '#'.
+# A name is the dotted path a node shows: (box src.parsers) draws a box
+# round that directory, (hide src.test) drops it. Any other name is
+# literal, so (box SwiftUI) boxes the framework. Comment out with '#'.
 (lines)
 ``)
 
