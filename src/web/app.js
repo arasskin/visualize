@@ -325,6 +325,15 @@ function uncomment(text) {
   return head + rest;
 }
 
+// Comment a line out, or bring it back. Shared by the row's `#` button and
+// by alt+c, so the two cannot drift into meaning different things.
+function toggleComment(at) {
+  const text = lines[at];
+  if (text === undefined) return;
+  lines[at] = text.trim().startsWith('#') ? uncomment(text) : '#' + text;
+  send('run', at);
+}
+
 function draw() {
   // A DELETE CAN LEAVE THE SELECTION PAST THE END. Clamp before drawing, so
   // the picked row is always one that exists and the next j moves from where
@@ -374,10 +383,7 @@ function draw() {
     // the line the way you would have typed it and sends the file. That is
     // why the server knows nothing about it -- there is nothing to know.
     const hash = icon('#', commented ? 'uncomment this line' : 'comment this line out', 'hash');
-    hash.onclick = () => {
-      lines[i] = commented ? uncomment(text) : '#' + text;
-      send('run', i);
-    };
+    hash.onclick = () => toggleComment(i);
     const del = icon('✕', 'delete this line', 'del');
     del.onclick = () => send('delete', i);
 
@@ -955,12 +961,31 @@ function altChord(e) {
   // the key that was pressed, whatever the OS decided it should type.
   const down = e.code === 'KeyJ' || e.code === 'ArrowDown';
   const up = e.code === 'KeyK' || e.code === 'ArrowUp';
-  if (!down && !up) return false;
+  const del = e.code === 'KeyD';
+  const comment = e.code === 'KeyC';
+  if (!down && !up && !del && !comment) return false;
   e.preventDefault();
-  // The panel has to be up to be moving around in it -- holding alt already
-  // put it there, and this is the case where it was open beforehand.
+  // ACTIONS NEED SOMETHING TO ACT ON, and the check has to happen BEFORE
+  // the panel opens: opening focuses a row, and focusing a row selects it,
+  // so asking afterwards would find a selection the open had just invented
+  // and delete a line nobody chose.
+  const nothingPicked = picked < 0 || picked >= lines.length;
+
+  // The panel has to be up to be working in it -- holding alt already put it
+  // there, and this is the case where it was open beforehand.
   if (configPanel.shut) configPanel.open();
-  pick(picked < 0 ? (down ? 0 : -1) : picked + (down ? 1 : -1));
+
+  if (down || up) {
+    pick(picked < 0 ? (down ? 0 : -1) : picked + (down ? 1 : -1));
+    return true;
+  }
+
+  if (nothingPicked) return true;
+  // One request in flight at a time: `send` refuses while busy, and a held
+  // key repeats fast enough to reach that.
+  if (busy) return true;
+  if (del) send('delete', picked);
+  else toggleComment(picked);
   return true;
 }
 
