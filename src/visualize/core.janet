@@ -134,6 +134,19 @@
   # knows it is behind.
   (var source-generation 0)
 
+  # THE SCANNED TREE, held here because this is what knows when it is stale.
+  # The watcher below tells this loop the source moved, and the same place
+  # that hears it is the place that drops the tree -- rather than a renderer
+  # holding a cache that something else has to remember to invalidate.
+  #
+  # Scanned on demand rather than at startup, so a first draw pays for it and
+  # a re-scan is just forgetting.
+  (var tree nil)
+  (defn scanned []
+    (unless tree (set tree (scan/scan root)))
+    tree)
+  (defn rescan [] (set tree nil))
+
   # Faults go to this project's state directory from here on, so a crash
   # that takes the server down is still readable afterwards.
   (def token (make-token))
@@ -166,7 +179,7 @@
   # The app's render, and the values only the CORE knows, kept apart: the
   # graph does not reach into the server for a token, and the server does
   # not know what a graph is.
-  (defn draw [] (graph/draw root config-path))
+  (defn draw [] (graph/draw (scanned) config-path))
 
   (defn handler [request]
     (def path (without-query (request :path)))
@@ -272,7 +285,13 @@
       # does and what gets drawn are none of its business.
       (and (= (request :method) "POST") (= path "/config"))
       ["200 OK" "application/json"
-       (json/encode (graph/config-edit root config-path (request :body)))]
+       (json/encode
+         (let [sent (json/decode (request :body))]
+           # Regenerate means "the source changed and I am telling you", so
+           # the tree is dropped before the edit is drawn. Every other action
+           # draws what is already scanned.
+           (when (= "regenerate" (string (get sent "action" ""))) (rescan))
+           (graph/config-edit (scanned) config-path (request :body))))]
 
       ["404 Not Found" "text/plain" "not found"]))
 
@@ -297,7 +316,7 @@
   # codebase changed.
   (watch/watching root
                   (fn []
-                    (graph/forget-scan)
+                    (rescan)
                     (++ source-generation)))
   # Off the server, not off the constant: they differ whenever the first
   # choice was taken, and printing the wrong one sends you to somebody else's

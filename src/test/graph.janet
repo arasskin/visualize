@@ -1,6 +1,7 @@
 # The config file on disk.
 
 (import ../visualize/graph)
+(import ../visualize/scan)
 (import ./harness :as t)
 
 (def- scratch "/tmp/visualize-graph-test.janet")
@@ -37,22 +38,23 @@
   # flashing the whole graph on load would say only that the graph exists.
   (def conf "/tmp/visualize-animate-test.conf")
   (spit conf "(animate)\n")
-  (def first-draw (graph/draw "." conf))
+  # A FRESH SCAN PER DRAWING, the way the server does it after the watcher
+  # says the source moved. Nothing is cached between them, so what the
+  # drawing compares against is the drawing before it and nothing else.
+  (def first-draw (graph/draw (scan/scan ".") conf))
   (t/is= 0 (length (string/find-all "node fresh" (string (first-draw 3))))
          "the first drawing flashes nothing")
 
   # A file written since then is new to this drawing.
   (os/touch "src/visualize/color.janet")
-  (graph/forget-scan)
-  (def second-draw (graph/draw "." conf))
+  (def second-draw (graph/draw (scan/scan ".") conf))
   (t/is= 1 (length (string/find-all `class="node fresh"` (string (second-draw 3))))
          "one file moved, one node flashes")
 
   # And without the verb, nothing is marked however much moved.
   (spit conf "(lines)\n")
   (os/touch "src/visualize/select.janet")
-  (graph/forget-scan)
-  (def unasked (graph/draw "." conf))
+  (def unasked (graph/draw (scan/scan ".") conf))
   (t/is= 0 (length (string/find-all "fresh" (string (unasked 3))))
          "the flash is the verb's, not the watcher's")
   (os/rm conf))
@@ -75,10 +77,9 @@
   (spit (string dir "/b.py") "x = 1\n")
 
   (defn flashed []
-    (graph/forget-scan)
     (sort (peg/match ~(any (+ (* `class="node fresh"` (any (if-not "<title>" 1))
                                  "<title>" (<- (some (if-not "<" 1)))) 1))
-                     (string ((graph/draw dir conf) 3)))))
+                     (string ((graph/draw (scan/scan dir) conf) 3)))))
 
   # THE BASELINE IS PER PROCESS, not per tree -- "since you last looked" is
   # a question about this session. The test above drew this repository, so

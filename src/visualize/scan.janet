@@ -393,28 +393,3 @@
     {:error (string "no files under " root
                     " matched any parser (" (string/join (languages) ", ") ")")}
     (build (read-all jobs workers))))
-
-# The scan's output for a given source tree never varies -- same files, same
-# graph, every time. It is fast, but it is still pointless to redo per edit
-# when only the post-processing changes. `forget` is how you say the SOURCE
-# changed and this is stale.
-#
-# THE CACHE LIVES WITH THE SCAN, not with whichever caller wanted one. A
-# drawing is a pure function of the graph and the config; which of those was
-# cached is not the drawing's business.
-(var- cached nil)
-
-(defn graph-of
-  ``The dependency graph of `root`, scanned once and remembered.
-
-  What `scan` returns -- {:nodes :edges :sizes :stamps :ours}, or a table
-  carrying :error.``
-  [root]
-  (unless cached
-    (set cached (scan root)))
-  cached)
-
-(defn forget
-  "Drop the cached scan, so the next read re-walks the source tree."
-  []
-  (set cached nil))

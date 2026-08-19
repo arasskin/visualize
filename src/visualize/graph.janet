@@ -13,7 +13,6 @@
 # which is what makes "an app that visualizes this project" a thing you can
 # write without touching the server.
 
-(import ./scan)
 (import ./select)
 (import ./layout)
 (import ./config)
@@ -121,19 +120,20 @@
   flashing)
 
 (defn- render-svg
-  ``Draw the graph the config asks for. Returns [ok svg-or-error].
+  ``Draw the tree the config asks for. Returns [ok svg-or-error].
 
-  The scan is the whole graph; the narrowing, hiding, grouping and colouring
-  are all applied to it on the way to the layout.``
-  [root state]
-  (def graph (scan/graph-of root))
-  (if (graph :error)
-    [false (graph :error)]
+  THE TREE IS HANDED IN, not fetched. This module turns a scanned tree and a
+  config into a picture, and holding neither means it cannot be wrong about
+  when either is stale -- whoever owns the tree knows when it changed, and
+  that is the server. It also means this file does not import the scanner.``
+  [tree state]
+  (if (tree :error)
+    [false (tree :error)]
     (do
       # Narrow before hiding: (only ~) then (hide ~.Tests) reads the way
       # it is written, and hiding something already filtered out is a no-op
       # rather than an error.
-      (def trimmed (select/drop-nodes (select/keep graph (state :only)) (state :hidden)))
+      (def trimmed (select/drop-nodes (select/keep tree (state :only)) (state :hidden)))
       # AN ALIAS RELABELS THE NODES IT COVERS. `(prefix ~ src.visualize)`
       # makes `src.visualize.color` read `~.color`, so the picture speaks the
       # vocabulary the config is written in -- which is most of the point of
@@ -159,7 +159,7 @@
         (if (state :sized)
           (merge aliased
                  {:nodes (map (fn [node]
-                                (if-let [size (get (graph :sizes) (node :name))]
+                                (if-let [size (get (tree :sizes) (node :name))]
                                   (merge node {:label (string (node :label) "\n"
                                                               (select/thousands size))})
                                   node))
@@ -167,8 +167,8 @@
           aliased))
       # Compared before the record is updated, or every node would look
       # unchanged against a stamp taken moments ago.
-      (def flashing (moved-since (graph :stamps)))
-      (set seen (graph :stamps))
+      (def flashing (moved-since (tree :stamps)))
+      (set seen (tree :stamps))
       (layout/draw labelled {:groups (state :groups)
                              :sized (state :sized)
                              :flashing (if (state :animated) flashing {})}))))
@@ -201,17 +201,12 @@
 
 (defn draw
   ``Everything the page needs for one render: the config's lines, whatever
-  was wrong with them, and the graph or the error that stopped it.``
-  [root config-path]
+  was wrong with them, and the drawing or the error that stopped it.``
+  [tree config-path]
   (def lines (read-config config-path))
   (def [state problems] (config/run lines))
-  (def [ok result] (render-svg root state))
+  (def [ok result] (render-svg tree state))
   [lines problems ok result])
-
-(defn forget-scan
-  "Drop the cached scan, so the next draw re-reads the source tree."
-  []
-  (scan/forget))
 
 # Which actions are worth a redraw. Inserting adds an EMPTY line, which by
 # definition draws the same graph -- so it saves and returns immediately.
@@ -225,7 +220,7 @@
   THE WHOLE ROUTE, not a helper for it. The core hands over the request
   body and gets back a reply; nothing about buttons, configs or graphs
   needs to exist on the other side of that call.``
-  [root config-path body]
+  [tree config-path body]
   (def sent (json/decode body))
   (def action (string (get sent "action" "")))
   (def index (math/floor (or (get sent "index") -1)))
@@ -239,12 +234,9 @@
   # hold what you just did even if drawing it then fails.
   (def asking (= action "check"))
   (unless asking (write-config config-path lines))
-  # Rescanning is Regenerate's job, never a side effect of an edit -- the
-  # cache is dropped only when you ask for it.
-  (when (= action "regenerate") (forget-scan))
   (def [state problems] (config/run lines))
   (def [ok result]
-    (if (and (draws action) (not asking)) (render-svg root state) [true ""]))
+    (if (and (draws action) (not asking)) (render-svg tree state) [true ""]))
   {"lines" lines
    "problems" problems
    # A render failure belongs to no single line -- an unknown layout name is
