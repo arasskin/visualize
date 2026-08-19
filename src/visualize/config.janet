@@ -114,7 +114,7 @@
 # for the reader, and the parser never sees it.
 (def verb-specs
   [{:name "prefix" :args [:alias :name]
-    :blurb "Give a path a short name. The nodes under it are labelled with the token, and any later name starting with it is expanded -- so with (prefix ~ src.visualize), (hide ~.color) hides src.visualize.color. A token stands for one path; binding it twice is an error."}
+    :blurb "Give a path a short name. The nodes under it are labelled with that name, and any later path starting with it is expanded -- so with (prefix ~ src.visualize), (hide ~.color) hides src.visualize.color. A name stands for one path; binding it twice is an error."}
    {:name "box" :args [:name :color?]
     :blurb "Draw a box around everything under a path, and colour it. A colour is a name like blue, or six hex digits written bare -- 22a6f2, no hash, since a hash starts a comment. Without one a colour is chosen from the palette and the others shuffle to stay distinct."}
    {:name "hide" :args [:name]
@@ -212,13 +212,13 @@
   `(box p color?)`. The `?` marks the optional argument. A path argument is
   `p` -- short, because it appears in nearly every verb and a long word
   repeated down the list is read as noise rather than as a placeholder. An
-  alias argument is `token`, because that is what it is: a spelling you pick,
-  not a path.``
+  alias argument is `name`, which is what the verb gives the path: `(prefix
+  name p)` reads as "name this path".``
   [spec]
   (def parts
     (map (fn [arg]
            (case arg
-             :alias "token"
+             :alias "name"
              :name "p"
              :color? "color?"
              (string arg)))
@@ -350,18 +350,18 @@
           full (normalise (get args 1))
           bound (find |(= ($ :alias) token) (state :aliases))]
       (cond
-        (empty? token)
-        "a prefix needs something to bind -- (prefix this as), like (prefix ~ src.visualize)"
-
+        # No empty-name branch: `:alias` needs at least one character, so a
+        # `(prefix)` or `(prefix ~)` never parses and never reaches here. An
+        # empty PATH does reach it, because `""` is a legal quoted name.
         (empty? full)
-        "a prefix needs a path to stand for -- (prefix this as), like (prefix ~ src.visualize)"
+        "a prefix needs a path to stand for -- (prefix name p), like (prefix ~ src.visualize)"
 
         # REBINDING IS AN ERROR, not a replacement. A config is read top to
         # bottom and every line is its own program, so a second binding would
         # silently change what the lines above it meant. Say it instead.
         bound
         (string "`" token "` is already bound to `" (bound :prefix)
-                "` -- a token stands for one path")
+                "` -- a name stands for one path")
 
         (do
           (put state :aliases
