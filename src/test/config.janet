@@ -7,8 +7,8 @@
 (defn- run [& lines] (config/run lines))
 (defn- state-of [& lines] (first (config/run lines)))
 
-(t/test "hide and show-only collect prefixes"
-  (def state (state-of "(hide src.test)" "(hide WebKit)" "(show-only \"\")"))
+(t/test "hide and only collect prefixes"
+  (def state (state-of "(hide src.test)" "(hide WebKit)" "(only \"\")"))
   (t/is= ["src.test" "WebKit"] (state :hidden))
   (t/is= [""] (state :only) "the empty prefix is everything of ours"))
 
@@ -20,16 +20,8 @@
   (t/is= ["~.Tests"] (state :hidden)))
 
 (t/test "flags are set, never flipped"
-  (def state (state-of "(show-lines)" "(show-lines)" "(fill-color)"))
-  (t/ok (state :sized))
-  (t/ok (state :filled))
-  (t/ok (not (state :sized-coloring))))
-
-(t/test "show-lines-coloring implies the numbers"
-  # A colour ramp with nothing to read it against is a picture you cannot check.
-  (def state (state-of "(show-lines-coloring)"))
-  (t/ok (state :sized))
-  (t/ok (state :sized-coloring)))
+  (def state (state-of "(lines)" "(lines)"))
+  (t/ok (state :sized)))
 
 (t/test "groups take the palette in order and never repeat"
   (def state (state-of "(group \"~.A\")" "(group \"~.B\")" "(group \"~.C\")"))
@@ -151,7 +143,7 @@
   (t/is= "lib" (get-in (state-of "(prefix lib deps.vendor)") [:aliases 0 :alias])))
 
 (t/test "a bound prefix expands in later names"
-  (def state (state-of "(prefix ~ src.visualize)" "(hide ~.color)" "(show-only ~)"))
+  (def state (state-of "(prefix ~ src.visualize)" "(hide ~.color)" "(only ~)"))
   (t/is= ["src.visualize.color"] (state :hidden))
   (t/is= ["src.visualize"] (state :only))
   # Groups too, and the colour survives the expansion.
@@ -245,7 +237,7 @@
   (t/is= "(prefix token p)" (get-in by-name ["prefix" :usage]))
   (t/is= "(group p color?)" (get-in by-name ["group" :usage])
          "the optional colour is marked")
-  (t/is= "(show-lines)" (get-in by-name ["show-lines" :usage])
+  (t/is= "(lines)" (get-in by-name ["lines" :usage])
          "a verb with no arguments")
   # Every verb documented must carry a blurb -- a usage line alone says the
   # shape and not the meaning.
@@ -253,14 +245,25 @@
     (t/ok (and (d :blurb) (not (empty? (d :blurb))))
           (string (d :name) " must say what it does"))))
 
-(t/test "the longer of two verbs sharing a head still parses"
-  # `show-lines` is a prefix of `show-lines-coloring`, and a PEG takes the
-  # first alternative that matches -- so the rules are built longest name
-  # first. Without that, `(show-lines-coloring)` matches the `show-lines`
-  # rule and the rest of the line fails.
-  (def state (state-of "(show-lines-coloring)"))
-  (t/ok (state :sized-coloring))
-  (t/ok (state :sized)))
+(t/test "a verb whose name starts with another still parses"
+  # A PEG takes the first alternative that matches, so the rules are built
+  # longest name first: with `lines` ahead of a hypothetical `lines-by-size`,
+  # the longer verb would match the shorter rule and leave the rest of the
+  # line unparsed. No pair in the table shares a head today -- this asserts
+  # the ORDERING that makes adding one safe, since the trap is invisible
+  # until the day someone does.
+  (def names (map |($ :name) (config/docs)))
+  (each name names
+    (each other names
+      (when (and (not= name other) (string/has-prefix? name other))
+        (t/ok (< (index-of other names) (index-of name names))
+              (string other " must be tried before " name)))))
+  # And the whole table still parses, which is what the ordering protects.
+  (each d (config/docs)
+    (def [_ problems] (run (string "(" (d :name) " a b)")))
+    (when (problems 0)
+      (t/ok (not (string/find "there is no verb" (problems 0)))
+            (string (d :name) " must be reachable")))))
 
 (t/test "a prefix binds before any line that uses it"
   # WHERE IT SITS DOES NOT CHANGE WHAT THE FILE MEANS. A prefix declared at

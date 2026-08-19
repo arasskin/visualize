@@ -45,12 +45,12 @@
   (t/is= "" (select/expand "") "and the empty prefix is everything of ours"))
 
 (t/test "the empty prefix means OURS, not everything"
-  # Without this, (show-only ~) would keep the externals too and mean nothing.
+  # Without this, (only ~) would keep the externals too and mean nothing.
   (def ours {"Otto.App" true})
   (t/ok (select/matches? "Otto.App" "" ours))
   (t/ok (not (select/matches? "SwiftUI" "" ours))))
 
-(t/test "show-only narrows to a prefix and keeps only interior edges"
+(t/test "only narrows to a prefix and keeps only interior edges"
   # The empty prefix is what `~` alone used to spell: ours, by membership.
   (def got (select/keep (sample) [""]))
   (t/is= ["Otto.App" "Otto.View" "OttoClip.Cart"]

@@ -8,18 +8,18 @@
 (t/test "reading a config gives one entry per written line"
   # A trailing newline is one empty string on the end, and it is dropped --
   # it is how a text file ends, not a line someone wrote.
-  (spit scratch "(show-lines)\n(hide src.test)\n")
-  (t/is= ["(show-lines)" "(hide src.test)"] (graph/read-config scratch))
-  (spit scratch "(show-lines)")
-  (t/is= ["(show-lines)"] (graph/read-config scratch)
+  (spit scratch "(lines)\n(hide src.test)\n")
+  (t/is= ["(lines)" "(hide src.test)"] (graph/read-config scratch))
+  (spit scratch "(lines)")
+  (t/is= ["(lines)"] (graph/read-config scratch)
          "a file with no trailing newline reads the same"))
 
 (t/test "a config round trips unchanged"
-  (spit scratch "(show-lines)\n(hide src.test)\n")
+  (spit scratch "(lines)\n(hide src.test)\n")
   (def lines (graph/read-config scratch))
   (graph/write-config scratch lines)
   (t/is= lines (graph/read-config scratch))
-  (t/is= "(show-lines)\n(hide src.test)\n" (string (slurp scratch))
+  (t/is= "(lines)\n(hide src.test)\n" (string (slurp scratch))
          "and the file is the lines, newline-terminated"))
 
 (t/test "the editor's actions are the ones the page can send"

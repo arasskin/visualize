@@ -40,7 +40,7 @@
   paths -- it stripped to `a.b`, the same string wearing two more characters.
   `~` alone was "everything of ours", and that is the EMPTY prefix now:
   `matches?` reads it by membership rather than as a string test, so
-  `(show-only "")` keeps your files and drops the externals.
+  `(only "")` keeps your files and drops the externals.
 
   The config is plain Janet, so `~` is quasiquote and nothing else. A config
   wanting a short name for the project binds one -- `(def home "src")` --
@@ -56,7 +56,7 @@
 
   Everything is prefix-matched except the empty prefix that `~` expands to:
   that means "ours", which is a set membership test, not a string test.
-  Without the special case (show-only ~) would keep the externals as well and
+  Without the special case (only ~) would keep the externals as well and
   mean nothing.``
   [name prefix ours]
   (if (empty? prefix)
@@ -92,7 +92,7 @@
 
   Nothing declared means no filter at all -- so a config that says nothing
   shows the externals too, which is the only way to see what a project
-  actually links against. (show-only ~) gives back just our own files.
+  actually links against. (only ~) gives back just our own files.
 
   A node survives if it matches ANY prefix; an EDGE survives only if BOTH of
   its endpoints do. An edge to a node that is no longer drawn would point at

@@ -146,7 +146,7 @@ function moduleNames(svg) {
     const spans = texts.flatMap(t => [...t.querySelectorAll('tspan')]);
     const runs = (spans.length ? spans : texts)
       .map(t => t.textContent.trim());
-    // The show-lines view appends a count as its own run. Only a run that is
+    // The lines view appends a count as its own run. Only a run that is
     // ALL digits goes -- a file could legitimately end in a number.
     if (runs.length > 1 && /^\d+$/.test(runs[runs.length - 1])) runs.pop();
     const label = runs.join('');

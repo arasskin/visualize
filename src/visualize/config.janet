@@ -1,6 +1,6 @@
-# The config language: seven verbs, parsed by a PEG.
+# The config language: five verbs, parsed by a PEG.
 #
-#     (show-lines)
+#     (lines)
 #     (group src.visualize)
 #     (group web 22a6f2)
 #     (hide src.test)
@@ -54,10 +54,6 @@
     # questions -- the number is exact, the colour is a glance -- and either is
     # useful without the other.
     :sized false
-    :sized-coloring false
-    # Whether nodes carry their colour as a fill or just an outline. Outlines
-    # by default: a wall of saturated boxes is harder to read the EDGES over.
-    :filled false
     # Prefixes to narrow to. Empty means no filter, which is the WHOLE graph --
     # so a config saying nothing shows the externals too.
     :only @[]
@@ -123,21 +119,17 @@
     :blurb "Draw a box around everything under a path, and colour it. A colour is a name like blue, or six hex digits written bare -- 22a6f2, no hash, since a hash starts a comment. Without one a colour is chosen from the palette and the others shuffle to stay distinct."}
    {:name "hide" :args [:name]
     :blurb "Drop everything under a path from the drawing. Its edges go with it."}
-   {:name "show-only" :args [:name]
-    :blurb "Narrow to everything under a path. Several narrow to the union. Applied before hide, so (show-only src) then (hide src.test) reads the way it is written."}
-   {:name "show-lines-coloring" :args []
-    :blurb "Shade nodes by line count instead of by how many edges they have."}
-   {:name "show-lines" :args []
-    :blurb "Write each file's line count under its name."}
-   {:name "fill-color" :args []
-    :blurb "Fill the nodes with their colour instead of just outlining them."}])
+   {:name "only" :args [:name]
+    :blurb "Narrow to everything under a path. Several narrow to the union. Applied before hide, so (only src) then (hide src.test) reads the way it is written."}
+   {:name "lines" :args []
+    :blurb "Write each file's line count under its name."}])
 
 # LONGEST NAME FIRST is not cosmetic: a PEG alternation takes the first
-# branch that matches, so with "show-lines" ahead of "show-lines-coloring"
-# the longer verb would match the shorter rule and leave "-coloring"
-# unparsed. Sorting by length removes the need to remember that when adding
-# a verb -- which is exactly the kind of ordering a hand-written list gets
-# wrong once and then keeps.
+# branch that matches, so a verb whose name STARTS WITH another one -- were
+# `lines` and `lines-by-size` both here -- would match the shorter rule and
+# leave the rest unparsed. Sorting by length removes the need to remember
+# that when adding a verb, which is exactly the kind of ordering a
+# hand-written list gets wrong once and then keeps.
 (def- verb-rules
   (map (fn [spec]
          (def parts @[~(constant ,(keyword (spec :name))) (spec :name)])
@@ -321,7 +313,7 @@
         (array/push (state :hidden) text))
       nil)
 
-    :show-only
+    :only
     (let [text (normalise (expand-aliases (state :aliases) (first args)))]
       (unless (index-of text (state :only))
         (array/push (state :only) text))
@@ -377,11 +369,7 @@
                           (array ;(state :aliases) {:alias token :prefix full})))
           nil)))
 
-    :fill-color (do (put state :filled true) nil)
-    :show-lines (do (put state :sized true) nil)
-    :show-lines-coloring (do (put state :sized true)
-                             (put state :sized-coloring true)
-                             nil)))
+    :lines (do (put state :sized true) nil)))
 
 (defn- complain
   ``What is wrong with a line the grammar refused.

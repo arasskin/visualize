@@ -50,7 +50,7 @@
 # A name is the dotted path a node shows: (group src.parsers) boxes that
 # directory, (hide src.test) drops it. Any other name is literal, so
 # (group SwiftUI) groups the framework. Comment out with '#'.
-(show-lines)
+(lines)
 ``)
 
 # The starter above ends without a newline, because a long-string literal ends
@@ -132,23 +132,10 @@
   (if (graph :error)
     [false (graph :error)]
     (do
-      # Narrow before hiding: (show-only ~) then (hide ~.Tests) reads the way
+      # Narrow before hiding: (only ~) then (hide ~.Tests) reads the way
       # it is written, and hiding something already filtered out is a no-op
       # rather than an error.
       (def trimmed (select/drop-nodes (select/keep graph (state :only)) (state :hidden)))
-      # Only the nodes still on the graph get a say in the ramp: ranking
-      # against hidden files would spend the range on colours nothing wears.
-      (def weights
-        (if (state :sized-coloring)
-          (let [here @{}]
-            (each node (trimmed :nodes)
-              (when-let [size (get (graph :sizes) (node :name))]
-                (put here (node :name) size)))
-            (select/ramp-of here))
-          # The default shading, by how entangled a node is. Computed here
-          # rather than inside a renderer: it is a fact about the graph, and
-          # both layouts want the same one.
-          (select/weights-for trimmed)))
       # AN ALIAS RELABELS THE NODES IT COVERS. `(prefix ~ src.visualize)`
       # makes `src.visualize.color` read `~.color`, so the picture speaks the
       # vocabulary the config is written in -- which is most of the point of
@@ -167,7 +154,7 @@
                                   (merge node {:label (string/join (string/split "." short) ".\n")})
                                   node))
                               (trimmed :nodes))})))
-      # The label carries the line count when (show-lines) asked for it. Done
+      # The label carries the line count when (lines) asked for it. Done
       # on the graph rather than in a renderer, so both layouts get it and
       # the text that goes between them already says what the box reads.
       (def labelled
@@ -181,9 +168,7 @@
                               (aliased :nodes))})
           aliased))
       (layout/draw labelled {:groups (state :groups)
-                             :sized (state :sized)
-                             :filled (state :filled)
-                             :weights weights}))))
+                             :sized (state :sized)}))))
 
 
 (defn page

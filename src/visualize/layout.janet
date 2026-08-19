@@ -1,7 +1,7 @@
 # The graph, drawn by graphviz.
 #
 # WHAT THIS IS. `graph.janet` hands over a parsed graph and the config's
-# decisions -- groups, colours, whether nodes are filled -- and gets
+# decisions -- groups, colours -- and gets
 # back [ok svg]. Everything between is DOT: this file writes the graph as a
 # DOT document, runs `dot -Tsvg`, and returns what comes out.
 #
@@ -71,8 +71,6 @@
   [graph opts]
   (def groups (or (opts :groups) []))
   (def ours (or (graph :ours) {}))
-  (def weights (or (opts :weights) {}))
-  (def filled (opts :filled))
   (def out @[])
   (array/push out "digraph G {")
   (array/push out "  rankdir=TB;")
@@ -89,24 +87,19 @@
                       "\", fontsize=11, penwidth=1.2];"))
   (array/push out "  edge [arrowsize=0.7, color=\"#8a8a8a\"];")
 
-  # A node's colour is the group's hue tinted by its weight, which is what
-  # the custom renderer did and what the config's ramp expects. `filled`
-  # decides whether that colour goes inside the ellipse or only on its line.
+  # A node's colour is the group's hue tinted by its weight, and it goes on
+  # the OUTLINE rather than inside the ellipse: a wall of saturated boxes is
+  # harder to read the edges over, which is why the fill was never the
+  # default and is now not an option.
   (defn node-line [node indent]
     (def name (node :name))
     (def claimed (select/group-for name groups ours))
     (def hue (if claimed (claimed :color) color/ungrouped))
-    (def weight (get weights name 0))
-    (def fill (color/tint hue weight))
     (array/push out
                 (string indent "\"" (quoted name) "\""
                         (attrs [["label" (quoted (node :label))]
-                                ["fillcolor" (if filled fill "none")]
-                                ["style" (if filled "filled" "solid")]
                                 ["color" (color/ink-on-page hue)]
-                                ["fontcolor" (if filled
-                                               (color/ink fill)
-                                               (color/ink-on-page hue))]])
+                                ["fontcolor" (color/ink-on-page hue)]])
                         ";")))
 
   # GROUPS BECOME CLUSTERS, which is what a group has always meant here: a

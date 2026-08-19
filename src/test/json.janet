@@ -48,7 +48,7 @@
   (t/is= [] (json/decode "[]")))
 
 (t/test "a round trip through both is the identity"
-  (def original {"lines" ["(show-only ~)" "(group ~.A red)"]
+  (def original {"lines" ["(only ~)" "(group ~.A red)"]
                  "problems" {"0" "went wrong"}
                  "error" ""
                  "svg" "<svg><path d=\"M0,0\"/></svg>"})

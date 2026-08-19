@@ -13,10 +13,8 @@
 #     (hide ~.Clip.)          ...trailing dot: its contents, not itself
 #     (group ~.Clip)          box its members, next palette colour
 #     (group ~.Shared red)    ...or a colour you name
-#     (fill-color)            fill nodes with their group colour
-#     (show-only ~)           narrow to our own files -- the everyday setting
-#     (show-lines)            write each file's line count on it
-#     (show-lines-coloring)   ...and shade by size instead of by edges
+#     (only ~)                narrow to our own files -- the everyday setting
+#     (lines)                 write each file's line count on it
 #
 # `~` IS THE PROJECT, the way a shell expands ~ to a home directory. Every
 # other name is literal, so (group SwiftUI) and (hide WebKit) work on the
