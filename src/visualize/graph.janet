@@ -60,6 +60,15 @@
       # it is written, and hiding something already filtered out is a no-op
       # rather than an error.
       (def trimmed (select/drop-nodes (select/keep tree (state :only)) (state :hidden)))
+      # COLLAPSE AFTER TRIMMING, before everything else. There is no point
+      # folding nodes that `hide` already took off, and doing it here means
+      # the alias relabelling and the line counts below see the collapsed
+      # node rather than the members it replaced.
+      #
+      # The sizes come back changed, since a collapsed node carries the sum
+      # of what it stands for.
+      (def [folded sizes]
+        (select/collapse trimmed (state :collapsed) (tree :sizes)))
       # AN ALIAS RELABELS THE NODES IT COVERS. `(prefix ~ src.visualize)`
       # makes `src.visualize.color` read `~.color`, so the picture speaks the
       # vocabulary the config is written in -- which is most of the point of
@@ -70,14 +79,14 @@
       # and what the config matches. Only the label changes.
       (def aliased
         (if (empty? (state :aliases))
-          trimmed
-          (merge trimmed
+          folded
+          (merge folded
                  {:nodes (map (fn [node]
                                 (if-let [short (select/alias-label (state :aliases)
                                                                    (node :name))]
                                   (merge node {:label (string/join (string/split "." short) ".\n")})
                                   node))
-                              (trimmed :nodes))})))
+                              (folded :nodes))})))
       # The label carries the line count when (lines) asked for it. Done
       # on the graph rather than in a renderer, so both layouts get it and
       # the text that goes between them already says what the box reads.
@@ -85,7 +94,7 @@
         (if (state :sized)
           (merge aliased
                  {:nodes (map (fn [node]
-                                (if-let [size (get (tree :sizes) (node :name))]
+                                (if-let [size (get sizes (node :name))]
                                   # In full: an abbreviated 1.3k rounds away
                                   # the difference between files a hundred
                                   # lines apart, which is the comparison the

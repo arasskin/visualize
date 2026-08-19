@@ -168,3 +168,60 @@
   (def two [{:alias "~~" :prefix "src.visualize"} {:alias "~" :prefix "src"}])
   (t/is= "~~.color" (select/alias-label two "src.visualize.color"))
   (t/is= "~.test" (select/alias-label two "src.test")))
+
+(t/test "collapse folds a region into one node"
+  (def graph
+    {:nodes [{:name "p.go" :label "go" :ours true}
+             {:name "p.py" :label "py" :ours true}
+             {:name "p.shared" :label "shared" :ours true}
+             {:name "main" :label "main" :ours true}
+             {:name "util" :label "util" :ours true}]
+     # Two members point out, one points in, and one edge is between members.
+     :edges [["p.go" "main"] ["p.py" "main"] ["util" "p.go"] ["p.go" "p.shared"]]
+     :ours {"p.go" true "p.py" true "p.shared" true "main" true "util" true}})
+  (def sizes {"p.go" 10 "p.py" 20 "p.shared" 30 "main" 1 "util" 2})
+  (def [out counts] (select/collapse graph ["p"] sizes))
+
+  (t/is= ["main" "p" "util"] (sort (map |($ :name) (out :nodes)))
+         "three files became one node")
+
+  # THE COLLAPSED NODE WEARS THE EDGES ITS MEMBERS HAD. Two of them pointed
+  # at main, and that is one arrow now: five files importing one thing is
+  # one dependency once they are one node.
+  (t/is= [["p" "main"] ["util" "p"]] (sort (out :edges)))
+
+  # AN EDGE BETWEEN MEMBERS GOES. p.go -> p.shared is inside the node now,
+  # and an arrow from a thing to itself says nothing the collapse did not.
+  (t/ok (not (find |(= $ ["p" "p"]) (out :edges))))
+
+  # THE LINE COUNT ADDS UP, so a collapsed box reads the size of what it
+  # stands for.
+  (t/is= 60 (counts "p"))
+  (t/is= 1 (counts "main") "and the others are untouched")
+  (t/is= nil (counts "p.go") "a member's own count goes with it"))
+
+(t/test "collapse leaves a region of one alone"
+  # Folding a single thing into itself changes only its name, and the point
+  # of collapsing is to say less about a region's inside -- which a region
+  # of one already does.
+  (def graph {:nodes [{:name "a.only" :ours true} {:name "b" :ours true}]
+              :edges [["a.only" "b"]]
+              :ours {"a.only" true "b" true}})
+  (def [out counts] (select/collapse graph ["a"] {"a.only" 5 "b" 3}))
+  (t/is= ["a.only" "b"] (sort (map |($ :name) (out :nodes))))
+  (t/is= 5 (counts "a.only") "and keeps its own count")
+
+  # Nothing declared, nothing done.
+  (def [same] (select/collapse graph [] {}))
+  (t/is= 2 (length (same :nodes))))
+
+(t/test "two collapses that overlap fold a node once"
+  # First match by declaration order, like the boxes: a node folded into
+  # both would be drawn twice.
+  (def graph {:nodes [{:name "a.b.x" :ours true} {:name "a.b.y" :ours true}
+                      {:name "a.c" :ours true}]
+              :edges [["a.b.x" "a.c"]]
+              :ours {"a.b.x" true "a.b.y" true "a.c" true}})
+  (def [out] (select/collapse graph ["a" "a.b"] {}))
+  (t/is= ["a"] (map |($ :name) (out :nodes))
+         "the wider one declared first takes everything"))

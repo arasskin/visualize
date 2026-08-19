@@ -128,6 +128,97 @@
               :edges (filter (fn [[a b]] (not (or (hidden? a) (hidden? b))))
                              (graph :edges))}))))
 
+(defn collapse
+  ``Fold everything under each prefix into one node.
+
+  `(collapse src.visualize.parsers)` replaces the seven parser files with a
+  single node called `src.visualize.parsers`, wearing every edge any of them
+  had. What a collapsed region depends on, and what depends on it, is exactly
+  what its members did -- so the picture keeps saying the same thing about
+  the rest of the graph while saying less about the inside of one part.
+
+  EDGES BETWEEN MEMBERS GO. Two parsers that import each other are one node
+  now, and an arrow from a node to itself says nothing that the collapse did
+  not already say. Edges to the outside are kept, deduplicated: five files
+  importing `scan` is one arrow once they are one node.
+
+  THE LINE COUNT ADDS UP. A collapsed node stands for its members, so it
+  carries what they carried -- `(lines)` on a collapsed parsers box reads the
+  size of the directory, which is the number that is true of the thing now
+  drawn.
+
+  A PREFIX HOLDING ONE NODE LEAVES IT ALONE. Folding a single thing into
+  itself changes only its name, which is a rename nobody asked for -- and
+  the point of collapsing is to say less about a region's inside, which a
+  region of one already does.``
+  [graph prefixes sizes]
+  (if (empty? prefixes)
+    [graph sizes]
+    (let [ours (get graph :ours {})
+          tests (map |[(expand $) (selector $ ours)] prefixes)
+          # Which prefix swallows a node, if any. FIRST MATCH by declaration
+          # order, like the boxes -- two collapses that overlap would
+          # otherwise fold a node into both and draw it twice.
+          folded-into (fn [name]
+                        (var out nil)
+                        (each [prefix test] tests
+                          (when (and (nil? out) (test name)) (set out prefix)))
+                        out)]
+
+      # The nodes that survive: everything not folded, plus one per prefix
+      # that actually swallowed something.
+      # Members first, so a prefix holding only one can be put back.
+      (def members @{})
+      (each node (get graph :nodes [])
+        (when-let [into (folded-into (node :name))]
+          (put members into (array/push (or (members into) @[]) node))))
+      (def made @{})
+      (eachp [prefix group] members
+        (when (> (length group) 1) (put made prefix group)))
+
+      (def kept @[])
+      (each node (get graph :nodes [])
+        (def into (folded-into (node :name)))
+        (unless (and into (made into)) (array/push kept node)))
+
+      (def nodes @[])
+      (each node kept (array/push nodes node))
+      (eachp [prefix members] made
+        (array/push nodes
+                    {:name prefix
+                     :label (string/join (string/split "." prefix) ".\n")
+                     # Ours if anything inside it was: a collapsed region of
+                     # your own files is still yours.
+                     :ours (truthy? (find |($ :ours) members))}))
+
+      # Sizes follow their nodes. A collapsed one adds up what it stands for.
+      # A name maps to its stand-in, but only where one was actually made.
+      (def stands-for
+        (fn [name]
+          (def into (folded-into name))
+          (if (and into (made into)) into name)))
+
+      (def out-sizes @{})
+      (eachp [name n] (or sizes {})
+        (def into (folded-into name))
+        (unless (and into (made into)) (put out-sizes name n)))
+      (eachp [prefix members] made
+        (var total 0)
+        (each m members (+= total (get (or sizes {}) (m :name) 0)))
+        (when (> total 0) (put out-sizes prefix total)))
+
+      (def pairs @{})
+      (each [from to] (get graph :edges [])
+        (def a (stands-for from))
+        (def b (stands-for to))
+        # An arrow from a node to itself is what an edge between two members
+        # becomes, and it says nothing the collapse did not.
+        (unless (= a b) (put pairs [a b] true)))
+
+      [(merge graph {:nodes (sorted-by |($ :name) nodes)
+                     :edges (sorted (keys pairs))})
+       out-sizes])))
+
 (defn degrees
   ``How many edges touch each node, in and out together.
 
