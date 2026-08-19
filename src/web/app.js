@@ -727,9 +727,19 @@ const configPanel = makePanel(panel, {
   },
 });
 
-// Start under the header, top-left. After a frame, so the collapsed bar has a
-// real width to clamp against -- measuring before layout puts it elsewhere.
-requestAnimationFrame(() => configPanel.place(12, 60));
+// Top-left, with its BOTTOM EDGE ON THE HELP MARK'S. The two are the only
+// furniture on an otherwise empty page, so a shared baseline is what stops
+// them reading as two things placed independently.
+//
+// Measured rather than written down: the mark's height comes from its font
+// and the bar's from its padding, so a hardcoded top would drift the moment
+// either changed. After a frame, because neither has a real height until
+// layout has run.
+requestAnimationFrame(() => {
+  const mark = document.getElementById('help-open').getBoundingClientRect();
+  const bar = configPanel.root.getBoundingClientRect();
+  configPanel.place(12, Math.max(0, mark.bottom - bar.height));
+});
 
 lines = window.CONFIG_LINES || [];
 for (const [at, why] of Object.entries(window.CONFIG_PROBLEMS || {})) {
