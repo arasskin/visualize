@@ -952,6 +952,11 @@ let altDown = false;
 // thing separating it from a tap when no chord was struck. A chord counts as
 // a hold however brief it was.
 let altAt = 0;
+// Where the caret was when alt went down, so releasing puts it back. Moving
+// the selection focuses a row, which pulls the caret out of whatever you
+// were typing in -- and a modifier you held for a moment should not cost you
+// your place in a half-written line.
+let altCaret = null;
 // Generous, because the cost is asymmetric: a slow tap misread as a hold
 // puts away a panel you asked to keep, while a quick hold misread as a tap
 // just leaves it up. Only the no-chord case depends on this at all.
@@ -1053,6 +1058,14 @@ document.addEventListener('keydown', (e) => {
   altDown = true;
   altUsed = false;
   altAt = performance.now();
+  // The COMPOSE BAR only. A config row is not somewhere to return to: its
+  // focus handler selects that row, so restoring into one would undo the
+  // move you just made with j/k. The bar is outside the list and has no
+  // such opinion.
+  const el = document.activeElement;
+  altCaret = (el === composeInput && typeof el.selectionStart === 'number')
+    ? { el, start: el.selectionStart, end: el.selectionEnd }
+    : null;
   altOpened = configPanel.shut;
   // Opening on the way DOWN, so a hold shows the config for as long as it is
   // held. A tap over an open panel closes it instead -- see the keyup, which
@@ -1064,15 +1077,31 @@ document.addEventListener('keyup', (e) => {
   if (e.key !== 'Alt') return;
   altDown = false;
   const held = altUsed || performance.now() - altAt >= ALT_HOLD_MS;
+  // BACK TO WHERE YOU WERE TYPING -- AFTER the panel has settled. Putting a
+  // peek away blurs whatever inside it held focus, so restoring first only
+  // to have the close undo it was the bug this replaced. Only if the field
+  // is still on the page: a redraw replaces the inputs.
+  const caret = altCaret;
+  altCaret = null;
+  const restore = () => {
+    if (!caret || !caret.el.isConnected) return;
+    caret.el.focus();
+    if (typeof caret.el.setSelectionRange === 'function') {
+      caret.el.setSelectionRange(caret.start, caret.end);
+    }
+  };
+
   if (held) {
     // A HOLD IS A PEEK: it puts away what it put up, and leaves alone what
     // was already there.
     if (altOpened) configPanel.toggle();
+    restore();
     return;
   }
   // A TAP IS A TOGGLE. Pressing down already opened a shut panel, so that
   // half is done; tapping over one that was open is what closes it.
   if (!altOpened) configPanel.toggle();
+  restore();
 });
 
 window.addEventListener('blur', () => {
