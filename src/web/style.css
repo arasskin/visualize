@@ -354,7 +354,20 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    low-contrast until hovered: it is here for the first five minutes of using
    the config, and should not compete with the graph after that. */
 #help-open {
-  position: fixed; top: .5rem; right: .9rem; z-index: 6;
+  /* INSET EQUALLY, like the config panel: 12px of gap above the glyph and
+     12px to its right, so both bits of furniture sit the same distance into
+     the same corner.
+     
+     The offsets are not 12px themselves, because the padding is a HIT TARGET
+     rather than spacing -- it sits between the glyph and the edge and has to
+     come off. Written as the subtraction so the two stay tied: change the
+     padding and the gap holds. */
+  --inset: 12px;
+  --pad-y: .35rem;
+  --pad-x: .5rem;
+  position: fixed; z-index: 6;
+  top: calc(var(--inset) - var(--pad-y));
+  right: calc(var(--inset) - var(--pad-x));
   /* Bare glyph: the generic button rule gives every button a border and a
      wash, and both are undone here. A chrome-less mark reads as part of the
      page the way the HUD does, where a bordered circle reads as a control
@@ -364,7 +377,7 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
      glyph is eleven pixels wide, which is a hard thing to hit and was --
      the first click after removing the border missed it. The mark stays
      bare; the area around it is just clickable. */
-  padding: .35rem .5rem;
+  padding: var(--pad-y) var(--pad-x);
   font: 700 20px/1 var(--font-config);
   color: var(--ink); opacity: .55;
 }
