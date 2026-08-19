@@ -136,6 +136,26 @@
   (def [_ badargs] (run "(hide)"))
   (t/ok (badargs 0) "a verb without its argument is refused"))
 
+(t/test "a complaint names the form that failed, not the first one"
+  # A line holds as many forms as you like, and the compose bar writes more
+  # than one whenever it appends to a selected line: type `hide` with a box
+  # line picked and the line becomes `(box src.web) (hide)`. Reading the verb
+  # off the FRONT of the line reported `box` for a mistake in `hide`.
+  (defn about [line] (((run line) 1) 0))
+
+  (t/ok (string/find "`hide`" (about "(box src.web) (hide)"))
+        "the broken form is named")
+  (t/ok (not (string/find "`box`" (about "(box src.web) (hide)")))
+        "and the one before it is not")
+
+  (t/ok (string/find "wobble" (about "(lines) (wobble x)")))
+  (t/ok (string/find "`lines`" (about "(box a red) (lines extra)")))
+
+  # A line that fails as a WHOLE has no single form to blame, and still says
+  # the useful thing.
+  (t/ok (string/find "parenthesis" (about "(hide src.test")))
+  (t/ok (string/find "parentheses" (about "hide src.test"))))
+
 (t/test "an arity complaint shows THAT verb's shape"
   # One canned sentence used to serve every verb, and it ended "and a colour
   # is rrggbb or a name" -- so `(lines extra)` complained about a colour it

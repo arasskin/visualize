@@ -376,7 +376,21 @@
   an answer in itself.``
   [line]
   (def text (string/trim line))
-  (def named (peg/match ~(* "(" (any (set " \t")) (<- (some (range "az" "AZ" "--")))) text))
+  # THE FORM THAT FAILED, not the first one on the line. A line may hold
+  # several -- `(box src.web) (hide)` is what the compose bar writes when it
+  # appends to a selected line -- and reading the verb off the front named
+  # `box` for a mistake in `hide`, which is a confusing thing to be told.
+  #
+  # Each form is tried on its own and the first that the grammar refuses is
+  # the one to talk about. A line that fails only as a WHOLE -- unbalanced
+  # parentheses, text outside a form -- has no such piece, and falls back to
+  # the front of the line, which is where the rest of these messages point.
+  (def forms (peg/match ~(any (+ (<- (* "(" (any (if-not ")" 1)) ")"))
+                                 (if-not "(" 1)))
+                        text))
+  (def broken (find |(nil? (peg/match grammar $)) (or forms [])))
+  (def named (peg/match ~(* "(" (any (set " \t")) (<- (some (range "az" "AZ" "--"))))
+                        (or broken text)))
   (def verb (and named (first named)))
   (cond
     (not (string/has-prefix? "(" text))
