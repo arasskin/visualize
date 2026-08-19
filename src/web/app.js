@@ -378,23 +378,23 @@ function draw() {
       if (e.key === 'Enter') { e.preventDefault(); send('run', i); }
     };
 
-    // NO INSERT BUTTONS. A new line comes from the compose bar -- type
-    // anywhere and it goes to the end -- so a row's own controls are only
-    // about the row: comment it out, remove it, or drag it somewhere else.
-    //
-    // No run button either: every action re-runs the whole file anyway, so a
+    // No run button: every action re-runs the whole file anyway, so a
     // per-line one promised a granularity that never existed. Enter in the
     // field is what commits a typed edit.
     //
     // Commenting is a TEXT EDIT, not an action of its own: the button writes
     // the line the way you would have typed it and sends the file. That is
     // why the server knows nothing about it -- there is nothing to know.
+    const up = icon('↑', 'insert a line above', 'up');
+    up.onclick = () => send('insert-above', i);
+    const down = icon('↓', 'insert a line below', 'down');
+    down.onclick = () => send('insert-below', i);
     const hash = icon('#', commented ? 'uncomment this line' : 'comment this line out', 'hash');
     hash.onclick = () => toggleComment(i);
     const del = icon('✕', 'delete this line', 'del');
     del.onclick = () => send('delete', i);
 
-    row.append(box, hash, del, hold);
+    row.append(box, up, down, hash, del, hold);
 
     // The line and anything wrong with it travel together, so the message sits
     // directly beneath the input that caused it.
@@ -414,6 +414,17 @@ function draw() {
     rows.appendChild(slot);
   });
 
+  // AN EMPTY FILE STILL NEEDS A WAY IN. With no rows there is no row to
+  // insert from, so deleting the last line would leave a panel you could
+  // never add to again.
+  if (!lines.length) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const add = icon('+', 'add the first line', 'up');
+    add.onclick = () => send('insert-below', -1);
+    row.append(add);
+    rows.appendChild(row);
+  }
 }
 
 // Pick a row up and carry it. A clone follows the pointer while the real row
@@ -523,7 +534,9 @@ async function send(action, index, keepView) {
   draw();
   // Inserting only saves; saying 'drawing' would be a lie, and the request
   // comes back too fast for the message to be read anyway.
-  const draws = true;
+  // Inserting adds an empty line, which draws the same graph -- so it says
+  // "saving" rather than promising a redraw that would change nothing.
+  const draws = action !== 'insert-above' && action !== 'insert-below';
   status.textContent = draws ? 'drawing...' : 'saving...';
   const t0 = performance.now();
   try {
