@@ -1134,6 +1134,8 @@ composeInput.addEventListener('input', () => {
 // follows it -- `(box src` and `(box src.web ` want different things.
 for (const ev of ['click', 'keyup']) {
   composeInput.addEventListener(ev, (e) => {
+    // Only the horizontal ones: up and down walk the LIST now, and resetting
+    // the highlight on their keyup would undo the move as it was made.
     if (e.type === 'keyup' && !['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) return;
     listAt = -1;
     renderList();
@@ -1147,6 +1149,14 @@ composeInput.addEventListener('keydown', (e) => {
   if (e.ctrlKey && (e.key === 'n' || e.key === 'p') && listItems.length) {
     e.preventDefault();
     moveList(e.key === 'n' ? 1 : -1);
+    return;
+  }
+  // THE ARROWS AGREE WITH WHAT YOU SEE. The list is drawn bottom-up, best
+  // match nearest the field, so DOWN walks toward the field and UP away
+  // from it -- the opposite of the index, and the same direction as the eye.
+  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && listItems.length) {
+    e.preventDefault();
+    moveList(e.key === 'ArrowUp' ? 1 : -1);
     return;
   }
   if (e.key === 'Tab' && listItems.length) {

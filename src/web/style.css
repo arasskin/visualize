@@ -563,7 +563,20 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    under your hands. */
 #compose-list {
   position: absolute; bottom: 100%; left: 0; right: 0;
-  margin: 0 0 .35rem; padding: 0; list-style: none;
+  /* FLUSH to the field, and its border shared with the box's rather than
+     doubled: the list is the field's own overflow, not a separate panel
+     floating near it. */
+  margin: 0; padding: 0; list-style: none;
+  border-bottom: 0;
+  /* BEST MATCH AT THE BOTTOM, nearest the text it is completing. The rows
+     are written in rank order and the column is reversed, so the first
+     candidate sits against the field and the list grows upward away from
+     it -- the eye does not travel to read the answer it is most likely to
+     want. */
+  display: flex; flex-direction: column-reverse;
+  /* A flex item shrinks to fit by default, so eight rows squeeze into the
+     five-row box rather than overflowing it. Told not to, the box overflows
+     and scrolls as it did before the reversal. */
   /* FIVE ROWS, then scroll. Enough to see the shape of what matched without
      the list becoming the page. */
   /* Five WHOLE rows: a row is its line-height plus its padding, and the
@@ -578,6 +591,7 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 #compose-list:empty { display: none; }
 
 #compose-list li {
+  flex: none;
   --row: 1.9em;
   --row-pad: .1rem;
   padding: var(--row-pad) .6rem;
