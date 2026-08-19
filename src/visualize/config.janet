@@ -131,7 +131,7 @@
    {:name "box" :args [:name :color?]
     :blurb "Draw a box around nodes starting with the provided prefix. Give an optional color (blue, red, ..., or rrggbb)."}
    {:name "fold" :args [:name]
-    :blurb "Draw everything under a prefix as one node, wearing every edge its members had. Line counts add up, so a folded box reads the size of what it stands for."}
+    :blurb "Fold all nodes starting with prefix into one node aggregating line counts, incoming, and outgoing edges."}
    {:name "hide" :args [:name]
     :blurb "Hide all nodes starting with the given prefix."}
    {:name "only" :args [:name]
