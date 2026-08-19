@@ -388,9 +388,20 @@
     (and verb (not (index-of verb verbs)))
     (string "there is no verb `" verb "` -- try " (string/join verbs ", "))
 
+    # THE VERB'S OWN SHAPE, from the table the parser was built from. This
+    # used to be one canned sentence for every verb, ending "and a colour is
+    # rrggbb or a name" -- so `(lines extra)` and `(prefix ~)` both complained
+    # about a colour neither of them takes, and every arity error read like a
+    # `box` error.
     (and verb (index-of verb verbs))
-    (string "`" verb "` did not take these arguments -- a name is a dotted "
-            "path like src.visualize, and a colour is rrggbb or a name")
+    (let [spec (find |(= ($ :name) verb) verb-specs)]
+      (string "`" verb "` takes " (usage spec)
+              (if (empty? (spec :args))
+                " and nothing else"
+                (string " -- p is a dotted path like src.visualize"
+                        (if (index-of :color? (spec :args))
+                          ", and a colour is rrggbb or a name like blue"
+                          "")))))
 
     (string "not a config form -- try " (string/join verbs ", "))))
 

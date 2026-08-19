@@ -134,7 +134,30 @@
   (t/ok (string/find "no verb" (unknown 0)))
   (t/ok (string/find "box" (unknown 0)) "and lists the ones there are")
   (def [_ badargs] (run "(hide)"))
-  (t/ok (badargs 0) "a verb without its argument is refused")
+  (t/ok (badargs 0) "a verb without its argument is refused"))
+
+(t/test "an arity complaint shows THAT verb's shape"
+  # One canned sentence used to serve every verb, and it ended "and a colour
+  # is rrggbb or a name" -- so `(lines extra)` complained about a colour it
+  # does not take, and every arity error read like a box error.
+  (defn about [line] (((run line) 1) 0))
+
+  (t/ok (string/find "(hide p)" (about "(hide)"))
+        "hide is shown taking a prefix")
+  (t/ok (not (string/find "colour" (about "(hide)")))
+        "and no colour, which it does not take")
+
+  (t/ok (string/find "(lines)" (about "(lines extra)")))
+  (t/ok (string/find "nothing else" (about "(lines extra)"))
+        "a verb with no arguments says so")
+
+  (t/ok (string/find "(prefix name p)" (about "(prefix ~)"))
+        "prefix is shown taking both of its arguments")
+
+  # box is the one verb the old message was accidentally right about.
+  (t/ok (string/find "(box p color?)" (about "(box)")))
+  (t/ok (string/find "colour" (about "(box)"))
+        "and it alone mentions a colour")
   (def [_ unclosed] (run "(hide src.test"))
   (t/ok (string/find "parenthesis" (unclosed 0)))
   (def [_ naked] (run "hide src.test"))
