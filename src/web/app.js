@@ -859,6 +859,104 @@ const composeFault = document.getElementById('compose-fault');
 
 function composing() { return !compose.classList.contains('shut'); }
 
+const composeList = document.getElementById('compose-list');
+
+// -- completions -----------------------------------------------------------
+//
+// WHAT THERE IS TO COMPLETE is two things, and which one depends on where the
+// caret is: the first word of a line is a verb, and everything after it is a
+// prefix. Both are already on the page -- the verbs as window.CONFIG_DOCS,
+// the prefixes as the titles of the nodes currently drawn -- so none of this
+// asks the server anything.
+
+// Every dotted prefix of a name, so a node called `src.visualize.color`
+// offers `src` and `src.visualize` as well as itself. THE DERIVED ONES ARE
+// THE POINT: a leaf file is rarely what you box or hide, and typing `src`
+// should suggest the directory above the file rather than only the file.
+function prefixesOf(name) {
+  const parts = name.split('.');
+  const out = [];
+  for (let i = 1; i <= parts.length; i++) out.push(parts.slice(0, i).join('.'));
+  return out;
+}
+
+// What `(prefix ~ src.visualize)` lines bind, read off the config the page
+// is already showing: [name, what it stands for].
+function bindings() {
+  const out = [];
+  for (const line of lines) {
+    // Every form on the line, since a line may hold several.
+    for (const form of (line || '').match(/\([^)]*\)/g) || []) {
+      const m = /^\(\s*prefix\s+(\S+)\s+(\S+?)\s*\)$/.exec(form);
+      if (m) out.push([m[1], m[2]]);
+    }
+  }
+  return out;
+}
+
+function prefixCandidates() {
+  const svg = pane.querySelector('svg');
+  const names = [];
+  if (svg) {
+    for (const node of svg.querySelectorAll('g.node')) {
+      const title = node.querySelector('title');
+      if (title) names.push(title.textContent.trim());
+    }
+  }
+  const seen = new Set();
+  for (const name of names) for (const p of prefixesOf(name)) seen.add(p);
+
+  // A BOUND NAME IS A PREFIX TOO, and so is anything under it: `~` bound to
+  // src.visualize offers `~` and `~.color`, because those are the spellings
+  // the config is written in once the binding exists.
+  for (const [alias, stands] of bindings()) {
+    seen.add(alias);
+    for (const p of seen.size ? [...seen] : []) {
+      if (p === stands) continue;
+      if (p.startsWith(stands + '.')) seen.add(alias + p.slice(stands.length));
+    }
+  }
+  return [...seen];
+}
+
+// Ranked: a match at the START beats one in the middle, and a shorter
+// candidate beats a longer one. Shorter is a BROADER selection and usually
+// what was meant -- `src.visualize` before `src.visualize.parsers.javascript`.
+function rank(candidates, typed) {
+  const q = typed.toLowerCase();
+  const hits = [];
+  for (const c of candidates) {
+    const at = c.toLowerCase().indexOf(q);
+    if (at < 0) continue;
+    hits.push({ text: c, at, len: c.length });
+  }
+  hits.sort((a, b) => (a.at - b.at) || (a.len - b.len) || a.text.localeCompare(b.text));
+  return hits.map(h => h.text);
+}
+
+// The word the caret sits in, and what kind of thing it is. A line is
+// `verb arg...`, so the first word is a verb and the rest are prefixes.
+function wordAtCaret() {
+  const text = composeInput.value;
+  const caret = composeInput.selectionStart ?? text.length;
+  const before = text.slice(0, caret);
+  const start = before.lastIndexOf(' ') + 1;
+  return {
+    word: before.slice(start),
+    start,
+    end: caret,
+    first: start === 0,
+  };
+}
+
+function completions() {
+  const { word, first } = wordAtCaret();
+  const pool = first
+    ? (window.CONFIG_DOCS || []).map(d => d.name)
+    : prefixCandidates();
+  return rank(pool, word);
+}
+
 
 // The field is as wide as its text, so the closing paren sits just after
 // what you wrote rather than at the far edge of the box. Width in `ch`
@@ -870,12 +968,92 @@ function sizeCompose() {
   composeInput.style.width = n + 'ch';
 }
 
+// -- the list --------------------------------------------------------------
+
+// Which row is highlighted, or -1 for none. -1 is the state on opening and
+// after every keystroke: typing narrows the list rather than moving in it,
+// and Tab takes the top match precisely because nothing is selected yet.
+let listAt = -1;
+let listItems = [];
+
+function renderList() {
+  listItems = composing() ? completions() : [];
+  renderRows();
+}
+
+// Draw the rows as they stand, without asking what matches again.
+function renderRows() {
+  composeList.replaceChildren();
+  if (!listItems.length) {
+    compose.classList.remove('listing');
+    listAt = -1;
+    return;
+  }
+  compose.classList.add('listing');
+  listItems.forEach((text, i) => {
+    const li = document.createElement('li');
+    li.textContent = text;
+    li.setAttribute('role', 'option');
+    li.setAttribute('aria-selected', String(i === listAt));
+    if (i === listAt) li.className = 'at';
+    // Clicking takes it, which is the same as moving onto it.
+    li.addEventListener('mousedown', (e) => {
+      e.preventDefault();          // keep the caret in the field
+      takeCompletion(i);
+    });
+    composeList.appendChild(li);
+  });
+  // Keep the highlighted row in view; the list shows five at a time.
+  if (listAt >= 0) composeList.children[listAt]?.scrollIntoView({ block: 'nearest' });
+}
+
+// Write a candidate into the field, replacing the word the caret is in.
+// MOVING SELECTS: ctrl-n and ctrl-p put the text in as they go, so there is
+// nothing left to accept afterwards.
+function takeCompletion(i) {
+  const text = listItems[i];
+  if (text === undefined) return;
+  const { start, end } = wordAtCaret();
+  const value = composeInput.value;
+  composeInput.value = value.slice(0, start) + text + value.slice(end);
+  const caret = start + text.length;
+  composeInput.setSelectionRange(caret, caret);
+  listAt = i;
+  sizeCompose();
+}
+
+function moveList(step) {
+  if (!listItems.length) return;
+  // WRAPS, like the line movement: past the end is the top.
+  //
+  // From NOTHING selected, down goes to the first row and up to the last --
+  // `listAt` is -1 there, and letting the arithmetic run would put up on the
+  // second-to-last, which is a row nobody asked for.
+  if (listAt < 0) listAt = step > 0 ? 0 : listItems.length - 1;
+  else listAt = ((listAt + step) % listItems.length + listItems.length) % listItems.length;
+  takeCompletion(listAt);
+  // THE LIST DOES NOT RE-RANK WHILE YOU WALK IT. Taking a candidate writes it
+  // into the field, and re-filtering against that text would reorder the rows
+  // under the cursor -- one ctrl-p landing somewhere unrelated to where one
+  // ctrl-n came from. Typing rebuilds the list; moving only moves in it.
+  renderRows();
+}
+
+function shutList() {
+  listItems = [];
+  listAt = -1;
+  composeList.replaceChildren();
+  compose.classList.remove('listing');
+}
+
 function openCompose(seed) {
   compose.classList.remove('shut');
   composeFault.textContent = '';
   composeInput.value = seed || '';
   sizeCompose();
   composeInput.focus();
+  listAt = -1;
+  renderList();
   // Caret after the seeded character rather than before it.
   const end = composeInput.value.length;
   composeInput.setSelectionRange(end, end);
@@ -885,6 +1063,7 @@ function shutCompose() {
   compose.classList.add('shut');
   composeInput.value = '';
   composeFault.textContent = '';
+  shutList();
   composeInput.blur();
 }
 
@@ -942,11 +1121,50 @@ async function commitCompose() {
   shutCompose();
 }
 
-composeInput.addEventListener('input', sizeCompose);
+composeInput.addEventListener('input', () => {
+  sizeCompose();
+  // Typing NARROWS rather than moves: the highlight goes back to nothing, so
+  // Tab means "the best match for what I have now" however far down the list
+  // ctrl-n had wandered.
+  listAt = -1;
+  renderList();
+});
+
+// The caret moving changes which word is being completed, so the list
+// follows it -- `(box src` and `(box src.web ` want different things.
+for (const ev of ['click', 'keyup']) {
+  composeInput.addEventListener(ev, (e) => {
+    if (e.type === 'keyup' && !['ArrowLeft','ArrowRight','Home','End'].includes(e.key)) return;
+    listAt = -1;
+    renderList();
+  });
+}
 
 composeInput.addEventListener('keydown', (e) => {
+  // CTRL-N AND CTRL-P WALK THE LIST, and only while there is one -- the
+  // browser keeps them for new-window and print when the bar has nothing to
+  // offer, rather than losing them to a feature that is not doing anything.
+  if (e.ctrlKey && (e.key === 'n' || e.key === 'p') && listItems.length) {
+    e.preventDefault();
+    moveList(e.key === 'n' ? 1 : -1);
+    return;
+  }
+  if (e.key === 'Tab' && listItems.length) {
+    // The top match, since nothing is selected until ctrl-n moves. Moving
+    // already wrote its choice into the field, so Tab has nothing to do
+    // there and simply leaves it.
+    e.preventDefault();
+    if (listAt < 0) takeCompletion(0);
+    renderList();
+    return;
+  }
   if (e.key === 'Enter') { e.preventDefault(); commitCompose(); }
-  else if (e.key === 'Escape') { e.preventDefault(); shutCompose(); }
+  else if (e.key === 'Escape') {
+    e.preventDefault();
+    // The list first, then the bar: an escape closes the thing that is in
+    // the way before the thing you are working in.
+    if (listItems.length) shutList(); else shutCompose();
+  }
   // Backspacing past the start closes the bar, so an accidental keystroke is
   // undone by the same key that would undo a character.
   else if (e.key === 'Backspace' && composeInput.value === '') shutCompose();

@@ -552,3 +552,41 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
     fill-opacity: 0;
   }
 }
+
+/* -- completions -----------------------------------------------------------
+   ABOVE the bar. The bar sits 5.5rem off the bottom with the graph behind
+   it, so a list dropping down would cover the part you are looking at while
+   you filter it.
+
+   Absolutely positioned rather than in flow, so opening it does not move the
+   field -- the thing you are typing in should not jump when a list appears
+   under your hands. */
+#compose-list {
+  position: absolute; bottom: 100%; left: 0; right: 0;
+  margin: 0 0 .35rem; padding: 0; list-style: none;
+  /* FIVE ROWS, then scroll. Enough to see the shape of what matched without
+     the list becoming the page. */
+  /* Five WHOLE rows: a row is its line-height plus its padding, and the
+     border sits outside both -- leaving either out clips the fifth row
+     rather than showing it. */
+  max-height: calc(5 * (1.9em + .2rem) + 2px);
+  overflow-y: auto;
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+  font: inherit;
+}
+#compose-list:empty { display: none; }
+
+#compose-list li {
+  --row: 1.9em;
+  --row-pad: .1rem;
+  padding: var(--row-pad) .6rem;
+  line-height: var(--row);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+#compose-list li:hover { background: var(--wash); }
+/* The row ctrl-n moved to. Its text is already in the field, so this marks
+   where you are in the list rather than offering something to accept. */
+#compose-list li.at { background: var(--wash-strong); }

@@ -21,6 +21,9 @@
     <span class="paren">(</span><input id="compose-input" spellcheck="false"
       autocomplete="off" aria-label="add a config line"><span class="paren">)</span>
   </div>
+  <!-- Completions, ABOVE the bar: the graph is behind, and a list dropping
+       down would cover the part you are looking at while you filter it. -->
+  <ul id="compose-list" role="listbox" aria-label="completions"></ul>
   <!-- Why the line was refused, under the bar. Empty until something is. -->
   <p id="compose-fault" role="status" aria-live="polite"></p>
 </div>
