@@ -92,8 +92,4 @@
   (t/is= 2 (counts "Otto.App"))
   (t/is= 1 (counts "SwiftUI")))
 
-(t/test "line counts are written out in full"
-  (t/is= "240" (select/thousands 240))
-  (t/is= "1000" (select/thousands 1000) "no k abbreviation")
-  (t/is= "1300" (select/thousands 1300) "and no rounding to a tenth")
-  (t/is= "999" (select/thousands 999)))
+

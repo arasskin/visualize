@@ -160,8 +160,11 @@
           (merge aliased
                  {:nodes (map (fn [node]
                                 (if-let [size (get (tree :sizes) (node :name))]
-                                  (merge node {:label (string (node :label) "\n"
-                                                              (select/thousands size))})
+                                  # In full: an abbreviated 1.3k rounds away
+                                  # the difference between files a hundred
+                                  # lines apart, which is the comparison the
+                                  # number is on the box to support.
+                                  (merge node {:label (string (node :label) "\n" size)})
                                   node))
                               (aliased :nodes))})
           aliased))

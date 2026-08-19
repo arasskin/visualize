@@ -59,6 +59,23 @@
          "the flash is the verb's, not the watcher's")
   (os/rm conf))
 
+(t/test "a line count is written out in full"
+  # No `1.3k`: abbreviating rounds away the difference between files a
+  # hundred lines apart, which is the comparison the number is on the box to
+  # support. Asserted on the drawing rather than on a formatter, since the
+  # label is the thing that has to be right.
+  (def conf "/tmp/visualize-lines-test.conf")
+  (spit conf "(lines)\n")
+  (def svg (string ((graph/draw (scan/scan ".") conf) 3)))
+  (t/ok (nil? (peg/find ~(* (some (range "09")) "k") svg))
+        "no k-abbreviated count")
+  (t/ok (nil? (peg/find ~(* (some (range "09")) "." (some (range "09")) "k") svg))
+        "and nothing rounded to a tenth")
+  # And a real count is on the drawing, so the assertions above are not
+  # passing because nothing was labelled at all.
+  (t/ok (peg/find ~(* ">" (some (range "09")) "<") svg) "counts are drawn")
+  (os/rm conf))
+
 (t/test "a drawing of a stale tree does not consume the flash"
   # THE DEFERRED FLASH. The server holds the scanned tree and the watcher
   # polls, so between an edit and the tick that notices it there is a

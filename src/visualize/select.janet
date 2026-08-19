@@ -1,19 +1,17 @@
-# Prefix matching and the filtering the config can apply to a graph.
+# What the config language MEANS: which nodes it selects, and how shaded they
+# come out.
 #
-# WAS src/dot.janet, which held two unrelated jobs: these transforms, and
-# generating DOT text for a subprocess. The second is gone -- see src/v.janet
-# for the language that replaced it -- and what is left is what the config
-# language actually does, which is choose which of the scanned nodes you
-# wanted to look at.
+# The verbs are parsed in src/visualize/config.janet and drawn in
+# src/visualize/layout.janet; this is the middle, where `(hide src.test)`
+# becomes a set of nodes that are no longer on the graph. Three jobs, in the
+# order the file has them: matching a name against a prefix, filtering the
+# graph by those matches, and weighting what survives for colour.
 #
-# All of it works on the STRUCTURE, never on rendered text. The originals did
-# this by regex over DOT source, because pydeps handed them a finished string
-# and there was nothing else to work on; here the scan is ours, so hiding,
-# grouping and colouring happen on the graph and nothing has to parse back
-# what it just printed.
-#
-# Prefix matching is the whole config language, and `~` is the one special
-# case: see `expand` below.
+# ALL OF IT WORKS ON THE STRUCTURE, never on rendered text. An earlier version
+# did this by regex over DOT source, because the graph arrived as a finished
+# string and there was nothing else to work on; here the scan is ours, so
+# hiding, boxing and colouring happen on the graph and nothing has to parse
+# back what it just printed.
 
 (import ./color)
 
@@ -35,16 +33,13 @@
   external -- which is what lets an import be grouped and hidden like any
   other node.
 
-  `~` HAS NO MEANING HERE, and used to have two. `~.a.b` was a prefix for
-  "inside the project", which said nothing once node names became dotted
-  paths -- it stripped to `a.b`, the same string wearing two more characters.
-  `~` alone was "everything of ours", and that is the EMPTY prefix now:
-  `matches?` reads it by membership rather than as a string test, so
-  `(only "")` keeps your files and drops the externals.
+  NO TOKEN IS SPECIAL HERE. `~` is whatever `(prefix ~ src.visualize)` bound
+  it to, and config.janet has already expanded it by the time a name reaches
+  this function -- so this sees paths and nothing else.
 
-  The config is plain Janet, so `~` is quasiquote and nothing else. A config
-  wanting a short name for the project binds one -- `(def home "src")` --
-  and uses it with an unquote.``
+  The one shape with meaning of its own is the EMPTY prefix, which is
+  "everything of ours": `matches?` reads it by membership rather than as a
+  string test, so `(only "")` keeps your files and drops the externals.``
   [name]
   (def text (string/trim name))
   (cond
@@ -54,10 +49,10 @@
 (defn matches?
   ``Does this node match this prefix?
 
-  Everything is prefix-matched except the empty prefix that `~` expands to:
-  that means "ours", which is a set membership test, not a string test.
-  Without the special case (only ~) would keep the externals as well and
-  mean nothing.``
+  Everything is prefix-matched except the EMPTY prefix, which means "ours" --
+  a set membership test rather than a string one. Without that case
+  `(only "")` would match every node, since every string starts with the
+  empty string, and mean nothing at all.``
   [name prefix ours]
   (if (empty? prefix)
     (truthy? (ours name))
@@ -92,12 +87,12 @@
 
   Nothing declared means no filter at all -- so a config that says nothing
   shows the externals too, which is the only way to see what a project
-  actually links against. (only ~) gives back just our own files.
+  actually links against. `(only "")` gives back just our own files.
 
   A node survives if it matches ANY prefix; an EDGE survives only if BOTH of
   its endpoints do. An edge to a node that is no longer drawn would point at
-  nothing -- and in the layered layout, would rank against a node that is not
-  on the page.``
+  nothing, and graphviz would rank the drawing against a node nobody can
+  see.``
   [graph only]
   (if (empty? only)
     graph
@@ -161,20 +156,10 @@
 (defn weights-for
   ``The default shading: how entangled each node is, ranked.
 
-  Was computed inside the DOT renderer, where it was one more thing the text
-  generator knew about. It is a property of the graph, so it lives with the
-  other graph functions and the layouts ask for it.``
+  A property of the graph rather than of a drawing, so it lives with the
+  other graph functions and the renderer asks for it.``
   [graph]
   (color/ramp (degrees graph)))
-
-(defn thousands
-  ``A line count as a label: 240, 1000, 1300.
-
-  Written out in full. The abbreviated form this used to print -- 1.3k for
-  1300 -- rounded away the difference between files a hundred lines apart,
-  which is exactly the comparison the number is on the box to support.``
-  [count]
-  (string count))
 
 (defn group-for
   ``Which group claims this node, if any.

@@ -252,13 +252,13 @@
 (defn node-name
   ``A file's path as its DOT node name.
 
-  `OttoClip/CartWebView.swift` -> `OttoClip_CartWebView`. DOT identifiers
-  cannot carry a separator unquoted, so the path is flattened -- the same
-  dots-to-underscores shape pydeps produces, which is what lets one config
-  language address both.
+  `OttoClip/CartWebView.swift` -> `OttoClip.CartWebView`. DOT identifiers
+  cannot carry a separator unquoted, so the path is flattened to dots -- the
+  same shape the labels wear and the config is written in, which is what
+  makes `(hide OttoClip.)` a thing you can type after reading the drawing.
 
-  THE FLATTENING IS LOSSY and deliberately so: `OttoClip_Cart` could have been
-  `OttoClip/Cart.swift` or `OttoClip_Cart.swift`, and nothing in the name says
+  THE FLATTENING IS LOSSY and deliberately so: `OttoClip.Cart` could have been
+  `OttoClip/Cart.swift` or `OttoClip.Cart.swift`, and nothing in the name says
   which. Everything that needs the real path therefore works FORWARD from the
   file list rather than backward from a node name.``
   [rel]
