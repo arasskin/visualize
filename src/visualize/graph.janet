@@ -81,12 +81,14 @@
   in-place typo and the button that acts on it arrive together -- there is no
   separate save step to forget.
 
-  'run', 'reorder' and 'regenerate' change no text: every action re-runs the
-  file anyway, so running IS just saving what is on screen.``
+  'run', 'reorder', 'regenerate' and 'check' change no text: every action
+  re-runs the file anyway, so running IS just saving what is on screen, and
+  `check` is running WITHOUT the saving.``
   [lines action index]
   (def out (array ;lines))
   (cond
-    (or (= action "run") (= action "reorder") (= action "regenerate")) out
+    (or (= action "run") (= action "reorder") (= action "regenerate")
+        (= action "check")) out
     (= action "insert-above") (array/insert out (max 0 index) "")
     (= action "insert-below") (array/insert out (min (length out) (+ index 1)) "")
     (= action "delete") (if (and (>= index 0) (< index (length out)))
@@ -232,15 +234,21 @@
   (def action (string (get sent "action" "")))
   (def index (math/floor (or (get sent "index") -1)))
   (def lines (edit (map string (get sent "lines" [])) action index))
-  # Save first: the file is the thing being edited, and it should hold what
-  # you just did even if drawing it then fails.
-  (write-config config-path lines)
+  # `check` ASKS WITHOUT TELLING. It runs the lines and answers with what was
+  # wrong, and writes nothing -- the compose bar uses it to find out whether
+  # what you typed parses before that text reaches the file. Every other
+  # action is an edit and saves.
+  #
+  # Save first, for those: the file is the thing being edited, and it should
+  # hold what you just did even if drawing it then fails.
+  (def asking (= action "check"))
+  (unless asking (write-config config-path lines))
   # Rescanning is Regenerate's job, never a side effect of an edit -- the
   # cache is dropped only when you ask for it.
   (when (= action "regenerate") (forget-scan))
   (def [state problems] (config/run lines))
   (def [ok result]
-    (if (draws action) (render-svg root specs state) [true ""]))
+    (if (and (draws action) (not asking)) (render-svg root specs state) [true ""]))
   {"lines" lines
    "problems" problems
    # A render failure belongs to no single line -- an unknown layout name is

@@ -810,13 +810,6 @@ const composeFault = document.getElementById('compose-fault');
 
 function composing() { return !compose.classList.contains('shut'); }
 
-// Which line the bar is editing, or null when it is composing a new one.
-// Set when a commit leaves a complaint on screen, cleared when the bar
-// closes -- so a fix mends the line and a fresh keystroke starts another.
-let composeAt = null;
-// What that line held BEFORE the bar appended to it. A retry rebuilds from
-// this, so fixing a typo does not append to the previous attempt.
-let composeWas = '';
 
 // The field is as wide as its text, so the closing paren sits just after
 // what you wrote rather than at the far edge of the box. Width in `ch`
@@ -843,70 +836,62 @@ function shutCompose() {
   compose.classList.add('shut');
   composeInput.value = '';
   composeFault.textContent = '';
-  composeAt = null;
-  composeWas = '';
   composeInput.blur();
+}
+
+// Ask the server whether these lines parse, without writing them. Returns
+// the complaint about `at`, or nothing.
+async function checkLines(candidate, at) {
+  try {
+    const r = await fetch(`/config?k=${encodeURIComponent(window.TOKEN)}`, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'check', index: -1, lines: candidate }),
+    });
+    const out = await r.json();
+    return (out.problems || {})[String(at)] || '';
+  } catch (_) {
+    // Unreachable server is not a parse error. Let the commit go and fail
+    // the way any other request would.
+    return '';
+  }
 }
 
 async function commitCompose() {
   const text = composeInput.value.trim();
   if (!text) { shutCompose(); return; }
+  if (busy) return;
   // What you typed goes in as a call, ONTO THE SELECTED LINE -- a line holds
   // as many forms as you like and the parser runs each in turn, so appending
   // is how you build a line up a piece at a time. The selection does not
   // move: you are still working on the same line, now longer.
   //
-  // Onto a BLANK selected line it is simply the line, which is what makes
-  // the margins somewhere to write rather than somewhere to append to
-  // nothing. With no selection at all it goes at the end.
-  //
-  // RETRYING REPLACES what the last commit wrote, rather than appending a
-  // second copy: while the bar is showing a complaint the text is already
-  // out there, and fixing a typo should mend it, not leave the broken form
-  // beside a corrected one.
+  // With no selection it goes at the end as a line of its own.
   const call = `(${text})`;
-  const onto = picked >= 0 && picked < lines.length ? picked : -1;
-  const at = composeAt === null ? (onto < 0 ? lines.length : onto) : composeAt;
-  // What the line looked like before this bar wrote anything to it, so a
-  // retry rebuilds from there instead of appending to its own last try.
-  if (composeAt === null) composeWas = lines[at] ?? '';
-  composeAt = at;
-  const base = composeWas.trim();
-  lines = lines.slice(0, at)
-    .concat([base ? `${base} ${call}` : call], lines.slice(at + 1));
-  picked = at;
+  const at = picked >= 0 && picked < lines.length ? picked : lines.length;
+  const base = (lines[at] ?? '').trim();
+  const merged = base ? `${base} ${call}` : call;
+  const candidate = lines.slice(0, at).concat([merged], lines.slice(at + 1));
+
+  // A REFUSED LINE NEVER REACHES THE FILE. The bar asks first and only sends
+  // what parses, so a typo stays in the bar rather than being written and
+  // then complained about -- the config on disk holds only lines that ran.
+  //
+  // Which also means there is no half-written form to mend on a retry: the
+  // line under the caret is the whole attempt, every time.
   composeFault.textContent = '';
-  await send('run', -1);
-  // THE LINE STAYS IN THE BAR IF IT WAS WRONG. The config took it either
-  // way -- every line is its own program, so a bad one costs the others
-  // nothing -- but closing the bar on a complaint would put the thing you
-  // just mistyped somewhere you now have to go and find. Here it is still
-  // under the cursor, still editable, with the reason underneath.
-  const why = faults[at];
+  const why = await checkLines(candidate, at);
   if (why) {
     composeFault.textContent = why;
     composeInput.focus();
     composeInput.setSelectionRange(text.length, text.length);
-  } else {
-    shutCompose();
+    return;
   }
-}
 
-// A CLICK ELSEWHERE PUTS IT AWAY. The bar has no chrome to dismiss it and
-// nothing anchors it to the page, so clicking off it is the gesture that
-// means "not this after all" -- the same one that closes the help.
-//
-// `mousedown` rather than `click`, so the bar goes as the press lands and
-// the graph underneath gets the rest of the gesture: pressing to drag the
-// graph should not need a second press once the bar is gone.
-//
-// Anything inside #compose is the bar itself, INCLUDING the complaint under
-// it, so reading an error does not dismiss what it is about.
-document.addEventListener('mousedown', (e) => {
-  if (!composing()) return;
-  if (compose.contains(e.target)) return;
+  lines = candidate;
+  picked = at;
+  await send('run', -1);
   shutCompose();
-});
+}
 
 composeInput.addEventListener('input', sizeCompose);
 
