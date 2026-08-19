@@ -134,7 +134,7 @@
    {:name "lines" :args []
     :blurb "Write each file's line count under its name."}
    {:name "animate" :args []
-    :blurb "Flash a node when its file is new or has been written since the last drawing. "}])
+    :blurb "Flash a node when its file is new or has been written since the last drawing. Nothing flashes on the first drawing, since there is no earlier one to differ from."}])
 
 # LONGEST NAME FIRST is not cosmetic: a PEG alternation takes the first
 # branch that matches, so a verb whose name STARTS WITH another one -- were
@@ -349,7 +349,7 @@
         # `(prefix)` or `(prefix ~)` never parses and never reaches here. An
         # empty PATH does reach it, because `""` is a legal quoted name.
         (empty? full)
-        "a prefix needs a path to stand for -- (prefix name p), like (prefix ~ src.visualize)"
+        "a prefix needs something to stand for -- (prefix name p), like (prefix ~ src.visualize)"
 
         # REBINDING IS AN ERROR, not a replacement. A config is read top to
         # bottom and every line is its own program, so a second binding would
@@ -412,9 +412,10 @@
       (string "`" verb "` takes " (usage spec)
               (if (empty? (spec :args))
                 " and nothing else"
-                (string " -- p is a dotted path like src.visualize"
+                (string " -- p is a prefix of the labels on the graph, so"
+                        " src.visualize catches every node under it"
                         (if (index-of :color? (spec :args))
-                          ", and a colour is rrggbb or a name like blue"
+                          ". A colour is rrggbb or a name like blue"
                           "")))))
 
     (string "not a config form -- try " (string/join verbs ", "))))
