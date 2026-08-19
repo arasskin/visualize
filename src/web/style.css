@@ -600,7 +600,12 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
 }
-#compose-list li:hover { background: var(--wash); }
+/* HOVER ONLY WHILE THE MOUSE IS IN USE. `:hover` is a state the browser
+   holds at the pointer's last position, and the cursor hiding while you type
+   does not clear it -- so a row stayed lit under an invisible pointer,
+   competing with the row ctrl-n had actually moved to. The class is added on
+   a real mouse move and dropped on the next keystroke; see app.js. */
+#compose.mousing #compose-list li:hover { background: var(--wash); }
 /* The row ctrl-n moved to. Its text is already in the field, so this marks
    where you are in the list rather than offering something to accept. */
 #compose-list li.at { background: var(--wash-strong); }

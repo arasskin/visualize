@@ -1161,6 +1161,13 @@ async function commitCompose() {
   shutCompose();
 }
 
+// WHETHER THE MOUSE IS IN PLAY. A pointer that has not moved since you
+// started typing is one the OS has probably hidden, and a row lit under it
+// says something false about what is selected. Hover styling is granted on a
+// real move and withdrawn on the next key.
+compose.addEventListener('mousemove', () => compose.classList.add('mousing'));
+composeInput.addEventListener('keydown', () => compose.classList.remove('mousing'));
+
 composeInput.addEventListener('input', () => {
   sizeCompose();
   // Typing NARROWS rather than moves: the highlight goes back to nothing, so
