@@ -54,7 +54,12 @@
    "grey" "#8d99ae"
    "gray" "#8d99ae"})
 
-(def- hex-color (peg/compile ~(* "#" (6 :h) -1)))
+# The `#` is OPTIONAL, and configs are written without it: `#` is the config
+# language's comment character, so a colour that needed one could not be told
+# from a comment without knowing which position it sat in. `22a6f2` and
+# `#22a6f2` both read; the stored form always carries the hash, because that
+# is what SVG wants.
+(def- hex-color (peg/compile ~(* (? "#") (6 :h) -1)))
 
 (defn as-hex
   ``One colour as "#rrggbb", or nil if it is not a colour at all.
@@ -65,7 +70,8 @@
   (def text (string/trim (string color)))
   (def border (or (named (string/ascii-lower text)) text))
   (when (peg/match hex-color border)
-    (string/ascii-lower border)))
+    (def lower (string/ascii-lower border))
+    (if (string/has-prefix? "#" lower) lower (string "#" lower))))
 
 (defn- channels
   "The three bytes of a #rrggbb, as numbers."
