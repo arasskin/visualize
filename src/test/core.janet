@@ -1,6 +1,6 @@
 # Every test file, run in one process.
 #
-#     janet test/run.janet
+#     janet src/test/core.janet
 #
 # Imported rather than shelled out to, so the tally at the end is a tally of
 # everything rather than one exit code per file.

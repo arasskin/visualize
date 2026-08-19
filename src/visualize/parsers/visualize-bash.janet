@@ -55,14 +55,80 @@
 # this repo's own ./visualize, where every path is "$here/...", yields nothing
 # at all. A variable ANYWHERE ELSE in the path leaves it alone, because
 # `$dir/$name.sh` names a file no scan can know.
-(defn- strip-var [text]
+# The variable at the head of a path, and what follows it: `$janet_src/x.c`
+# gives ["janet_src" "x.c"], and a path with no leading variable gives nil.
+(defn- split-var [text]
+  (peg/match ~(* (+ (* "${" (<- (some (if-not "}" 1))) "}")
+                    (* "$" (<- (some (+ (range "AZ") (range "az")
+                                        (range "09") "_")))))
+                 "/" (<- (any 1)) -1)
+             (string/trim text `"'`)))
+
+# LITERAL ASSIGNMENTS, read in one pass before the paths are. A script names
+# its directories once at the top -- `janet_src="$here/external-src/janet"` --
+# and then reaches for files through them, so without this every path behind
+# such a variable lands at the root: `$janet_src/janet.c` became `janet.c`
+# rather than the external-src/janet/janet.c it means.
+#
+# Only assignments whose value is a literal path, optionally behind ONE
+# already-known variable. Anything with a command substitution or a second
+# variable is left unresolved, which puts its paths back on the plain
+# root-relative footing rather than guessing.
+(defn- assignments [text]
+  (def known @{})
+  # THE VARIABLE FORM FIRST. A PEG takes the first alternative that matches,
+  # and the plain-value rule matches the same opening -- put it ahead and
+  # `janet_src="$here/x"` is read as a plain value of `` and the variable is
+  # never seen.
+  (def hits (peg/match
+              ~(any (+ (* ,line-start (any (set " \t"))
+                          (<- (some (+ (range "AZ") (range "az")
+                                       (range "09") "_")))
+                          "=" (? `"`) "$"
+                          (<- (some (+ (range "AZ") (range "az")
+                                       (range "09") "_")))
+                          "/"
+                          (<- (some (if-not (+ (set " \t\n\"'();|&`$") -1) 1)))
+                          (? `"`))
+                       (* ,line-start (any (set " \t"))
+                          (<- (some (+ (range "AZ") (range "az")
+                                       (range "09") "_")))
+                          "=" (? `"`)
+                          (<- (some (if-not (+ (set " \t\n\"'();|&`$") -1) 1)))
+                          (? `"`))
+                       1))
+              text))
+  # The captures arrive flat: two for a plain assignment, three for one
+  # behind a variable. Walked rather than destructured, since a PEG cannot
+  # say which alternative produced what it just pushed.
+  (var i 0)
+  (def all (or hits []))
+  (while (< i (length all))
+    (def name (all i))
+    # A three-capture run is `name base rest`, and the middle one names a
+    # variable we may already know.
+    (def two (get all (+ i 1)))
+    (def three (get all (+ i 2)))
+    (cond
+      (and three (known two))
+      (do (put known name (string (known two) "/" three)) (+= i 3))
+      (and three (= two "here"))
+      (do (put known name three) (+= i 3))
+      (do (put known name two) (+= i 2))))
+  known)
+
+(defn- strip-var [text &opt known]
   (def peeled (string/trim text `"'`))
-  (def cut (peg/match ~(* (+ (* "${" (some (if-not "}" 1)) "}")
-                             (* "$" (some (+ (range "AZ") (range "az")
-                                             (range "09") "_"))))
-                          "/" (<- (any 1)) -1)
-                      peeled))
-  (def rest (if cut (first cut) peeled))
+  (def parts (split-var peeled))
+  (def rest
+    (if parts
+      (let [name (first parts)
+            tail (get parts 1)
+            base (get (or known {}) name)]
+        # A known directory puts the path where it actually is; an unknown
+        # one is the `$here` case, and the tail stands alone.
+        (if base (string base "/" tail) tail))
+      peeled))
   # A variable left in the remainder means the path is assembled at runtime.
   (if (string/find "$" rest) nil rest))
 
@@ -93,10 +159,10 @@
       (set out (string/slice out 0 (- (length out) (length ext))))))
   out)
 
-(defn- as-relative [text]
+(defn- as-relative [text &opt known]
   (def trimmed (string/trim text `"'`))
-  (def rooted (not= trimmed (string/trim (or (strip-var text) "") `"'`)))
-  (when-let [bare (strip-var text)]
+  (def rooted (not= trimmed (string/trim (or (strip-var text known) "") `"'`)))
+  (when-let [bare (strip-var text known)]
     (def path (string/trim bare `"'`))
     (cond
       (empty? path) nil
@@ -131,6 +197,7 @@
 
 (defn- parse [raw _path]
   (def text (decommented raw))
+  (def known (assignments text))
   # THREE SHAPES, each matched on its own rather than by one loose pattern.
   # A single alternation that tried to cover all of them caught `$0` out of
   # `dirname "$0"` and missed every quoted path, because a rule that admits
@@ -147,7 +214,7 @@
   # thing hands back "source ./lib/util.sh" rather than the file.
   (defn collect [rule]
     (each hit (or (peg/match ~(any (+ ,rule 1)) text) [])
-      (when-let [rel (as-relative hit)]
+      (when-let [rel (as-relative hit known)]
         (array/push found rel))))
 
   # `source x` and `. x`, at the head of a line or after a separator. The `.`
