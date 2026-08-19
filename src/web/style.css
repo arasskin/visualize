@@ -492,3 +492,37 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   background: var(--bad-wash);
 }
 
+
+/* -- animate ---------------------------------------------------------------
+   A node whose file moved since the last drawing arrives with a fill and the
+   class `fresh`; this fades the fill out and leaves the outline the node
+   always had. The fill is in the SVG rather than added here, so a node still
+   reads as changed for the instant before the animation starts -- and if the
+   drawing is saved or printed, the marks are in it.
+
+   On the POLYGON and ELLIPSE, not the group: graphviz puts the shape inside
+   a <g class="node fresh">, and the fill belongs to the shape. */
+#graph svg g.fresh ellipse,
+#graph svg g.fresh polygon,
+#graph svg g.fresh path {
+  animation: flash 1.1s ease-out forwards;
+}
+
+@keyframes flash {
+  /* From the fill graphviz baked in to none, which is what an unchanged node
+     wears. `forwards` holds the end state so a node does not snap back. */
+  from { fill-opacity: 1; }
+  to { fill-opacity: 0; }
+}
+
+/* A redraw replaces the whole SVG, so the animation restarts by construction
+   -- there is no state to reset. Respect a reader who asked for less motion:
+   the fill still appears and still fades, just without the tween. */
+@media (prefers-reduced-motion: reduce) {
+  #graph svg g.fresh ellipse,
+  #graph svg g.fresh polygon,
+  #graph svg g.fresh path {
+    animation: none;
+    fill-opacity: 0;
+  }
+}

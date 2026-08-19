@@ -99,6 +99,27 @@
                           out)
     (errorf "unknown action '%s'" action)))
 
+# WHAT THE LAST DRAWING SAW. Kept per-process rather than on disk: the
+# comparison is "since you last looked", and a fresh page has not looked yet.
+#
+# Recorded on every draw whether or not `animate` asked for it, so turning
+# the verb on mid-session compares against the drawing before it rather than
+# against nothing.
+(var- seen nil)
+
+(defn- moved-since [stamps]
+  ``Which nodes are new or have been written since the last drawing.
+
+  Nothing on the FIRST draw -- there is no previous one to differ from, and
+  flashing the whole graph on load would say only that the graph exists.``
+  (def flashing @{})
+  (when seen
+    (eachp [name stamp] stamps
+      (def before (seen name))
+      (when (or (nil? before) (not= before stamp))
+        (put flashing name true))))
+  flashing)
+
 (defn- render-svg
   ``Draw the graph the config asks for. Returns [ok svg-or-error].
 
@@ -144,8 +165,13 @@
                                   node))
                               (aliased :nodes))})
           aliased))
+      # Compared before the record is updated, or every node would look
+      # unchanged against a stamp taken moments ago.
+      (def flashing (moved-since (graph :stamps)))
+      (set seen (graph :stamps))
       (layout/draw labelled {:groups (state :groups)
-                             :sized (state :sized)}))))
+                             :sized (state :sized)
+                             :flashing (if (state :animated) flashing {})}))))
 
 
 (defn page

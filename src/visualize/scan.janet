@@ -80,6 +80,11 @@
   of order still knows which file it belongs to.``
   [[index job]]
   (def text (try (slurp (job :path)) ([_] nil)))
+  # WHEN THE FILE WAS LAST WRITTEN, carried so a redraw can tell which files
+  # moved since the one before it -- see `animate` in the config language.
+  # Taken on the worker beside the read, because that is where the file is
+  # already being touched.
+  (def stamp (try (os/stat (job :path) :modified) ([_] nil)))
   [index
    (if-not text
      # An unreadable file is skipped rather than fatal: a broken symlink or a
@@ -87,6 +92,7 @@
      {:rel (job :rel) :skipped true}
      (let [found (parser/run (job :spec) text (job :rel))]
        {:rel (job :rel)
+        :stamp stamp
         # Counted the way `wc -l` counts: a trailing newline ends the last
         # line rather than starting an empty one.
         :lines (length (string/split "\n" (string/trimr text "\n")))
@@ -249,7 +255,7 @@
 (defn build
   ``Turn parsed files into a graph: nodes, edges, and each file's size.
 
-  Returns {:nodes [...] :edges [...] :sizes {...} :ours {...}}.
+  Returns {:nodes [...] :edges [...] :sizes {...} :stamps {...} :ours {...}}.
 
   TWO KINDS OF EDGE, because languages come in two kinds. Where a parser
   reported :imports, the import IS the dependency and becomes an edge to a
@@ -287,6 +293,10 @@
 
   (def sizes @{})
   (each file live (put sizes (node-name (file :rel)) (file :lines)))
+
+  # Modification times, keyed like the sizes. What `animate` compares.
+  (def stamps @{})
+  (each file live (put stamps (node-name (file :rel)) (file :stamp)))
 
   # Collected as (user, used) -- the direction the scan discovers, since it
   # walks a file and asks what that file needs -- then flipped once at the end.
@@ -336,7 +346,7 @@
   # written rather than by collection order.
   (def edges (sorted (map (fn [pair] [(pair 1) (pair 0)]) (keys pairs))))
 
-  {:nodes nodes :edges edges :sizes sizes :ours ours})
+  {:nodes nodes :edges edges :sizes sizes :stamps stamps :ours ours})
 
 (defn scan
   "Find, read and graph everything under `root`. The whole pipeline."

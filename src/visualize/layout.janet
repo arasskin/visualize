@@ -70,6 +70,10 @@
   other graphviz tool understand.``
   [graph opts]
   (def groups (or (opts :groups) []))
+  # Nodes whose file moved since the last drawing. graphviz cannot animate,
+  # so they are given a fill and a CLASS -- the page fades the fill out, and
+  # the fill itself is what remains if the stylesheet never loads.
+  (def flashing (or (opts :flashing) {}))
   (def ours (or (graph :ours) {}))
   (def out @[])
   (array/push out "digraph G {")
@@ -95,11 +99,21 @@
     (def name (node :name))
     (def claimed (select/group-for name groups ours))
     (def hue (if claimed (claimed :color) color/ungrouped))
+    (def fresh (flashing name))
     (array/push out
                 (string indent "\"" (quoted name) "\""
-                        (attrs [["label" (quoted (node :label))]
-                                ["color" (color/ink-on-page hue)]
-                                ["fontcolor" (color/ink-on-page hue)]])
+                        (attrs
+                          [["label" (quoted (node :label))]
+                           ["color" (color/ink-on-page hue)]
+                           ["fontcolor" (color/ink-on-page hue)]
+                           # The group's own hue, tinted the way a filled node
+                           # used to be -- a flash in the node's colour rather
+                           # than one colour for every change.
+                           ;(if fresh
+                              [["style" "filled"]
+                               ["fillcolor" (color/tint hue 0.55)]
+                               ["class" "fresh"]]
+                              [])])
                         ";")))
 
   # GROUPS BECOME CLUSTERS, which is what a group has always meant here: a

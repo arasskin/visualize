@@ -1,4 +1,4 @@
-# The config language: five verbs, parsed by a PEG.
+# The config language: six verbs, parsed by a PEG.
 #
 #     (lines)
 #     (box src.visualize)
@@ -57,6 +57,8 @@
     # Prefixes to narrow to. Empty means no filter, which is the WHOLE graph --
     # so a config saying nothing shows the externals too.
     :only @[]
+    # Whether a node whose file moved since the last drawing should flash.
+    :animated false
     # ALIASES, longest prefix first. `(prefix ~ src.visualize)` binds `~` to
     # that path: the nodes under it are RELABELLED to wear the alias, and
     # any later name starting with it is expanded before matching. Kept
@@ -122,7 +124,9 @@
    {:name "only" :args [:name]
     :blurb "Only visualize nodes that start with the provided prefix. Multiple onlys will create a union of nodes."}
    {:name "lines" :args []
-    :blurb "Write each file's line count under its name."}])
+    :blurb "Write each file's line count under its name."}
+   {:name "animate" :args []
+    :blurb "Flash a node when its file is new or has been written since the last drawing. Nothing flashes on the first draw, since there is no previous one to differ from."}])
 
 # LONGEST NAME FIRST is not cosmetic: a PEG alternation takes the first
 # branch that matches, so a verb whose name STARTS WITH another one -- were
@@ -369,7 +373,8 @@
                           (array ;(state :aliases) {:alias token :prefix full})))
           nil)))
 
-    :lines (do (put state :sized true) nil)))
+    :lines (do (put state :sized true) nil)
+    :animate (do (put state :animated true) nil)))
 
 (defn- complain
   ``What is wrong with a line the grammar refused.

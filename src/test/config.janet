@@ -19,6 +19,11 @@
   (def state (state-of "(hide \"~.Tests\")" "(hide \"~.Tests\")"))
   (t/is= ["~.Tests"] (state :hidden)))
 
+(t/test "animate asks for the flash"
+  (t/ok ((state-of "(animate)") :animated))
+  (t/ok (not ((state-of "(lines)") :animated))
+        "and nothing else turns it on"))
+
 (t/test "flags are set, never flipped"
   (def state (state-of "(lines)" "(lines)"))
   (t/ok (state :sized)))

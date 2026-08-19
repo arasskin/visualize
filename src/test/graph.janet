@@ -32,4 +32,29 @@
   (t/is= [""] (graph/edit [] "insert-below" -1)
          "the first line of an empty file"))
 
+(t/test "animate flashes what moved since the last drawing"
+  # NOTHING ON THE FIRST DRAW: there is no previous one to differ from, and
+  # flashing the whole graph on load would say only that the graph exists.
+  (def conf "/tmp/visualize-animate-test.conf")
+  (spit conf "(animate)\n")
+  (def first-draw (graph/draw "." conf))
+  (t/is= 0 (length (string/find-all "node fresh" (string (first-draw 3))))
+         "the first drawing flashes nothing")
+
+  # A file written since then is new to this drawing.
+  (os/touch "src/visualize/color.janet")
+  (graph/forget-scan)
+  (def second-draw (graph/draw "." conf))
+  (t/is= 1 (length (string/find-all `class="node fresh"` (string (second-draw 3))))
+         "one file moved, one node flashes")
+
+  # And without the verb, nothing is marked however much moved.
+  (spit conf "(lines)\n")
+  (os/touch "src/visualize/select.janet")
+  (graph/forget-scan)
+  (def unasked (graph/draw "." conf))
+  (t/is= 0 (length (string/find-all "fresh" (string (unasked 3))))
+         "the flash is the verb's, not the watcher's")
+  (os/rm conf))
+
 (os/rm scratch)
