@@ -727,19 +727,14 @@ const configPanel = makePanel(panel, {
   },
 });
 
-// Top-left, with its BOTTOM EDGE ON THE HELP MARK'S. The two are the only
-// furniture on an otherwise empty page, so a shared baseline is what stops
-// them reading as two things placed independently.
+// Top-left, inset the SAME on both sides. One number for the gap above and
+// the gap to the left, so the panel sits in a corner rather than at two
+// unrelated distances from it.
 //
-// Measured rather than written down: the mark's height comes from its font
-// and the bar's from its padding, so a hardcoded top would drift the moment
-// either changed. After a frame, because neither has a real height until
-// layout has run.
-requestAnimationFrame(() => {
-  const mark = document.getElementById('help-open').getBoundingClientRect();
-  const bar = configPanel.root.getBoundingClientRect();
-  configPanel.place(12, Math.max(0, mark.bottom - bar.height));
-});
+// After a frame, because the collapsed bar has no real width to clamp
+// against until layout has run.
+const inset = 12;
+requestAnimationFrame(() => configPanel.place(inset, inset));
 
 lines = window.CONFIG_LINES || [];
 for (const [at, why] of Object.entries(window.CONFIG_PROBLEMS || {})) {
