@@ -13,13 +13,7 @@
 # which is what makes "an app that visualizes this project" a thing you can
 # write without touching the server.
 
-(import ./scan)
-(import ./parsers/go :as go)
-(import ./parsers/visualize-bash :as bash)
-(import ./parsers/janet :as janet-lang)
-(import ./parsers/javascript :as javascript)
-(import ./parsers/python :as python)
-(import ./parsers/swift :as swift)
+(import ./source)
 (import ./select)
 (import ./layout)
 (import ./config)
@@ -105,31 +99,13 @@
                           out)
     (errorf "unknown action '%s'" action)))
 
-# The scan's output for a given source tree never varies -- same files, same
-# graph, every time. It is fast, but it is still pointless to redo per edit
-# when only the post-processing changes. Regenerate is how you say the SOURCE
-# changed and this is stale.
-#
-# AND IT IS WRITTEN DOWN. The scan is the most valuable fact this program
-# holds -- every file, every dependency, every line count -- and it used to
-# live in a var, visible only to code inside this process. On disk it is
-# readable by a page, a script, an agent, or the next run, which is what
-# lets a view of this project be something that reads a file rather than
-# something that has to be built into the server. See src/state.janet.
-(var- cached nil)
-
-(defn- graph-for [root specs]
-  (unless cached
-    (set cached (scan/scan root specs)))
-  cached)
-
 (defn- render-svg
   ``Draw the graph the config asks for. Returns [ok svg-or-error].
 
   The scan is the whole graph; the narrowing, hiding, grouping and colouring
   are all applied to it on the way to the layout.``
-  [root specs state]
-  (def graph (graph-for root specs))
+  [root state]
+  (def graph (source/graph-of root))
   (if (graph :error)
     [false (graph :error)]
     (do
@@ -200,16 +176,16 @@
 (defn draw
   ``Everything the page needs for one render: the config's lines, whatever
   was wrong with them, and the graph or the error that stopped it.``
-  [root specs config-path]
+  [root config-path]
   (def lines (read-config config-path))
   (def [state problems] (config/run lines))
-  (def [ok result] (render-svg root specs state))
+  (def [ok result] (render-svg root state))
   [lines problems ok result])
 
 (defn forget-scan
   "Drop the cached scan, so the next draw re-reads the source tree."
   []
-  (set cached nil))
+  (source/forget))
 
 # Which actions are worth a redraw. Inserting adds an EMPTY line, which by
 # definition draws the same graph -- so it saves and returns immediately.
@@ -223,7 +199,7 @@
   THE WHOLE ROUTE, not a helper for it. The core hands over the request
   body and gets back a reply; nothing about buttons, configs or graphs
   needs to exist on the other side of that call.``
-  [root specs config-path body]
+  [root config-path body]
   (def sent (json/decode body))
   (def action (string (get sent "action" "")))
   (def index (math/floor (or (get sent "index") -1)))
@@ -242,7 +218,7 @@
   (when (= action "regenerate") (forget-scan))
   (def [state problems] (config/run lines))
   (def [ok result]
-    (if (and (draws action) (not asking)) (render-svg root specs state) [true ""]))
+    (if (and (draws action) (not asking)) (render-svg root state) [true ""]))
   {"lines" lines
    "problems" problems
    # A render failure belongs to no single line -- an unknown layout name is
@@ -250,20 +226,3 @@
    # messages.
    "error" (if ok "" result)
    "svg" (if ok result "")})
-
-(def specs
-  ``Every language this program can read, in name order.
-
-  A LIST, not a directory scan. This used to be src/parsers.janet: a loader
-  that walked the parsers directory at runtime, dofile'd whatever it found,
-  unwrapped a `spec` export through two possible shapes, and tolerated a
-  broken file by skipping that language -- a plugin system for five files
-  that ship in this repo and change when someone edits this line anyway.
-  Adding a language is now an import and an entry here, which is the same
-  amount of editing the loader was avoiding, minus the machinery.``
-  [bash/spec go/spec janet-lang/spec javascript/spec python/spec swift/spec])
-
-(defn spec-names
-  "Their names, for the startup banner."
-  [specs]
-  (map |($ :name) specs))

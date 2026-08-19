@@ -49,6 +49,7 @@
 # The first app built on this core. See the note at the top of graph.janet:
 # it is a consumer, not a component -- delete it and the server still runs.
 (import ./graph)
+(import ./source)
 (import ./watch)
 
 # The env the dev repl evaluates in protos to THIS one, captured at load so
@@ -127,7 +128,6 @@
   (def here (os/realpath (string (dyn :current-file) "/../..")))
   (def web-dir (string here "/web"))
   (def config-path (string root "/" graph/config-name))
-  (def specs graph/specs)
   # THE SOURCE GENERATION. Bumped whenever the watcher sees the tree change;
   # the page waits on it and redraws, which is what replaced the Regenerate
   # button. A number rather than a flag so a page that missed one edit still
@@ -166,7 +166,7 @@
   # The app's render, and the values only the CORE knows, kept apart: the
   # graph does not reach into the server for a token, and the server does
   # not know what a graph is.
-  (defn draw [] (graph/draw root specs config-path))
+  (defn draw [] (graph/draw root config-path))
 
   (defn handler [request]
     (def path (without-query (request :path)))
@@ -272,7 +272,7 @@
       # does and what gets drawn are none of its business.
       (and (= (request :method) "POST") (= path "/config"))
       ["200 OK" "application/json"
-       (json/encode (graph/config-edit root specs config-path (request :body)))]
+       (json/encode (graph/config-edit root config-path (request :body)))]
 
       ["404 Not Found" "text/plain" "not found"]))
 
@@ -288,14 +288,14 @@
 
   (print "visualize: " root " on " url)
   (print (align-word "config: " "visualize: ") config-path)
-  (print (align-word "parsers: " "visualize: ") (string/join (graph/spec-names specs) ", "))
+  (print (align-word "parsers: " "visualize: ") (string/join (source/languages) ", "))
   (print "ctrl-c to stop")
   # WATCH THE SOURCE. An edit anywhere under the root drops the scan cache
   # and bumps the generation; the page is parked on /watch and redraws. This
   # is what the Regenerate button used to do by hand, and the reason it is
   # gone: a tool for seeing a codebase should not need to be told the
   # codebase changed.
-  (watch/watching root specs
+  (watch/watching root
                   (fn []
                     (graph/forget-scan)
                     (++ source-generation)))

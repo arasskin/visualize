@@ -18,8 +18,8 @@
 # a thread would mean copying the spec list per tick and marshalling results
 # back for no gain.
 
-(import ./scan)
 (import ./graph)
+(import ./source)
 
 # The config file is not source. It sits in the root being watched -- a
 # visualize pointed at its own repo scans `visualize.conf` like any other
@@ -42,10 +42,10 @@
   Size as well as mtime because a filesystem's mtime granularity is a
   second on some systems, and an edit that lands within the same second as
   the last one would otherwise look like nothing happened.``
-  [root specs]
+  [root]
   (var sum 0)
   (var count 0)
-  (each job (scan/find-files root specs)
+  (each job (source/fingerprint-of root)
     (def stats (unless (= (job :rel) config-name) (os/stat (job :path))))
     (when stats
       (++ count)
@@ -67,16 +67,16 @@
   The first fingerprint is taken WITHOUT firing: the tree existing is not a
   change, and a page that just loaded should not immediately be told to
   redraw what it is already showing.``
-  [root specs changed &opt every]
+  [root changed &opt every]
   (default every 0.7)
   (var running true)
-  (var last (fingerprint root specs))
+  (var last (fingerprint root))
   (ev/go
     (fn []
       (while running
         (ev/sleep every)
         (when running
-          (def now (try (fingerprint root specs) ([_] nil)))
+          (def now (try (fingerprint root) ([_] nil)))
           (when (and now (not= now last))
             (set last now)
             # A failure in the callback must not end the watch: the next
