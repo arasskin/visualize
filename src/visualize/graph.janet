@@ -15,7 +15,6 @@
 
 (import ./select)
 (import ./layout)
-(import ./color)
 
 # THE ONE SPELLING of the file this program writes into the directory it is
 # pointed at. src/visualize/watch.janet reads it from here rather than
@@ -104,10 +103,10 @@
       # each node's box, colour and flash onto the node -- so what goes to
       # the renderer is a tree that already answers every question a drawing
       # asks, and the renderer needs no opinion about the config.
-      # THE PALETTE, handed to select rather than imported by it: what a
-      # colour is stays one module's business, and this is the seam it
-      # reaches the drawing through.
+      # The palette comes off the STATE, like every other thing the config
+      # decided. A colour is a config choice, so which palette this drawing
+      # uses arrives with the boxes rather than being fetched separately.
       (def resolved (select/resolve labelled (state :groups)
                                     (if (state :animated) flashing {})
-                                    color/for-drawing))
+                                    (state :palette)))
       (layout/draw resolved))))

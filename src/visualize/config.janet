@@ -59,6 +59,14 @@
     :only @[]
     # Whether a node whose file moved since the last drawing should flash.
     :animated false
+    # THE PALETTE THIS CONFIG DRAWS WITH: the colour of a node no box
+    # claimed, and the two derivations a renderer needs from any colour --
+    # the ink that reads against the page, and the tint a flash breathes in.
+    #
+    # Here because a colour is a CONFIG choice. The verbs name colours, this
+    # module resolves them, and the answers travel with the rest of what the
+    # config decided rather than being fetched separately by whoever draws.
+    :palette color/for-drawing
     # ALIASES, longest prefix first. `(prefix ~ src.visualize)` binds `~` to
     # that path: the nodes under it are RELABELLED to wear the alias, and
     # any later name starting with it is expanded before matching. Kept
@@ -126,7 +134,7 @@
    {:name "lines" :args []
     :blurb "Write each file's line count under its name."}
    {:name "animate" :args []
-    :blurb "Flash a node when its file is new or has been written since the last drawing. Nothing flashes on the first drawing, since there is no earlier one to differ from."}])
+    :blurb "Flash a node when its file is new or has been written since the last drawing. "}])
 
 # LONGEST NAME FIRST is not cosmetic: a PEG alternation takes the first
 # branch that matches, so a verb whose name STARTS WITH another one -- were
