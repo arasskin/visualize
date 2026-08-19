@@ -9,6 +9,8 @@
 (import ../visualize/parsers/swift)
 (import ../visualize/parsers/python)
 (import ../visualize/parsers/go)
+(import ../visualize/parsers/html :as html)
+(import ../visualize/parsers/css :as css)
 (import ../visualize/parsers/javascript :as js)
 (import ./harness :as t)
 
@@ -164,3 +166,51 @@ const fs = require('fs')
              :parse (fn [text path] {:declares ["D"] :imports ["I"] :refs ["R"]})})
   (t/is= {:declares ["D"] :imports ["I"] :refs ["R"]}
          (parser/run fake "anything at all" "a.x")))
+
+(t/test "html reads what a page pulls in"
+  (defn imports [text] (((html/spec :parse) text "page.html") :imports))
+
+  (t/is= ["./theme.css" "./app.js"]
+         (imports `<link rel="stylesheet" href="theme.css"><script src="./app.js"></script>`)
+         "a stylesheet and a script")
+  (t/is= ["./logo.png"] (imports `<img src="logo.png">`) "and an image")
+  (t/is= ["./clip.mp4" "./thumb.jpg"]
+         (sort (imports `<video poster="thumb.jpg" src="clip.mp4"></video>`)))
+
+  # A LINK TO ANOTHER PAGE IS NAVIGATION, not a dependency: a site whose
+  # every page links every other draws a mesh saying only that a nav bar
+  # exists. `href` is a file everywhere EXCEPT on an anchor.
+  (t/is= [] (imports `<a href="about.html">about</a>`))
+  (t/is= ["./theme.css"]
+         (imports `<a href="about.html">x</a><link href="theme.css">`)
+         "which is decided by the tag, not the attribute")
+
+  # Not files.
+  (t/is= [] (imports `<script src="https://cdn.example.com/lib.js"></script>`))
+  (t/is= [] (imports `<link href="//cdn.example.com/f.css">`))
+  (t/is= [] (imports `<img src="data:image/png;base64,iVBOR">`))
+  (t/is= [] (imports `<a href="#top">top</a>`))
+
+  # A query is not part of the name, and a site-absolute path is read as a
+  # sibling: the server maps / to the directory the page sits in.
+  (t/is= ["./favicon.ico"] (imports `<link rel="icon" href="/favicon.ico?v=2">`)))
+
+(t/test "css references other files three ways"
+  (defn imports [text] (((css/spec :parse) text "sheet.css") :imports))
+
+  (t/is= ["./base.css"] (imports `@import "base.css";`) "another stylesheet")
+  (t/is= ["./print.css"] (imports `@import 'print.css' print;`)
+         "media conditions are not part of the path")
+  (t/is= ["./x.woff2"] (imports `@font-face { src: url(x.woff2); }`) "a font")
+  (t/is= ["./bg.png"] (imports `body { background: url("bg.png"); }`) "an image")
+  (t/is= ["./spaced.png"] (imports `.a { background: url( spaced.png ); }`)
+         "the spaces inside url() are syntax, not name")
+
+  # `url(#blur)` names an SVG filter in the same document, not a file.
+  (t/is= [] (imports `.e { filter: url(#blur); }`))
+  (t/is= [] (imports `.c { background: url(https://cdn.example.com/x.png); }`))
+  (t/is= [] (imports `.d { background: url(data:image/gif;base64,R0lGOD); }`))
+
+  # A COMMENTED-OUT IMPORT IS NOT ONE.
+  (t/is= [] (imports `/* @import "off.css"; */`))
+  (t/is= ["./on.css"] (imports `/* off */ @import "on.css";`)))

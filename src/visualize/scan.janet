@@ -20,8 +20,10 @@
 
 (import ./parser)
 (import ./parsers/visualize-bash :as bash)
+(import ./parsers/css :as css)
 (import ./parsers/go :as go)
 (import ./parsers/janet :as janet-lang)
+(import ./parsers/html :as html)
 (import ./parsers/javascript :as javascript)
 (import ./parsers/python :as python)
 (import ./parsers/swift :as swift)
@@ -36,7 +38,8 @@
   that ship in this repo and change when someone edits this line anyway.
   Adding a language is now an import and an entry here, which is the same
   amount of editing the loader was avoiding, minus the machinery.``
-  [bash/spec go/spec janet-lang/spec javascript/spec python/spec swift/spec])
+  [bash/spec css/spec go/spec html/spec janet-lang/spec javascript/spec
+   python/spec swift/spec])
 
 (defn languages
   "Their names, for the startup banner."
