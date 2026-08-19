@@ -12,10 +12,14 @@
   # last without making room first.
   (t/is= ["" "(a)" "(b)" ""] (graph/margins ["(a)" "(b)"]))
   (t/is= ["" "(a)" ""] (graph/margins ["" "(a)" ""]) "already margined")
-  # Exactly one at each end, so reading and writing does not grow a margin.
-  (t/is= ["" "(a)" ""] (graph/margins ["" "" "" "(a)" "" ""]))
+  # AT LEAST one, not exactly one. Trimming to exactly one swallowed a line
+  # opened NEXT TO a margin -- alt+N on the first verb wrote a blank the next
+  # read threw away, so the key silently did nothing.
+  (t/is= ["" "" "(a)" ""] (graph/margins ["" "" "(a)" ""])
+         "a blank someone asked for is kept")
+  (t/is= ["" "(a)" "" ""] (graph/margins ["" "(a)" "" ""]))
   (t/is= ["" ""] (graph/margins []) "an empty file is its two margins")
-  (t/is= ["" ""] (graph/margins ["" "" ""]) "and so is a file of blanks")
+  (t/is= ["" ""] (graph/margins [""]) "and one blank becomes two")
   # A blank BETWEEN lines is the writer's own spacing and is left alone.
   (t/is= ["" "(a)" "" "(b)" ""] (graph/margins ["(a)" "" "(b)"])))
 

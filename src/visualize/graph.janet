@@ -58,16 +58,22 @@
   them, so there is always somewhere to start typing above the first verb and
   below the last without making room first.
 
-  Exactly one at each end, so reading and writing does not grow a margin, and
-  a file that arrives with several blanks or none is brought to the same
-  shape. A file of nothing but blanks is two lines: the two margins.``
+  AT LEAST one at each end, not exactly one. Trimming to exactly one meant a
+  line opened NEXT TO a margin was indistinguishable from the margin itself
+  and got swallowed -- alt+N on the first verb, or alt+n on the last, wrote a
+  blank that the next read threw away, so the key silently did nothing. A
+  blank someone asked for is a line like any other; only the absence of one
+  is the thing this fixes.
+
+  A file of nothing but blanks keeps them, and an empty file becomes two.``
   [lines]
   (def out (array ;lines))
   (defn blank? [line] (= "" (string/trim (or line ""))))
-  (while (and (> (length out) 0) (blank? (last out))) (array/pop out))
-  (var lead 0)
-  (while (and (< lead (length out)) (blank? (out lead))) (++ lead))
-  (array ""  ;(slice out lead) ""))
+  (unless (and (> (length out) 0) (blank? (out 0)))
+    (array/insert out 0 ""))
+  (unless (and (> (length out) 1) (blank? (last out)))
+    (array/push out ""))
+  out)
 
 (defn read-config
   "The config file as a list of lines, creating it if it is not there."

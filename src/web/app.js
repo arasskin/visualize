@@ -363,6 +363,13 @@ function draw() {
     // Typing edits the array; nothing reaches disk until a button says so, so
     // a half-typed form never gets evaluated.
     box.oninput = () => { lines[i] = box.value; };
+    // A DEAD KEY THAT GOT PAST THE CHORD. Capture-phase preventDefault stops
+    // macOS arming the tilde on alt+n, but an accent already pending when
+    // alt went down would still land here. Nothing typed while alt is held
+    // belongs in a config line, so it is refused rather than inserted.
+    box.addEventListener('beforeinput', (e) => {
+      if (altDown) e.preventDefault();
+    });
     // Clicking into a line is choosing it. The class is set directly rather
     // than by redrawing, because a redraw would replace the input the click
     // just put the caret in.
@@ -966,6 +973,12 @@ function altChord(e) {
   // SHIFT PICKS THE SIDE. alt+n opens a line under the selected one, alt+N
   // over it -- the same key, and which way is the shift, the way a capital
   // reads as the mirror of its letter.
+  //
+  // alt+n is macOS's DEAD KEY FOR TILDE: it arms a pending accent that lands
+  // on whatever you press next, and with the caret in a row that accent goes
+  // into the config. Matching by `e.code` already catches the keystroke --
+  // `e.key` here is `Dead` -- and the preventDefault below is what stops the
+  // accent being armed at all. See also the compositionstart guard.
   const fresh = e.code === 'KeyN';
   if (!down && !up && !del && !comment && !fresh) return false;
   e.preventDefault();
@@ -1005,6 +1018,10 @@ function altChord(e) {
   return true;
 }
 
+// ON CAPTURE, so a chord is claimed before the focused row input sees it.
+// This is what keeps alt+n out of the field: it is macOS's dead key for
+// tilde, and by the time a keydown reaches an input on the bubble phase the
+// accent is already armed and about to land in the line.
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Alt') {
     // Any other key during the hold makes it a chord, not a tap.
@@ -1021,7 +1038,7 @@ document.addEventListener('keydown', (e) => {
   // held. A tap over an open panel closes it instead -- see the keyup, which
   // is where a tap is finally told from a hold.
   if (altOpened) configPanel.open();
-});
+}, true);
 
 document.addEventListener('keyup', (e) => {
   if (e.key !== 'Alt') return;
