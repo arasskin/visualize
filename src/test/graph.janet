@@ -59,6 +59,42 @@
          "the flash is the verb's, not the watcher's")
   (os/rm conf))
 
+(t/test "a drawing of a stale tree does not consume the flash"
+  # THE DEFERRED FLASH. The server holds the scanned tree and the watcher
+  # polls, so between an edit and the tick that notices it there is a
+  # window. A drawing made in that window sees the OLD stamps: the edited
+  # file looks unchanged, and recording those stamps as seen meant the flash
+  # arrived on whatever redraw came after the tick -- a file nobody was
+  # working on appearing to flash out of nowhere.
+  #
+  # Fixed by checking the tree per draw rather than only when the watcher
+  # fires; this asserts the behaviour that fix produces.
+  (def dir "/tmp/visualize-stale-tree")
+  (defn clear []
+    (each entry (try (os/dir dir) ([_] []))
+      (os/rm (string dir "/" entry)))
+    (try (os/rmdir dir) ([_] nil)))
+  (clear)
+  (os/mkdir dir)
+  (def conf (string dir "/vz.conf"))
+  (spit conf "(animate)\n")
+  (spit (string dir "/a.py") "import b\n")
+  (spit (string dir "/b.py") "x = 1\n")
+
+  (defn fresh-in [tree]
+    (sort (peg/match ~(any (+ (* `class="node fresh"` (any (if-not "<title>" 1))
+                                 "<title>" (<- (some (if-not "<" 1)))) 1))
+                     (string ((graph/draw tree conf) 3)))))
+
+  (fresh-in (scan/scan dir))
+  # An edit the held tree has not seen yet.
+  (spit (string dir "/b.py") "x = 222222\n")
+  # A FRESH SCAN is what the server now does per draw, so the edit is caught
+  # by the drawing that follows it rather than by a later one.
+  (t/is= ["b"] (fresh-in (scan/scan dir)))
+  (t/is= [] (fresh-in (scan/scan dir)) "and is not shown twice")
+  (clear))
+
 (t/test "a file added, edited or removed between drawings"
   # A TREE OF ITS OWN, so adding and removing files is not done to the repo
   # the suite is running out of.

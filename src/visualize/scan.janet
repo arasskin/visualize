@@ -427,7 +427,7 @@
 # `visualize.conf` is an extension no parser claims, so `find-files` never
 # returns it and the fingerprint never sees it.
 
-(defn- fingerprint
+(defn fingerprint
   ``One number standing for the state of the tree: every file's mtime and
   size, summed with its path. Different content, different number -- and
   the same number for a tree nobody has touched, which is the common case

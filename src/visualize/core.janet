@@ -140,9 +140,23 @@
   #
   # Scanned on demand rather than at startup, so a first draw pays for it and
   # a re-scan is just forgetting.
+  #
+  # CHECKED PER DRAW, not only when the watcher fires. The watcher polls, so
+  # between an edit and the tick that notices it there is a window -- and a
+  # config save landing in that window used to draw the STALE tree. That drew
+  # the edited file as unchanged and, worse, recorded it as seen: the flash
+  # then arrived on whatever redraw came after the tick, which is how a file
+  # nobody was working on appeared to flash out of nowhere.
+  #
+  # The fingerprint is the cheap half of a scan (a stat per file), so asking
+  # it per draw costs a few milliseconds and removes the window entirely.
   (var tree nil)
+  (var tree-print nil)
   (defn scanned []
-    (unless tree (set tree (scan/scan root)))
+    (def now (scan/fingerprint root))
+    (when (or (nil? tree) (not= now tree-print))
+      (set tree (scan/scan root))
+      (set tree-print now))
     tree)
   (defn rescan [] (set tree nil))
 
