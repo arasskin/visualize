@@ -50,7 +50,7 @@
 # it is a consumer, not a component -- delete it and the server still runs.
 (import ./graph)
 (import ./scan)
-(import ./watch)
+(import ./watcher)
 
 # The env the dev repl evaluates in protos to THIS one, captured at load so
 # a connection sees the same names this file sees -- every module above,
@@ -314,7 +314,7 @@
   # is what the Regenerate button used to do by hand, and the reason it is
   # gone: a tool for seeing a codebase should not need to be told the
   # codebase changed.
-  (watch/watching root
+  (watcher/watch root
                   (fn []
                     (rescan)
                     (++ source-generation)))

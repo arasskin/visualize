@@ -52,7 +52,7 @@
   )
   [sum count])
 
-(defn watching
+(defn watch
   ``Watch `root` and call `changed` when the source has moved.
 
   Returns a function that stops the watch. `every` is the poll interval in
