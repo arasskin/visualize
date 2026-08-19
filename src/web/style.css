@@ -365,9 +365,13 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   --inset: 12px;
   --pad-y: .35rem;
   --pad-x: .5rem;
+  /* A pixel further in than the top gap. The glyph's right side is its
+     thin stroke where the top is its full bowl, so matching the numbers
+     leaves it looking a touch further out than it is. */
+  --nudge: 1px;
   position: fixed; z-index: 6;
   top: calc(var(--inset) - var(--pad-y));
-  right: calc(var(--inset) - var(--pad-x));
+  right: calc(var(--inset) - var(--pad-x) + var(--nudge));
   /* Bare glyph: the generic button rule gives every button a border and a
      wash, and both are undone here. A chrome-less mark reads as part of the
      page the way the HUD does, where a bordered circle reads as a control
