@@ -114,13 +114,13 @@
 # for the reader, and the parser never sees it.
 (def verb-specs
   [{:name "prefix" :args [:alias :name]
-    :blurb "Give a path a short name. The nodes under it are labelled with that name, and any later path starting with it is expanded -- so with (prefix ~ src.visualize), (hide ~.color) hides src.visualize.color. A name stands for one path; binding it twice is an error."}
+    :blurb "Bind a name to a prefix. Nodes under it wear the name, later prefixes starting with it expand, and binding one twice is an error."}
    {:name "box" :args [:name :color?]
-    :blurb "Draw a box around everything under a path, and colour it. A colour is a name like blue, or six hex digits written bare -- 22a6f2, no hash, since a hash starts a comment. Without one a colour is chosen from the palette and the others shuffle to stay distinct."}
+    :blurb "Draw a coloured box around everything under a prefix. A colour is a name like blue or six bare hex digits like 22a6f2; without one the palette picks, and the others shuffle to stay distinct."}
    {:name "hide" :args [:name]
-    :blurb "Drop everything under a path from the drawing. Its edges go with it."}
+    :blurb "Drop everything under a prefix from the drawing. Its edges go with it."}
    {:name "only" :args [:name]
-    :blurb "Narrow to everything under a path. Several narrow to the union. Applied before hide, so (only src) then (hide src.test) reads the way it is written."}
+    :blurb "Narrow to everything under a prefix, several narrowing to the union. Applied before hide, so (only src) then (hide src.test) reads the way it is written."}
    {:name "lines" :args []
     :blurb "Write each file's line count under its name."}])
 
@@ -209,11 +209,11 @@
 (defn usage
   ``One verb's call shape, from the same `:args` the parser was built from.
 
-  `(box p color?)`. The `?` marks the optional argument. A path argument is
+  `(box p color?)`. The `?` marks the optional argument. A prefix argument is
   `p` -- short, because it appears in nearly every verb and a long word
   repeated down the list is read as noise rather than as a placeholder. An
-  alias argument is `name`, which is what the verb gives the path: `(prefix
-  name p)` reads as "name this path".``
+  alias argument is `name`, which is what the verb gives the prefix:
+  `(prefix name p)` reads as "name this prefix".``
   [spec]
   (def parts
     (map (fn [arg]
