@@ -49,7 +49,7 @@
 # The first app built on this core. See the note at the top of graph.janet:
 # it is a consumer, not a component -- delete it and the server still runs.
 (import ./graph)
-(import ./source)
+(import ./scan)
 (import ./watch)
 
 # The env the dev repl evaluates in protos to THIS one, captured at load so
@@ -288,7 +288,7 @@
 
   (print "visualize: " root " on " url)
   (print (align-word "config: " "visualize: ") config-path)
-  (print (align-word "parsers: " "visualize: ") (string/join (source/languages) ", "))
+  (print (align-word "parsers: " "visualize: ") (string/join (scan/languages) ", "))
   (print "ctrl-c to stop")
   # WATCH THE SOURCE. An edit anywhere under the root drops the scan cache
   # and bumps the generation; the page is parked on /watch and redraws. This

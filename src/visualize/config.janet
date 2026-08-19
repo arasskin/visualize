@@ -134,6 +134,7 @@
 # leave the rest unparsed. Sorting by length removes the need to remember
 # that when adding a verb, which is exactly the kind of ordering a
 # hand-written list gets wrong once and then keeps.
+
 (def- verb-rules
   (map (fn [spec]
          (def parts @[~(constant ,(keyword (spec :name))) (spec :name)])

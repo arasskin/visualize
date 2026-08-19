@@ -19,7 +19,7 @@
 # back for no gain.
 
 (import ./graph)
-(import ./source)
+(import ./scan)
 
 # The config file is not source. It sits in the root being watched -- a
 # visualize pointed at its own repo scans `visualize.conf` like any other
@@ -45,7 +45,7 @@
   [root]
   (var sum 0)
   (var count 0)
-  (each job (source/fingerprint-of root)
+  (each job (scan/find-files root)
     (def stats (unless (= (job :rel) config-name) (os/stat (job :path))))
     (when stats
       (++ count)

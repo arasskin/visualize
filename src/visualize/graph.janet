@@ -13,7 +13,7 @@
 # which is what makes "an app that visualizes this project" a thing you can
 # write without touching the server.
 
-(import ./source)
+(import ./scan)
 (import ./select)
 (import ./layout)
 (import ./config)
@@ -126,7 +126,7 @@
   The scan is the whole graph; the narrowing, hiding, grouping and colouring
   are all applied to it on the way to the layout.``
   [root state]
-  (def graph (source/graph-of root))
+  (def graph (scan/graph-of root))
   (if (graph :error)
     [false (graph :error)]
     (do
@@ -211,7 +211,7 @@
 (defn forget-scan
   "Drop the cached scan, so the next draw re-reads the source tree."
   []
-  (source/forget))
+  (scan/forget))
 
 # Which actions are worth a redraw. Inserting adds an EMPTY line, which by
 # definition draws the same graph -- so it saves and returns immediately.

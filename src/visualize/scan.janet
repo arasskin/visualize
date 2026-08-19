@@ -1,9 +1,15 @@
 # Walking the tree and reading every file, on all the cores there are.
 #
-# This file names no language either. It finds the files some parser claims,
-# hands each one to a worker thread, and turns the answers into a graph. The
-# only language-specific things in the process are the specs in `visualize/parsers/`,
-# which arrive as data.
+# THE LANGUAGES ARE NAMED HERE, and nowhere above. This file imports the six
+# specs, finds the files they claim, hands each one to a worker thread and
+# turns the answers into a graph -- so a caller asks for a graph and gets one
+# without ever holding a parser. src/visualize/graph.janet cannot name a
+# language, which is the point.
+#
+# The specs themselves stay data: what a language IS lives in
+# `visualize/parsers/`, and how to run one lives in src/visualize/parser.janet.
+# Neither of those names a language either. This is the one place that does,
+# because finding a file means asking every spec whether it claims one.
 #
 # WHY THREADS. The scan is the slow half -- reading a few thousand files and
 # running three PEGs over each -- and it is embarrassingly parallel: no file's
@@ -13,6 +19,29 @@
 # string work on one core and is not worth splitting.
 
 (import ./parser)
+(import ./parsers/visualize-bash :as bash)
+(import ./parsers/go :as go)
+(import ./parsers/janet :as janet-lang)
+(import ./parsers/javascript :as javascript)
+(import ./parsers/python :as python)
+(import ./parsers/swift :as swift)
+
+(def specs
+  ``Every language this program can read, in name order.
+
+  A LIST, not a directory scan. This used to be src/parsers.janet: a loader
+  that walked the parsers directory at runtime, dofile'd whatever it found,
+  unwrapped a `spec` export through two possible shapes, and tolerated a
+  broken file by skipping that language -- a plugin system for six files
+  that ship in this repo and change when someone edits this line anyway.
+  Adding a language is now an import and an entry here, which is the same
+  amount of editing the loader was avoiding, minus the machinery.``
+  [bash/spec go/spec janet-lang/spec javascript/spec python/spec swift/spec])
+
+(defn languages
+  "Their names, for the startup banner."
+  []
+  (map |($ :name) specs))
 
 # Directories no scan should ever descend into, whatever the language. A spec
 # adds its own via :skip-dirs; these are the ones every project has.
@@ -44,7 +73,7 @@
   Directories are pruned as they are met rather than filtered afterwards, so a
   node_modules with fifty thousand files in it costs one `stat` instead of
   fifty thousand.``
-  [root specs]
+  [root]
   (def found @[])
   # Each spec's own skips, merged with the global set once rather than per
   # directory.
@@ -358,9 +387,34 @@
 
 (defn scan
   "Find, read and graph everything under `root`. The whole pipeline."
-  [root specs &opt workers]
-  (def jobs (find-files root specs))
+  [root &opt workers]
+  (def jobs (find-files root))
   (if (empty? jobs)
     {:error (string "no files under " root
-                    " matched any parser (" (string/join (map |($ :name) specs) ", ") ")")}
+                    " matched any parser (" (string/join (languages) ", ") ")")}
     (build (read-all jobs workers))))
+
+# The scan's output for a given source tree never varies -- same files, same
+# graph, every time. It is fast, but it is still pointless to redo per edit
+# when only the post-processing changes. `forget` is how you say the SOURCE
+# changed and this is stale.
+#
+# THE CACHE LIVES WITH THE SCAN, not with whichever caller wanted one. A
+# drawing is a pure function of the graph and the config; which of those was
+# cached is not the drawing's business.
+(var- cached nil)
+
+(defn graph-of
+  ``The dependency graph of `root`, scanned once and remembered.
+
+  What `scan` returns -- {:nodes :edges :sizes :stamps :ours}, or a table
+  carrying :error.``
+  [root]
+  (unless cached
+    (set cached (scan root)))
+  cached)
+
+(defn forget
+  "Drop the cached scan, so the next read re-walks the source tree."
+  []
+  (set cached nil))
