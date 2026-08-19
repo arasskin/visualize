@@ -963,7 +963,11 @@ function altChord(e) {
   const up = e.code === 'KeyK' || e.code === 'ArrowUp';
   const del = e.code === 'KeyD';
   const comment = e.code === 'KeyC';
-  if (!down && !up && !del && !comment) return false;
+  // SHIFT PICKS THE SIDE. alt+n opens a line under the selected one, alt+N
+  // over it -- the same key, and which way is the shift, the way a capital
+  // reads as the mirror of its letter.
+  const fresh = e.code === 'KeyN';
+  if (!down && !up && !del && !comment && !fresh) return false;
   e.preventDefault();
   // ACTIONS NEED SOMETHING TO ACT ON, and the check has to happen BEFORE
   // the panel opens: opening focuses a row, and focusing a row selects it,
@@ -980,10 +984,22 @@ function altChord(e) {
     return true;
   }
 
-  if (nothingPicked) return true;
   // One request in flight at a time: `send` refuses while busy, and a held
   // key repeats fast enough to reach that.
   if (busy) return true;
+
+  if (fresh) {
+    // With nothing selected a new line goes at the end, which is where the
+    // compose bar puts one too -- there is no line to be relative to, and
+    // the end is the answer everything else gives.
+    const at = nothingPicked ? lines.length : picked + (e.shiftKey ? 0 : 1);
+    lines = lines.slice(0, at).concat([''], lines.slice(at));
+    picked = at;
+    send('run', at);
+    return true;
+  }
+
+  if (nothingPicked) return true;
   if (del) send('delete', picked);
   else toggleComment(picked);
   return true;

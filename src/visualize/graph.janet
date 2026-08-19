@@ -50,23 +50,46 @@
 # next edit through the page appends to it -- so the file is normalised on the
 # way to disk exactly as `write-config` does it.
 
+(defn margins
+  ``The lines, with exactly one empty line at each end.
+
+  A ROOM TO WRITE IN AT EITHER END. They are ordinary empty lines -- the
+  parser skips a blank the way it skips a comment -- but the file always has
+  them, so there is always somewhere to start typing above the first verb and
+  below the last without making room first.
+
+  Exactly one at each end, so reading and writing does not grow a margin, and
+  a file that arrives with several blanks or none is brought to the same
+  shape. A file of nothing but blanks is two lines: the two margins.``
+  [lines]
+  (def out (array ;lines))
+  (defn blank? [line] (= "" (string/trim (or line ""))))
+  (while (and (> (length out) 0) (blank? (last out))) (array/pop out))
+  (var lead 0)
+  (while (and (< lead (length out)) (blank? (out lead))) (++ lead))
+  (array ""  ;(slice out lead) ""))
+
 (defn read-config
   "The config file as a list of lines, creating it if it is not there."
   [path]
   (unless (os/stat path :mode)
     (spit path (string (string/trimr starter "\n") "\n")))
   (def text (try (slurp path) ([_] "")))
-  # A trailing newline is one empty string on the end, which would show as a
-  # phantom blank row in the editor.
+  # A trailing newline is one empty string on the end -- dropped here, and
+  # then `margins` puts the file into the shape the editor works in.
   (def lines (string/split "\n" text))
-  (if (and (> (length lines) 0) (= "" (last lines)))
-    (slice lines 0 -2)
-    lines))
+  (margins
+    (if (and (> (length lines) 0) (= "" (last lines)))
+      (slice lines 0 -2)
+      lines)))
 
 (defn write-config
-  "Write the lines back, as a real edit to the real file."
+  ``Write the lines back, as a real edit to the real file.
+
+  Through `margins`, so the file on disk carries the same blank ends the
+  editor shows -- the panel is a view of the file, not a decoration over it.``
   [path lines]
-  (spit path (string (string/join lines "\n") "\n")))
+  (spit path (string (string/join (margins lines) "\n") "\n")))
 
 # Which actions are worth a redraw -- all of them, now that inserting an
 # empty line is not one. Kept as a table rather than folded away because it
@@ -231,7 +254,10 @@
   (def sent (json/decode body))
   (def action (string (get sent "action" "")))
   (def index (math/floor (or (get sent "index") -1)))
-  (def lines (edit (map string (get sent "lines" [])) action index))
+  # Through `margins`, so the lines that go back to the page are the lines
+  # that went to disk -- otherwise the panel loses a margin after an edit and
+  # only gets it back on reload.
+  (def lines (margins (edit (map string (get sent "lines" [])) action index)))
   # Save first: the file is the thing being edited, and it should hold what
   # you just did even if drawing it then fails.
   (write-config config-path lines)
