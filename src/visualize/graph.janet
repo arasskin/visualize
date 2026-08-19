@@ -16,7 +16,6 @@
 (import ./select)
 (import ./layout)
 (import ./config)
-(import ./json)
 
 # THE ONE SPELLING of the file this program writes into the directory it is
 # pointed at. src/visualize/watch.janet reads it from here rather than
@@ -119,7 +118,7 @@
         (put flashing name true))))
   flashing)
 
-(defn- render-svg
+(defn render-svg
   ``Draw the tree the config asks for. Returns [ok svg-or-error].
 
   THE TREE IS HANDED IN, not fetched. This module turns a scanned tree and a
@@ -182,31 +181,6 @@
       (layout/draw resolved))))
 
 
-(defn page
-  ``The HTML for a rendered graph. `fill` is what the CORE knows -- the
-  token, so far -- supplied as a table, so this app does not reach into the
-  server for it and the server does not know what a graph is.``
-  [web-dir title lines problems svg fill]
-  # `->>`, not `->`: string/replace takes the subject LAST, and threading it
-  # first quietly produced a page that was the replacement value alone.
-  (def template (slurp (string web-dir "/index.html")))
-  (var out (->> template
-                (string/replace "{{TITLE}}" title)
-                (string/replace "{{CONFIG_NAME}}" config-title)
-                (string/replace "{{CONFIG_LINES}}" (json/encode lines))
-                (string/replace "{{CONFIG_PROBLEMS}}" (json/encode problems))
-                # The help panel's content, generated from the grammar's own
-                # verb table -- so the list cannot describe a verb the parser
-                # does not have, or miss one it does.
-                (string/replace "{{CONFIG_DOCS}}" (json/encode (config/docs)))))
-  (eachp [key value] fill
-    (set out (string/replace (string "{{" key "}}") value out)))
-  # The SVG goes in last, and with a function rather than a literal:
-  # string/replace treats `%` sequences in its replacement specially, and
-  # SVG is full of them (percent widths, escaped characters in a label). A
-  # function replacement is taken verbatim.
-  (string/replace "{{GRAPH}}" (fn [&] svg) out))
-
 (defn draw
   ``Everything the page needs for one render: the config's lines, whatever
   was wrong with them, and the drawing or the error that stopped it.``
@@ -215,40 +189,3 @@
   (def [state problems] (config/run lines))
   (def [ok result] (render-svg tree state))
   [lines problems ok result])
-
-# Which actions are worth a redraw. Inserting adds an EMPTY line, which by
-# definition draws the same graph -- so it saves and returns immediately.
-(def- draws {"run" true "delete" true "reorder" true "regenerate" true})
-
-(defn config-edit
-  ``Apply one button press from the page and answer with the result: the
-  new lines, what was wrong with them, and a fresh graph when the action
-  could have changed one.
-
-  THE WHOLE ROUTE, not a helper for it. The core hands over the request
-  body and gets back a reply; nothing about buttons, configs or graphs
-  needs to exist on the other side of that call.``
-  [tree config-path body]
-  (def sent (json/decode body))
-  (def action (string (get sent "action" "")))
-  (def index (math/floor (or (get sent "index") -1)))
-  (def lines (edit (map string (get sent "lines" [])) action index))
-  # `check` ASKS WITHOUT TELLING. It runs the lines and answers with what was
-  # wrong, and writes nothing -- the compose bar uses it to find out whether
-  # what you typed parses before that text reaches the file. Every other
-  # action is an edit and saves.
-  #
-  # Save first, for those: the file is the thing being edited, and it should
-  # hold what you just did even if drawing it then fails.
-  (def asking (= action "check"))
-  (unless asking (write-config config-path lines))
-  (def [state problems] (config/run lines))
-  (def [ok result]
-    (if (and (draws action) (not asking)) (render-svg tree state) [true ""]))
-  {"lines" lines
-   "problems" problems
-   # A render failure belongs to no single line -- an unknown layout name is
-   # not any one form's fault -- so it stays separate from the per-line
-   # messages.
-   "error" (if ok "" result)
-   "svg" (if ok result "")})

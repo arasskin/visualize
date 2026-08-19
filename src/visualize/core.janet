@@ -48,6 +48,7 @@
 (import ./json)
 # The first app built on this core. See the note at the top of graph.janet:
 # it is a consumer, not a component -- delete it and the server still runs.
+(import ./config)
 (import ./graph)
 (import ./scan)
 
@@ -194,6 +195,68 @@
   # not know what a graph is.
   (defn draw [] (graph/draw (scanned) config-path))
 
+  # THE PAGE, built here rather than in graph. Slurping a template and
+  # substituting holes is serving, not drawing -- and it needed `json` to
+  # hand the config to the browser, which was the renderer's only reason to
+  # know that format exists.
+  (defn page [title lines problems svg fill]
+    # `->>`, not `->`: string/replace takes the subject LAST, and threading
+    # it first quietly produced a page that was the replacement value alone.
+    (def template (slurp (string web-dir "/index.html")))
+    (var out (->> template
+                  (string/replace "{{TITLE}}" title)
+                  (string/replace "{{CONFIG_NAME}}" graph/config-title)
+                  (string/replace "{{CONFIG_LINES}}" (json/encode lines))
+                  (string/replace "{{CONFIG_PROBLEMS}}" (json/encode problems))
+                  # The help panel's content, generated from the grammar's
+                  # own verb table -- so the list cannot describe a verb the
+                  # parser does not have, or miss one it does.
+                  (string/replace "{{CONFIG_DOCS}}" (json/encode (config/docs)))))
+    (eachp [key value] fill
+      (set out (string/replace (string "{{" key "}}") value out)))
+    # The SVG goes in last, and with a function rather than a literal:
+    # string/replace treats `%` sequences in its replacement specially, and
+    # SVG is full of them (percent widths, escaped characters in a label). A
+    # function replacement is taken verbatim.
+    (string/replace "{{GRAPH}}" (fn [&] svg) out))
+
+  # ONE BUTTON PRESS from the page: edit the lines, save unless only asked,
+  # and answer with what went wrong and a fresh drawing.
+  #
+  # Here rather than in graph because it is a route -- it decodes a request
+  # body and shapes a reply, which is this file's subject. It also means the
+  # body is decoded ONCE: core used to parse it to look for `regenerate` and
+  # then hand the raw string to graph, which parsed it again.
+  (defn config-edit [body]
+    (def sent (json/decode body))
+    (def action (string (get sent "action" "")))
+    (def index (math/floor (or (get sent "index") -1)))
+    (def lines (graph/edit (map string (get sent "lines" [])) action index))
+    # `check` ASKS WITHOUT TELLING. It runs the lines and answers with what
+    # was wrong, and writes nothing -- the compose bar uses it to find out
+    # whether what you typed parses before that text reaches the file. Every
+    # other action is an edit and saves.
+    #
+    # Save first, for those: the file is the thing being edited, and it
+    # should hold what you just did even if drawing it then fails.
+    (def asking (= action "check"))
+    (unless asking (graph/write-config config-path lines))
+    # Regenerate means "the source changed and I am telling you", so the
+    # tree is dropped before the edit is drawn.
+    (when (= action "regenerate") (rescan))
+    (def [state problems] (config/run lines))
+    (def [ok result]
+      (if (and (graph/draws action) (not asking))
+        (graph/render-svg (scanned) state)
+        [true ""]))
+    {"lines" lines
+     "problems" problems
+     # A render failure belongs to no single line -- an unknown layout name
+     # is not any one form's fault -- so it stays separate from the per-line
+     # messages.
+     "error" (if ok "" result)
+     "svg" (if ok result "")})
+
   (defn handler [request]
     (def path (without-query (request :path)))
     (def method (request :method))
@@ -242,13 +305,13 @@
       (do
         (def [lines problems ok result] (draw))
         ["200 OK" "text/html; charset=utf-8"
-         (graph/page web-dir "visualize"
-                     lines problems
-                     (if ok result (string "<p>could not render: " result "</p>"))
-                     # What only the core knows, handed over rather than
-                     # reached for: the app fills its own template holes and
-                     # this fills the server's.
-                     {"TOKEN" (json/encode token)})])
+         (page "visualize"
+               lines problems
+               (if ok result (string "<p>could not render: " result "</p>"))
+               # What only the core knows, handed over rather than reached
+               # for: the page fills the template's holes and this fills the
+               # server's.
+               {"TOKEN" (json/encode token)})])
 
       # THE WATCH: park until the source changes, so an edit on disk redraws
       # the page without anyone pressing anything. Parked rather than
@@ -298,13 +361,7 @@
       # does and what gets drawn are none of its business.
       (and (= (request :method) "POST") (= path "/config"))
       ["200 OK" "application/json"
-       (json/encode
-         (let [sent (json/decode (request :body))]
-           # Regenerate means "the source changed and I am telling you", so
-           # the tree is dropped before the edit is drawn. Every other action
-           # draws what is already scanned.
-           (when (= "regenerate" (string (get sent "action" ""))) (rescan))
-           (graph/config-edit (scanned) config-path (request :body))))]
+       (json/encode (config-edit (request :body)))]
 
       ["404 Not Found" "text/plain" "not found"]))
 
