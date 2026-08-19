@@ -801,6 +801,9 @@ function composing() { return !compose.classList.contains('shut'); }
 // Set when a commit leaves a complaint on screen, cleared when the bar
 // closes -- so a fix mends the line and a fresh keystroke starts another.
 let composeAt = null;
+// What that line held BEFORE the bar appended to it. A retry rebuilds from
+// this, so fixing a typo does not append to the previous attempt.
+let composeWas = '';
 
 // The field is as wide as its text, so the closing paren sits just after
 // what you wrote rather than at the far edge of the box. Width in `ch`
@@ -828,31 +831,36 @@ function shutCompose() {
   composeInput.value = '';
   composeFault.textContent = '';
   composeAt = null;
+  composeWas = '';
   composeInput.blur();
 }
 
 async function commitCompose() {
   const text = composeInput.value.trim();
   if (!text) { shutCompose(); return; }
-  // What you typed goes in as a call, UNDER THE SELECTED LINE -- the
-  // selection is where you are working, so a new line belongs next to it
-  // rather than at the far end of a file you may be nowhere near. With
-  // nothing selected there is no "next to", and the end is where it goes.
+  // What you typed goes in as a call, ONTO THE SELECTED LINE -- a line holds
+  // as many forms as you like and the parser runs each in turn, so appending
+  // is how you build a line up a piece at a time. The selection does not
+  // move: you are still working on the same line, now longer.
   //
-  // RETRYING REPLACES, rather than appending a second copy: while the bar is
-  // showing a complaint, the line it is complaining about is already in the
-  // config, and fixing a typo should mend that line, not leave the broken
-  // one behind with a corrected twin under it.
-  const fresh = composeAt === null;
-  const at = fresh
-    ? (picked >= 0 && picked < lines.length ? picked + 1 : lines.length)
-    : composeAt;
+  // Onto a BLANK selected line it is simply the line, which is what makes
+  // the margins somewhere to write rather than somewhere to append to
+  // nothing. With no selection at all it goes at the end.
+  //
+  // RETRYING REPLACES what the last commit wrote, rather than appending a
+  // second copy: while the bar is showing a complaint the text is already
+  // out there, and fixing a typo should mend it, not leave the broken form
+  // beside a corrected one.
+  const call = `(${text})`;
+  const onto = picked >= 0 && picked < lines.length ? picked : -1;
+  const at = composeAt === null ? (onto < 0 ? lines.length : onto) : composeAt;
+  // What the line looked like before this bar wrote anything to it, so a
+  // retry rebuilds from there instead of appending to its own last try.
+  if (composeAt === null) composeWas = lines[at] ?? '';
   composeAt = at;
-  lines = fresh
-    ? lines.slice(0, at).concat([`(${text})`], lines.slice(at))
-    : lines.slice(0, at).concat([`(${text})`], lines.slice(at + 1));
-  // The line you just wrote is the one you are on now, so the next thing --
-  // another compose, an alt+n, an alt+d -- happens where you are looking.
+  const base = composeWas.trim();
+  lines = lines.slice(0, at)
+    .concat([base ? `${base} ${call}` : call], lines.slice(at + 1));
   picked = at;
   composeFault.textContent = '';
   await send('run', -1);
