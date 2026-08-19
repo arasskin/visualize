@@ -59,7 +59,9 @@
       (case (os/stat full :mode)
         :directory (unless (or (skips entry) (string/has-prefix? "." entry))
                      (walk full here))
-        :file (when-let [spec (find |(parser/claims? $ entry) specs)]
+        # `full` as well as the name, so a spec can look at a shebang when the
+        # name gives it nothing -- see parser/claims?.
+        :file (when-let [spec (find |(parser/claims? $ entry full) specs)]
                 (array/push found {:path full :rel here :spec spec})))))
 
   (walk root "")

@@ -66,19 +66,45 @@
   # A variable left in the remainder means the path is assembled at runtime.
   (if (string/find "$" rest) nil rest))
 
-# Relative, because that is how the scanner resolves a path against the file
-# that named it -- see resolve-relative in src/visualize/scan.janet. A bare
-# `lib/util.sh` would otherwise be read as a dotted module name and flattened
-# into a node nothing matches.
+# WHICH DIRECTORY A PATH IS RELATIVE TO depends on how it was written, and
+# the two cases resolve differently.
+#
+# A path written plainly -- `source lib/util.sh` -- is relative to the script,
+# because that is what shell does with it. It keeps a `./` so the scanner
+# resolves it against the importing file; see resolve-relative in
+# src/visualize/scan.janet.
+#
+# A path that came from a VARIABLE is not. `$here` is computed, and computed
+# from `dirname $0` plus however many `..` the script needed -- this repo's
+# src/test/run walks up two levels, so its `"$here/build"` means the root and
+# not src/test/build. There is no way to know how far up from the text, so a
+# stripped path is treated as ROOT-relative: that is what a `$here` is for.
+# Emitted without the leading dot, which is how the scanner tells the two
+# apart, and with a SCRIPT extension dropped since node names carry none.
+# Only the extensions this parser can have produced: a `.c` reached by a
+# misfiring variable strip stays `.c`, so it reads as the foreign file it is
+# rather than as a node pretending to be ours.
+(def- script-exts [".sh" ".bash" ".janet"])
+
+(defn- drop-ext [text]
+  (var out text)
+  (each ext script-exts
+    (when (string/has-suffix? ext out)
+      (set out (string/slice out 0 (- (length out) (length ext))))))
+  out)
+
 (defn- as-relative [text]
+  (def trimmed (string/trim text `"'`))
+  (def rooted (not= trimmed (string/trim (or (strip-var text) "") `"'`)))
   (when-let [bare (strip-var text)]
-    (def trimmed (string/trim bare `"'`))
+    (def path (string/trim bare `"'`))
     (cond
-      (empty? trimmed) nil
+      (empty? path) nil
       # An absolute path is somewhere else on the machine, not in this tree.
-      (string/has-prefix? "/" trimmed) nil
-      (string/has-prefix? "." trimmed) trimmed
-      (string "./" trimmed))))
+      (string/has-prefix? "/" path) nil
+      rooted (drop-ext path)
+      (string/has-prefix? "." path) path
+      (string "./" path))))
 
 # `:parse` receives RAW text -- the engine's comment blanking is for specs
 # that hand it a PEG, and a spec with :parse takes over completely (see
@@ -163,6 +189,11 @@
 (def spec
   {:name "bash"
    :ext [".sh" ".bash"]
+
+   # A shell script is as often `build` as `build.sh`. Consulted only for a
+   # file with no extension -- see parser/claims?. `env` is here because
+   # `#!/usr/bin/env bash` is the portable spelling and the commonest one.
+   :shebang ["sh" "bash" "zsh" "dash" "ksh"]
 
    # Comments to end of line, and heredocs whole: a heredoc body is data the
    # script prints, and a path inside one is being written rather than read.

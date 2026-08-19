@@ -109,7 +109,41 @@
        :imports (captures (spec :imports) importable)
        :refs (captures (spec :refs) clean)})))
 
+(defn- first-line
+  ``The first line of a file, or nil -- read as a chunk rather than whole.
+
+  A tree holds extensionless files that are nobody's source: binaries,
+  LICENSE, a compiled runtime. Reading each one to check two characters
+  would cost the scan its speed, so this takes 128 bytes and stops. That is
+  more than any shebang and less than a page.``
+  [path]
+  (when-let [f (try (file/open path :rb) ([_] nil))]
+    (def head (try (file/read f 128) ([_] nil)))
+    (file/close f)
+    (when head
+      (def text (string head))
+      (def stop (string/find "\n" text))
+      (if stop (string/slice text 0 stop) text))))
+
 (defn claims?
-  "Does this spec claim this filename, by extension?"
-  [spec path]
-  (some |(string/has-suffix? $ path) (spec :ext)))
+  ``Does this spec claim this file?
+
+  By extension, and failing that BY SHEBANG for a file that has none. A shell
+  script is as often `build` as `build.sh`, and an extension rule alone reads
+  a repository's own scripts as data. `path` is the name; `full` is where to
+  read it, and without it the shebang test is skipped -- callers that only
+  have a filename keep the old behaviour.
+
+  The shebang is consulted ONLY when there is no extension. A `.py` file
+  beginning `#!/bin/sh` is a Python file someone made executable oddly, and
+  the extension is the better evidence.``
+  [spec path &opt full]
+  (cond
+    (some |(string/has-suffix? $ path) (spec :ext)) true
+    (or (nil? full) (string/find "." path)) false
+    (do
+      (def marks (spec :shebang))
+      (def line (and marks (first-line full)))
+      (truthy? (and line
+                    (string/has-prefix? "#!" line)
+                    (some |(string/find $ line) marks))))))
