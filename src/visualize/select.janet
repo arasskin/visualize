@@ -162,9 +162,39 @@
   (color/ramp (degrees graph)))
 
 (defn group-for
-  ``Which group claims this node, if any.
+  ``Which box claims this node, if any.
 
-  FIRST MATCH WINS when groups overlap, so a narrow group declared before a
-  broad one still gets its own box rather than being swallowed.``
+  FIRST MATCH WINS when boxes overlap, so a narrow one declared before a
+  broad one still gets its own rather than being swallowed.``
   [name groups ours]
   (find (fn [g] (matches? name (expand (g :prefix)) ours)) groups))
+
+(defn resolve
+  ``Answer every question the config asks about a node, once, on the node.
+
+  THE RENDERER READS FIELDS, NOT CONFIG. A drawing needs to know four things
+  about a node -- what to call it, which box it is in, what colour, whether
+  it is flashing -- and each of those is a question the config answers. Asked
+  here, the renderer needs no opinion about prefixes and no import of this
+  file; asked there, every renderer has to learn the config language over
+  again, and `group-for` gets run three times over the same nodes because
+  nowhere is the obvious place to remember the answer.
+
+  Adds to each node:
+
+    :box     the prefix of the box it belongs in, or nil
+    :colour  that box's colour, or the ungrouped one
+    :fresh   true when its file moved since the last drawing
+
+  Leaves :name and :label alone -- identity and text are already right by
+  the time this runs.``
+  [graph groups flashing]
+  (def ours (get graph :ours {}))
+  (merge graph
+         {:nodes (map (fn [node]
+                        (def claimed (group-for (node :name) groups ours))
+                        (merge node
+                               {:box (when claimed (claimed :prefix))
+                                :colour (if claimed (claimed :color) color/ungrouped)
+                                :fresh (truthy? (get flashing (node :name)))}))
+                      (get graph :nodes []))}))

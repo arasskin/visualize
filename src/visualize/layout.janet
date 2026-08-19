@@ -1,7 +1,7 @@
 # The graph, drawn by graphviz.
 #
 # WHAT THIS IS. `graph.janet` hands over a parsed graph and the config's
-# decisions -- groups, colours -- and gets
+# decisions -- boxes, colours -- and gets
 # back [ok svg]. Everything between is DOT: this file writes the graph as a
 # DOT document, runs `dot -Tsvg`, and returns what comes out.
 #
@@ -29,7 +29,6 @@
 # as `-&#45;&gt;`, which `graph.janet` normalises on the way out.
 
 (import ./color)
-(import ./select)
 
 # THE FONT, in one place because it has to be true in two.
 #
@@ -68,13 +67,7 @@
   Exported because it is worth reading on its own -- `vz dot` writes it to
   a file, and a DOT file is the one artefact both this program and every
   other graphviz tool understand.``
-  [graph opts]
-  (def groups (or (opts :groups) []))
-  # Nodes whose file moved since the last drawing. graphviz cannot animate,
-  # so they are given a fill and a CLASS -- the page fades the fill out, and
-  # the fill itself is what remains if the stylesheet never loads.
-  (def flashing (or (opts :flashing) {}))
-  (def ours (or (graph :ours) {}))
+  [graph]
   (def out @[])
   (array/push out "digraph G {")
   (array/push out "  rankdir=TB;")
@@ -91,15 +84,18 @@
                       "\", fontsize=11, penwidth=1.2];"))
   (array/push out "  edge [arrowsize=0.7, color=\"#8a8a8a\"];")
 
-  # A node's colour is the group's hue tinted by its weight, and it goes on
-  # the OUTLINE rather than inside the ellipse: a wall of saturated boxes is
-  # harder to read the edges over, which is why the fill was never the
-  # default and is now not an option.
+  # A node's colour goes on the OUTLINE rather than inside the ellipse: a
+  # wall of saturated boxes is harder to read the edges over, which is why
+  # the fill was never the default and is now not an option.
+  #
+  # READ OFF THE NODE. Which box claims it and what colour that makes it are
+  # questions about the config, answered by select/resolve before any of this
+  # runs -- so this file has no opinion about prefixes and does not import
+  # the module that does.
   (defn node-line [node indent]
     (def name (node :name))
-    (def claimed (select/group-for name groups ours))
-    (def hue (if claimed (claimed :color) color/ungrouped))
-    (def fresh (flashing name))
+    (def hue (get node :colour color/ungrouped))
+    (def fresh (node :fresh))
     (array/push out
                 (string indent "\"" (quoted name) "\""
                         (attrs
@@ -116,31 +112,30 @@
                               [])])
                         ";")))
 
-  # GROUPS BECOME CLUSTERS, which is what a group has always meant here: a
-  # dashed box around members that belong together, labelled with the
-  # prefix. graphviz keeps a cluster's members contiguous by construction,
-  # which is the guarantee the custom layout had to work for.
-  (def in-group @{})
+  # A BOX BECOMES A CLUSTER: a dashed rectangle around members that belong
+  # together, labelled with the prefix. graphviz keeps a cluster's members
+  # contiguous by construction, which is the guarantee the custom layout had
+  # to work for.
+  #
+  # Grouped by the :box each node already carries, so this is a partition
+  # rather than a search.
+  (def by-box @{})
   (each node (get graph :nodes [])
-    (when-let [claimed (select/group-for (node :name) groups ours)]
-      (put in-group (node :name) (claimed :prefix))))
-  (def by-group @{})
-  (each node (get graph :nodes [])
-    (when-let [key (in-group (node :name))]
-      (put by-group key (array/push (or (by-group key) @[]) node))))
+    (when-let [key (node :box)]
+      (put by-box key (array/push (or (by-box key) @[]) node))))
 
-  (eachp [key members] by-group
-    (def claimed (select/group-for ((first members) :name) groups ours))
+  (eachp [key members] by-box
+    (def hue (get (first members) :colour color/ungrouped))
     (array/push out (string "  subgraph \"cluster_" (quoted key) "\" {"))
     (array/push out (string "    label=\"" (quoted key) "\"; style=dashed;"
-                            " color=\"" (if claimed (claimed :color) color/ungrouped) "\";"
-                            " fontcolor=\"" (if claimed (claimed :color) color/ungrouped) "\";"
+                            " color=\"" hue "\";"
+                            " fontcolor=\"" hue "\";"
                             " fontsize=10;"))
     (each node members (node-line node "    "))
     (array/push out "  }"))
 
   (each node (get graph :nodes [])
-    (unless (in-group (node :name))
+    (unless (node :box)
       (node-line node "  ")))
 
   (each [from to] (get graph :edges [])
@@ -176,9 +171,8 @@
   format was how a graph was described; with graphviz drawing and the
   format gone, it was four hundred lines of detour between a table and a
   DOT document.``
-  [graph &opt opts]
-  (default opts {})
-  (def dot (to-dot graph opts))
+  [graph]
+  (def dot (to-dot graph))
   (try
     (let [proc (os/spawn ["dot" "-Tsvg"] :px {:in :pipe :out :pipe})]
       (:write (proc :in) dot)

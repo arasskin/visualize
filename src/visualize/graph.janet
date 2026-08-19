@@ -172,9 +172,14 @@
       # unchanged against a stamp taken moments ago.
       (def flashing (moved-since (tree :stamps)))
       (set seen (tree :stamps))
-      (layout/draw labelled {:groups (state :groups)
-                             :sized (state :sized)
-                             :flashing (if (state :animated) flashing {})}))))
+      # EVERY VERB IS RESOLVED BY HERE. `only` and `hide` took nodes off the
+      # tree, `prefix` and `lines` rewrote labels, and this last step writes
+      # each node's box, colour and flash onto the node -- so what goes to
+      # the renderer is a tree that already answers every question a drawing
+      # asks, and the renderer needs no opinion about the config.
+      (def resolved (select/resolve labelled (state :groups)
+                                    (if (state :animated) flashing {})))
+      (layout/draw resolved))))
 
 
 (defn page

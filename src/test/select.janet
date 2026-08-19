@@ -92,4 +92,27 @@
   (t/is= 2 (counts "Otto.App"))
   (t/is= 1 (counts "SwiftUI")))
 
+(t/test "resolve answers the config's questions on the node"
+  # THE RENDERER READS FIELDS, NOT CONFIG. Every question a drawing asks
+  # about a node -- which box, what colour, is it flashing -- is answered
+  # here, so layout needs no opinion about prefixes and does not import this
+  # module.
+  (def graph {:nodes [{:name "a.b" :label "b"}
+                      {:name "a.c" :label "c"}
+                      {:name "x" :label "x"}]
+              :ours {"a.b" true "a.c" true "x" true}})
+  (def out (select/resolve graph [{:prefix "a" :color "#111111"}] {"x" true}))
+  (def by-name (tabseq [n :in (out :nodes)] (n :name) n))
 
+  (t/is= "a" (get-in by-name ["a.b" :box]) "a node under the prefix is boxed")
+  (t/is= "#111111" (get-in by-name ["a.b" :colour]) "and wears the box's colour")
+  (t/is= nil (get-in by-name ["x" :box]) "one outside it is not")
+  (t/is= color/ungrouped (get-in by-name ["x" :colour])
+         "and wears the ungrouped colour")
+
+  (t/ok (get-in by-name ["x" :fresh]) "a moved file is flagged")
+  (t/ok (not (get-in by-name ["a.b" :fresh])) "an unmoved one is not")
+
+  # Identity and text are already right by the time this runs.
+  (t/is= "b" (get-in by-name ["a.b" :label]) "the label is left alone")
+  (t/is= "a.b" (get-in by-name ["a.b" :name]) "and so is the name"))
