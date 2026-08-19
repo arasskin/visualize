@@ -169,6 +169,24 @@
   [name groups ours]
   (find (fn [g] (matches? name (expand (g :prefix)) ours)) groups))
 
+(defn alias-label
+  ``A node name written the shortest way a config could say it, or nil.
+
+  The mirror of `expand-aliases`: with `~` bound to `src.visualize`, the node
+  `src.visualize.color` LABELS itself `~.color`, so the picture reads in the
+  same vocabulary the config is written in. Longest prefix first, again --
+  the alias that covers most of the name is the one that shortens it most.``
+  [aliases name]
+  (var out nil)
+  (each entry aliases
+    (unless out
+      (def full (entry :prefix))
+      (cond
+        (= name full) (set out (entry :alias))
+        (string/has-prefix? (string full ".") name)
+        (set out (string (entry :alias) (string/slice name (length full)))))))
+  out)
+
 (defn resolve
   ``Answer every question the config asks about a node, once, on the node.
 

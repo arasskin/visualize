@@ -116,3 +116,16 @@
   # Identity and text are already right by the time this runs.
   (t/is= "b" (get-in by-name ["a.b" :label]) "the label is left alone")
   (t/is= "a.b" (get-in by-name ["a.b" :name]) "and so is the name"))
+
+(t/test "a prefix shortens the labels it covers"
+  (def aliases [{:alias "~" :prefix "src.visualize"}])
+  (t/is= "~.color" (select/alias-label aliases "src.visualize.color"))
+  (t/is= "~" (select/alias-label aliases "src.visualize") "the path itself")
+  (t/is= nil (select/alias-label aliases "src.test") "an unrelated node")
+  # A DOT BOUNDARY, not a character one: `src.visualizer` merely starts with
+  # the same letters and keeps its own name.
+  (t/is= nil (select/alias-label aliases "src.visualizer.x"))
+  # Longest first here too, so the alias that covers most shortens most.
+  (def two [{:alias "~~" :prefix "src.visualize"} {:alias "~" :prefix "src"}])
+  (t/is= "~~.color" (select/alias-label two "src.visualize.color"))
+  (t/is= "~.test" (select/alias-label two "src.test")))

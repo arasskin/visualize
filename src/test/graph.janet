@@ -1,37 +1,18 @@
 # The config file on disk.
 
 (import ../visualize/graph)
+(import ../visualize/config)
 (import ../visualize/scan)
 (import ./harness :as t)
 
-(def- scratch "/tmp/visualize-graph-test.janet")
-
-(t/test "reading a config gives one entry per written line"
-  # A trailing newline is one empty string on the end, and it is dropped --
-  # it is how a text file ends, not a line someone wrote.
-  (spit scratch "(lines)\n(hide src.test)\n")
-  (t/is= ["(lines)" "(hide src.test)"] (graph/read-config scratch))
-  (spit scratch "(lines)")
-  (t/is= ["(lines)"] (graph/read-config scratch)
-         "a file with no trailing newline reads the same"))
-
-(t/test "a config round trips unchanged"
-  (spit scratch "(lines)\n(hide src.test)\n")
-  (def lines (graph/read-config scratch))
-  (graph/write-config scratch lines)
-  (t/is= lines (graph/read-config scratch))
-  (t/is= "(lines)\n(hide src.test)\n" (string (slurp scratch))
-         "and the file is the lines, newline-terminated"))
-
-(t/test "the editor's actions are the ones the page can send"
-  (t/is= ["a" "b"] (graph/edit ["a" "b"] "run" -1))
-  (t/is= ["b"] (graph/edit ["a" "b"] "delete" 0))
-  (t/is= ["a" "b"] (graph/edit ["a" "b"] "delete" 9)
-         "an index off the end deletes nothing")
-  (t/is= ["a" "" "b"] (graph/edit ["a" "b"] "insert-above" 1))
-  (t/is= ["a" "" "b"] (graph/edit ["a" "b"] "insert-below" 0))
-  (t/is= [""] (graph/edit [] "insert-below" -1)
-         "the first line of an empty file"))
+# The three steps the server takes for one drawing: read the config, run it,
+# render it. Here rather than in graph, because graph draws a PARSED config
+# and knows nothing about files.
+(defn- drawn [tree path]
+  (def lines (config/read-config path))
+  (def [state problems] (config/run lines))
+  (def [ok result] (graph/render-svg tree state))
+  [lines problems ok result])
 
 (t/test "animate flashes what moved since the last drawing"
   # NOTHING ON THE FIRST DRAW: there is no previous one to differ from, and
@@ -41,20 +22,20 @@
   # A FRESH SCAN PER DRAWING, the way the server does it after the watcher
   # says the source moved. Nothing is cached between them, so what the
   # drawing compares against is the drawing before it and nothing else.
-  (def first-draw (graph/draw (scan/scan ".") conf))
+  (def first-draw (drawn (scan/scan ".") conf))
   (t/is= 0 (length (string/find-all "node fresh" (string (first-draw 3))))
          "the first drawing flashes nothing")
 
   # A file written since then is new to this drawing.
   (os/touch "src/visualize/color.janet")
-  (def second-draw (graph/draw (scan/scan ".") conf))
+  (def second-draw (drawn (scan/scan ".") conf))
   (t/is= 1 (length (string/find-all `class="node fresh"` (string (second-draw 3))))
          "one file moved, one node flashes")
 
   # And without the verb, nothing is marked however much moved.
   (spit conf "(lines)\n")
   (os/touch "src/visualize/select.janet")
-  (def unasked (graph/draw (scan/scan ".") conf))
+  (def unasked (drawn (scan/scan ".") conf))
   (t/is= 0 (length (string/find-all "fresh" (string (unasked 3))))
          "the flash is the verb's, not the watcher's")
   (os/rm conf))
@@ -66,7 +47,7 @@
   # label is the thing that has to be right.
   (def conf "/tmp/visualize-lines-test.conf")
   (spit conf "(lines)\n")
-  (def svg (string ((graph/draw (scan/scan ".") conf) 3)))
+  (def svg (string ((drawn (scan/scan ".") conf) 3)))
   (t/ok (nil? (peg/find ~(* (some (range "09")) "k") svg))
         "no k-abbreviated count")
   (t/ok (nil? (peg/find ~(* (some (range "09")) "." (some (range "09")) "k") svg))
@@ -101,7 +82,7 @@
   (defn fresh-in [tree]
     (sort (peg/match ~(any (+ (* `class="node fresh"` (any (if-not "<title>" 1))
                                  "<title>" (<- (some (if-not "<" 1)))) 1))
-                     (string ((graph/draw tree conf) 3)))))
+                     (string ((drawn tree conf) 3)))))
 
   (fresh-in (scan/scan dir))
   # An edit the held tree has not seen yet.
@@ -132,7 +113,7 @@
   (defn flashed []
     (sort (peg/match ~(any (+ (* `class="node fresh"` (any (if-not "<title>" 1))
                                  "<title>" (<- (some (if-not "<" 1)))) 1))
-                     (string ((graph/draw (scan/scan dir) conf) 3)))))
+                     (string ((drawn (scan/scan dir) conf) 3)))))
 
   # THE BASELINE IS PER PROCESS, not per tree -- "since you last looked" is
   # a question about this session. The test above drew this repository, so
@@ -160,4 +141,3 @@
 
   (clear))
 
-(os/rm scratch)

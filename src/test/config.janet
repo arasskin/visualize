@@ -198,19 +198,6 @@
   # misspelled path does as well.
   (t/is= ["~.color"] ((state-of "(hide ~.color)") :hidden)))
 
-(t/test "a prefix shortens the labels it covers"
-  (def aliases [{:alias "~" :prefix "src.visualize"}])
-  (t/is= "~.color" (config/alias-label aliases "src.visualize.color"))
-  (t/is= "~" (config/alias-label aliases "src.visualize") "the path itself")
-  (t/is= nil (config/alias-label aliases "src.test") "an unrelated node")
-  # A DOT BOUNDARY, not a character one: `src.visualizer` merely starts with
-  # the same letters and keeps its own name.
-  (t/is= nil (config/alias-label aliases "src.visualizer.x"))
-  # Longest first here too, so the alias that covers most shortens most.
-  (def two [{:alias "~~" :prefix "src.visualize"} {:alias "~" :prefix "src"}])
-  (t/is= "~~.color" (config/alias-label two "src.visualize.color"))
-  (t/is= "~.test" (config/alias-label two "src.test")))
-
 (t/test "a prefix without both halves is refused"
   (def [_ p1] (run "(prefix ~)"))
   (t/ok (p1 0) "a token with nothing to stand for")
@@ -298,3 +285,34 @@
   # group needs for its colours.
   (def state (state-of "(box a)" "(prefix ~ src)" "(box b)"))
   (t/is= ["a" "b"] (map |($ :prefix) (state :groups))))
+
+(def- scratch "/tmp/visualize-config-file-test.conf")
+
+(t/test "reading a config gives one entry per written line"
+  # A trailing newline is one empty string on the end, and it is dropped --
+  # it is how a text file ends, not a line someone wrote.
+  (spit scratch "(lines)\n(hide src.test)\n")
+  (t/is= ["(lines)" "(hide src.test)"] (config/read-config scratch))
+  (spit scratch "(lines)")
+  (t/is= ["(lines)"] (config/read-config scratch)
+         "a file with no trailing newline reads the same"))
+
+(t/test "a config round trips unchanged"
+  (spit scratch "(lines)\n(hide src.test)\n")
+  (def lines (config/read-config scratch))
+  (config/write-config scratch lines)
+  (t/is= lines (config/read-config scratch))
+  (t/is= "(lines)\n(hide src.test)\n" (string (slurp scratch))
+         "and the file is the lines, newline-terminated"))
+
+(t/test "the editor's actions are the ones the page can send"
+  (t/is= ["a" "b"] (config/edit ["a" "b"] "run" -1))
+  (t/is= ["b"] (config/edit ["a" "b"] "delete" 0))
+  (t/is= ["a" "b"] (config/edit ["a" "b"] "delete" 9)
+         "an index off the end deletes nothing")
+  (t/is= ["a" "" "b"] (config/edit ["a" "b"] "insert-above" 1))
+  (t/is= ["a" "" "b"] (config/edit ["a" "b"] "insert-below" 0))
+  (t/is= [""] (config/edit [] "insert-below" -1)
+         "the first line of an empty file"))
+
+(os/rm scratch)

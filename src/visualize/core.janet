@@ -127,7 +127,7 @@
   # web/ and the parsers are siblings of that directory, not of this file.
   (def here (os/realpath (string (dyn :current-file) "/../..")))
   (def web-dir (string here "/web"))
-  (def config-path (string root "/" graph/config-name))
+  (def config-path (string root "/" config/config-name))
   # THE SOURCE GENERATION. Bumped whenever the watcher sees the tree change;
   # the page waits on it and redraws, which is what replaced the Regenerate
   # button. A number rather than a flag so a page that missed one edit still
@@ -193,7 +193,14 @@
   # The app's render, and the values only the CORE knows, kept apart: the
   # graph does not reach into the server for a token, and the server does
   # not know what a graph is.
-  (defn draw [] (graph/draw (scanned) config-path))
+  # ONE DRAWING, from the file: read the config, run it, render it. The three
+  # steps are three modules -- config owns the file and the language, graph
+  # owns the picture, and this is where they meet.
+  (defn draw []
+    (def lines (config/read-config config-path))
+    (def [state problems] (config/run lines))
+    (def [ok result] (graph/render-svg (scanned) state))
+    [lines problems ok result])
 
   # THE PAGE, built here rather than in graph. Slurping a template and
   # substituting holes is serving, not drawing -- and it needed `json` to
@@ -205,7 +212,7 @@
     (def template (slurp (string web-dir "/index.html")))
     (var out (->> template
                   (string/replace "{{TITLE}}" title)
-                  (string/replace "{{CONFIG_NAME}}" graph/config-title)
+                  (string/replace "{{CONFIG_NAME}}" config/config-title)
                   (string/replace "{{CONFIG_LINES}}" (json/encode lines))
                   (string/replace "{{CONFIG_PROBLEMS}}" (json/encode problems))
                   # The help panel's content, generated from the grammar's
@@ -231,7 +238,7 @@
     (def sent (json/decode body))
     (def action (string (get sent "action" "")))
     (def index (math/floor (or (get sent "index") -1)))
-    (def lines (graph/edit (map string (get sent "lines" [])) action index))
+    (def lines (config/edit (map string (get sent "lines" [])) action index))
     # `check` ASKS WITHOUT TELLING. It runs the lines and answers with what
     # was wrong, and writes nothing -- the compose bar uses it to find out
     # whether what you typed parses before that text reaches the file. Every
@@ -240,15 +247,21 @@
     # Save first, for those: the file is the thing being edited, and it
     # should hold what you just did even if drawing it then fails.
     (def asking (= action "check"))
-    (unless asking (graph/write-config config-path lines))
+    (unless asking (config/write-config config-path lines))
     # Regenerate means "the source changed and I am telling you", so the
     # tree is dropped before the edit is drawn.
     (when (= action "regenerate") (rescan))
+    # Drawn by graph, which owns what a config means. An action that changes
+    # no picture is still RUN -- the complaints are what the editor draws
+    # under the lines -- and only the drawing is skipped.
     (def [state problems] (config/run lines))
+    # An action that cannot have changed the picture is still RUN -- the
+    # complaints are what the editor writes under the rows -- and only the
+    # drawing is skipped.
     (def [ok result]
-      (if (and (graph/draws action) (not asking))
-        (graph/render-svg (scanned) state)
-        [true ""]))
+      (if (or asking (not (config/draws action)))
+        [true ""]
+        (graph/render-svg (scanned) state)))
     {"lines" lines
      "problems" problems
      # A render failure belongs to no single line -- an unknown layout name
