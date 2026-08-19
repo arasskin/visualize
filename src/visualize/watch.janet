@@ -18,20 +18,15 @@
 # a thread would mean copying the spec list per tick and marshalling results
 # back for no gain.
 
-(import ./graph)
 (import ./scan)
 
-# The config file is not source. It sits in the root being watched -- a
-# visualize pointed at its own repo scans `visualize.conf` like any other
-# file -- but it describes the VIEW, not the tree, and editing it through the
-# page WRITES it. That closed a loop: the page saved a config edit, the
-# fingerprint changed, the watcher announced that the source had moved, the
-# page redrew and saved again, and the server span at 7% CPU printing
-# nothing. A change to the config already redraws the page by the path that
-# made the change; the watcher's job is to notice edits nobody told it about.
-# From graph, not repeated here: this has to be the SAME file the editor
-# writes, and a second spelling of it would drift.
-(def- config-name graph/config-name)
+# THE CONFIG IS NOT IN THE LIST, and does not need excluding from it. Editing
+# it through the page once closed a loop -- the page saved, the fingerprint
+# moved, the watcher announced that the source had changed, the page redrew
+# and saved again, and the server span at 7% CPU printing nothing -- but that
+# was when the config was `config.janet` and the Janet parser claimed it.
+# `visualize.conf` is an extension no parser claims, so `find-files` never
+# returns it and the fingerprint never sees it.
 
 (defn- fingerprint
   ``One number standing for the state of the tree: every file's mtime and
@@ -46,7 +41,7 @@
   (var sum 0)
   (var count 0)
   (each job (scan/find-files root)
-    (def stats (unless (= (job :rel) config-name) (os/stat (job :path))))
+    (def stats (os/stat (job :path)))
     (when stats
       (++ count)
       # The path contributes too, so a rename with identical timestamps is
