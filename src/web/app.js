@@ -18,7 +18,24 @@ const MIN = 0.1, MAX = 10;
 // refit must never discard a view they chose.
 let scale = 1, tx = 0, ty = 0, touched = false;
 
+// ONE WRITE PER FRAME. A trackpad fires wheel and pointermove faster than the
+// display refreshes, and every one of those used to write a transform and
+// force the work that follows it -- several repaints per frame, all but the
+// last thrown away.
+//
+// The state (tx, ty, scale) is updated eagerly, so a reader still sees the
+// latest values; only the DOM write waits for the frame that will show it.
+let painting = null;
+
 function paint() {
+  if (painting) return;
+  painting = requestAnimationFrame(() => {
+    painting = null;
+    repaint();
+  });
+}
+
+function repaint() {
   const svg = pane.querySelector('svg');
   if (!svg) return;
   svg.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
@@ -62,7 +79,9 @@ function fit() {
   ty = (pane.clientHeight - h * scale) / 2;
   // Back to a view the page chose, so a resize may reframe again.
   touched = false;
-  paint();
+  // Immediate, like the redraw path: a fit follows a fresh SVG or a resize,
+  // where a deferred frame is a visible jump rather than a smoother one.
+  repaint();
 }
 
 pane.addEventListener('wheel', (e) => {
@@ -597,7 +616,10 @@ async function send(action, index, keepView) {
         // from what they were looking at is the cost of a feature meant to
         // be invisible. `touched` already means exactly this: it is what
         // stops an automatic refit from discarding a chosen view.
-        if (keepView && touched) paint(); else fit();
+        // `repaint`, not `paint`: this runs on a freshly swapped-in SVG that
+        // has no transform yet, and deferring it a frame would show the
+        // graph unpositioned for that frame.
+        if (keepView && touched) repaint(); else fit();
       }
       const count = Object.keys(faults).length;
       const ms = Math.round(performance.now() - t0);
