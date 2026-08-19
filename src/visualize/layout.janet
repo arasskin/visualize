@@ -117,26 +117,60 @@
   # contiguous by construction, which is the guarantee the custom layout had
   # to work for.
   #
-  # Grouped by the :box each node already carries, so this is a partition
-  # rather than a search.
-  (def by-box @{})
+  # AND CLUSTERS NEST, because boxes do. A node carries every box it is
+  # inside, widest first, so this walks that chain and writes a subgraph per
+  # level -- `(box api)` around `(box api.v1)` around the nodes. graphviz
+  # draws nested clusters natively; the work is emitting the nesting rather
+  # than a flat partition that had to pick one box per node.
+  #
+  # THE COLOUR OF A CLUSTER is the box's own, carried on the chain. An outer
+  # box may hold nothing but inner boxes, whose nodes wear the inner colour
+  # -- so reading a hue off a member would paint the outer rectangle in the
+  # wrong ink.
+  (def hue-of @{})
   (each node (get graph :nodes [])
-    (when-let [key (node :box)]
-      (put by-box key (array/push (or (by-box key) @[]) node))))
+    (each box (get node :boxes [])
+      (put hue-of (box :prefix) (box :colour))))
 
-  (eachp [key members] by-box
-    (def hue ((first members) :colour))
-    (array/push out (string "  subgraph \"cluster_" (quoted key) "\" {"))
-    (array/push out (string "    label=\"" (quoted key) "\"; style=dashed;"
+  # The tree of boxes, built from the chains. A box with no node directly in
+  # it still appears, because a node deeper down named it on the way past.
+  (def kids @{})
+  (def top @{})
+  (def held @{})
+  (each node (get graph :nodes [])
+    (def chain (map |($ :prefix) (get node :boxes [])))
+    (if (empty? chain)
+      (put held :loose (array/push (or (held :loose) @[]) node))
+      (do
+        (put held (last chain) (array/push (or (held (last chain)) @[]) node))
+        (put top (first chain) true)
+        (for i 0 (- (length chain) 1)
+          (def parent (chain i))
+          (def child (chain (+ i 1)))
+          (def seen (or (kids parent) @{}))
+          (put seen child true)
+          (put kids parent seen)))))
+
+  (defn emit-box [key depth]
+    (def pad (string/repeat "  " (+ depth 1)))
+    (def hue (hue-of key))
+    (array/push out (string pad "subgraph \"cluster_" (quoted key) "\" {"))
+    (array/push out (string pad "  label=\"" (quoted key) "\"; style=dashed;"
                             " color=\"" hue "\";"
                             " fontcolor=\"" hue "\";"
                             " fontsize=10;"))
-    (each node members (node-line node "    "))
-    (array/push out "  }"))
+    # Children first, then this box's own nodes, so a nested rectangle is not
+    # separated from its siblings by the loose members around it.
+    (each child (sorted (keys (or (kids key) @{})))
+      (emit-box child (+ depth 1)))
+    (each node (or (held key) [])
+      (node-line node (string pad "  ")))
+    (array/push out (string pad "}")))
 
-  (each node (get graph :nodes [])
-    (unless (node :box)
-      (node-line node "  ")))
+  (each key (sorted (keys top)) (emit-box key 0))
+
+  (each node (or (held :loose) [])
+    (node-line node "  "))
 
   (each [from to] (get graph :edges [])
     (array/push out (string "  \"" (quoted from) "\" -> \"" (quoted to) "\";")))

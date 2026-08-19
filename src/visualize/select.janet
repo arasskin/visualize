@@ -142,13 +142,28 @@
     (when (counts b) (put counts b (+ 1 (counts b)))))
   counts)
 
-(defn group-for
-  ``Which box claims this node, if any.
+(defn boxes-for
+  ``Every box this node falls inside, widest first.
 
-  FIRST MATCH WINS when boxes overlap, so a narrow one declared before a
-  broad one still gets its own rather than being swallowed.``
+  BOXES NEST. `(box api)` and `(box api.v1)` are not rivals for the same
+  node -- the second is inside the first, and a node under both is drawn in
+  both. Sorted by the length of what they match, so the list reads outermost
+  to innermost and the renderer can nest them in that order.
+
+  The EMPTY prefix is widest of all: it means "ours", so a box declared over
+  it contains every one of your files and any box inside it.``
   [name groups ours]
-  (find (fn [g] (matches? name (expand (g :prefix)) ours)) groups))
+  (def inside (filter (fn [g] (matches? name (expand (g :prefix)) ours)) groups))
+  (sorted-by |(length (expand ($ :prefix))) inside))
+
+(defn group-for
+  ``The innermost box claiming this node, or nil.
+
+  What a node's own colour comes from: the narrowest box it is in is the one
+  that says something about it, where the outer ones say something about a
+  region.``
+  [name groups ours]
+  (last (boxes-for name groups ours)))
 
 (defn alias-label
   ``A node name written the shortest way a config could say it, or nil.
@@ -181,7 +196,8 @@
 
   Adds to each node:
 
-    :box     the prefix of the box it belongs in, or nil
+    :box     the prefix of the INNERMOST box it is in, or nil
+    :boxes   every box it is in as {:prefix :colour}, widest first
     :colour  the box's colour, or the ungrouped one
     :ink     that colour deepened until it reads against the page
     :fill    that colour tinted, for the flash
@@ -205,10 +221,18 @@
   (def tint (palette :tint))
   (merge graph
          {:nodes (map (fn [node]
-                        (def claimed (group-for (node :name) groups ours))
+                        (def inside (boxes-for (node :name) groups ours))
+                        (def claimed (last inside))
                         (def hue (if claimed (claimed :color) ungrouped))
                         (merge node
                                {:box (when claimed (claimed :prefix))
+                                # Every box it is in, widest first, for the
+                                # renderer to nest. Each carries its OWN
+                                # colour: an outer box may hold nothing but
+                                # inner boxes, so its hue cannot be read off
+                                # a node -- those wear the inner box's.
+                                :boxes (map |{:prefix ($ :prefix)
+                                              :colour ($ :color)} inside)
                                 :colour hue
                                 :ink (ink hue)
                                 :fill (tint hue)

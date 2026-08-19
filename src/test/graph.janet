@@ -40,6 +40,36 @@
          "the flash is the verb's, not the watcher's")
   (os/rm conf))
 
+(t/test "a nested box becomes a nested cluster"
+  # graphviz draws nested clusters natively; the work is emitting the
+  # nesting rather than a flat partition that had to pick one box per node.
+  (def dir "/tmp/visualize-nested-boxes")
+  (defn clear []
+    (each entry (try (os/dir dir) ([_] []))
+      (os/rm (string dir "/" entry)))
+    (try (os/rmdir dir) ([_] nil)))
+  (clear)
+  (os/mkdir dir)
+  (spit (string dir "/api.v1.users.py") "x = 1\n")
+  (spit (string dir "/web.page.py") "y = 2\n")
+  (def conf (string dir "/vz.conf"))
+  (spit conf "(box api blue)\n(box api.v1 red)\n")
+
+  (def svg (string ((drawn (scan/scan dir) conf) 3)))
+  (def clusters
+    (peg/match ~(any (+ (* `class="cluster"` (any (if-not "<title>" 1))
+                           "<title>" (<- (any (if-not "<" 1)))) 1))
+               svg))
+  (t/is= ["cluster_api" "cluster_api.v1"] (sort clusters)
+         "both boxes are drawn, not just the one declared first")
+
+  # Each cluster wears its OWN colour. An outer box may hold nothing but
+  # inner boxes, whose nodes wear the inner colour, so reading a hue off a
+  # member would paint the outer rectangle in the wrong ink.
+  (t/ok (string/find "#22a6f2" svg) "the outer box is blue")
+  (t/ok (string/find "#ff4d6d" svg) "and the inner one red")
+  (clear))
+
 (t/test "a line count is written out in full"
   # No `1.3k`: abbreviating rounds away the difference between files a
   # hundred lines apart, which is the comparison the number is on the box to

@@ -92,6 +92,34 @@
   (t/is= 2 (counts "Otto.App"))
   (t/is= 1 (counts "SwiftUI")))
 
+(t/test "boxes nest rather than compete"
+  # `(box api)` and `(box api.v1)` are not rivals for the same node: the
+  # second is INSIDE the first, and a node under both is drawn in both. This
+  # used to be first-match-wins, so whichever was declared first swallowed
+  # the other and the order of two lines decided which box you got.
+  (def ours {"api.v1.users" true "web.page" true})
+  (def boxes [{:prefix "api" :color "#b"} {:prefix "api.v1" :color "#r"}])
+
+  (def chain (select/boxes-for "api.v1.users" boxes ours))
+  (t/is= ["api" "api.v1"] (map |($ :prefix) chain) "widest first")
+
+  # Declared the other way round, the chain is the same: nesting is about
+  # the prefixes, not about which line came first.
+  (def flipped (select/boxes-for "api.v1.users" (reverse boxes) ours))
+  (t/is= ["api" "api.v1"] (map |($ :prefix) flipped))
+
+  (t/is= [] (select/boxes-for "web.page" boxes ours) "a node in neither")
+
+  # A node's own colour comes from the INNERMOST box: the outer ones say
+  # something about a region, the inner one about the node.
+  (t/is= "api.v1" ((select/group-for "api.v1.users" boxes ours) :prefix))
+
+  # THE EMPTY PREFIX IS WIDEST OF ALL. It means "ours", so a box over it
+  # holds every one of your files and every box inside them.
+  (def with-all [{:prefix "" :color "#g"} ;boxes])
+  (t/is= ["" "api" "api.v1"]
+         (map |($ :prefix) (select/boxes-for "api.v1.users" with-all ours))))
+
 (t/test "resolve answers the config's questions on the node"
   # THE RENDERER READS FIELDS, NOT CONFIG. Every question a drawing asks
   # about a node -- which box, what colour, is it flashing -- is answered
@@ -110,6 +138,8 @@
   (def by-name (tabseq [n :in (out :nodes)] (n :name) n))
 
   (t/is= "a" (get-in by-name ["a.b" :box]) "a node under the prefix is boxed")
+  (t/is= [{:prefix "a" :colour "#111111"}] (get-in by-name ["a.b" :boxes])
+         "and carries the chain it is nested in, each box with its own colour")
   (t/is= "#111111" (get-in by-name ["a.b" :colour]) "and wears the box's colour")
   (t/is= nil (get-in by-name ["x" :box]) "one outside it is not")
   (t/is= "#999999" (get-in by-name ["x" :colour])
