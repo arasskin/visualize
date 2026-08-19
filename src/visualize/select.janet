@@ -128,22 +128,22 @@
               :edges (filter (fn [[a b]] (not (or (hidden? a) (hidden? b))))
                              (graph :edges))}))))
 
-(defn collapse
+(defn fold
   ``Fold everything under each prefix into one node.
 
-  `(collapse src.visualize.parsers)` replaces the seven parser files with a
+  `(fold src.visualize.parsers)` replaces the seven parser files with a
   single node called `src.visualize.parsers`, wearing every edge any of them
-  had. What a collapsed region depends on, and what depends on it, is exactly
+  had. What a folded region depends on, and what depends on it, is exactly
   what its members did -- so the picture keeps saying the same thing about
   the rest of the graph while saying less about the inside of one part.
 
   EDGES BETWEEN MEMBERS GO. Two parsers that import each other are one node
-  now, and an arrow from a node to itself says nothing that the collapse did
+  now, and an arrow from a node to itself says nothing that the fold did
   not already say. Edges to the outside are kept, deduplicated: five files
   importing `scan` is one arrow once they are one node.
 
-  THE LINE COUNT ADDS UP. A collapsed node stands for its members, so it
-  carries what they carried -- `(lines)` on a collapsed parsers box reads the
+  THE LINE COUNT ADDS UP. A folded node stands for its members, so it
+  carries what they carried -- `(lines)` on a folded parsers box reads the
   size of the directory, which is the number that is true of the thing now
   drawn.
 
@@ -157,7 +157,7 @@
     (let [ours (get graph :ours {})
           tests (map |[(expand $) (selector $ ours)] prefixes)
           # Which prefix swallows a node, if any. FIRST MATCH by declaration
-          # order, like the boxes -- two collapses that overlap would
+          # order, like the boxes -- two folds that overlap would
           # otherwise fold a node into both and draw it twice.
           folded-into (fn [name]
                         (var out nil)
@@ -187,11 +187,11 @@
         (array/push nodes
                     {:name prefix
                      :label (string/join (string/split "." prefix) ".\n")
-                     # Ours if anything inside it was: a collapsed region of
+                     # Ours if anything inside it was: a folded region of
                      # your own files is still yours.
                      :ours (truthy? (find |($ :ours) members))}))
 
-      # Sizes follow their nodes. A collapsed one adds up what it stands for.
+      # Sizes follow their nodes. A folded one adds up what it stands for.
       # A name maps to its stand-in, but only where one was actually made.
       (def stands-for
         (fn [name]
@@ -212,7 +212,7 @@
         (def a (stands-for from))
         (def b (stands-for to))
         # An arrow from a node to itself is what an edge between two members
-        # becomes, and it says nothing the collapse did not.
+        # becomes, and it says nothing the fold did not.
         (unless (= a b) (put pairs [a b] true)))
 
       [(merge graph {:nodes (sorted-by |($ :name) nodes)

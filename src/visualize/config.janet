@@ -59,7 +59,7 @@
     :only @[]
     # Prefixes to fold into one node each. In declaration order, because two
     # that overlap must not fold a node into both.
-    :collapsed @[]
+    :folded @[]
     # Whether a node whose file moved since the last drawing should flash.
     :animated false
     # THE PALETTE THIS CONFIG DRAWS WITH: the colour of a node no box
@@ -130,8 +130,8 @@
     :blurb "Bind a name to a prefix. This lets you use an arbitrary name as an arbitrary prefix. Binding the same name twice is an error."}
    {:name "box" :args [:name :color?]
     :blurb "Draw a box around nodes starting with the provided prefix. Give an optional color (blue, red, ..., or rrggbb)."}
-   {:name "collapse" :args [:name]
-    :blurb "Fold everything under a prefix into one node, wearing every edge its members had. Line counts add up, so a collapsed box reads the size of what it stands for."}
+   {:name "fold" :args [:name]
+    :blurb "Draw everything under a prefix as one node, wearing every edge its members had. Line counts add up, so a folded box reads the size of what it stands for."}
    {:name "hide" :args [:name]
     :blurb "Hide all nodes starting with the given prefix."}
    {:name "only" :args [:name]
@@ -384,10 +384,10 @@
                           (array ;(state :aliases) {:alias token :prefix full})))
           nil)))
 
-    :collapse
+    :fold
     (let [text (normalise (expand-aliases (state :aliases) (first args)))]
-      (unless (index-of text (state :collapsed))
-        (array/push (state :collapsed) text))
+      (unless (index-of text (state :folded))
+        (array/push (state :folded) text))
       nil)
 
     :lines (do (put state :sized true) nil)

@@ -62,13 +62,13 @@
       (def trimmed (select/drop-nodes (select/keep tree (state :only)) (state :hidden)))
       # COLLAPSE AFTER TRIMMING, before everything else. There is no point
       # folding nodes that `hide` already took off, and doing it here means
-      # the alias relabelling and the line counts below see the collapsed
+      # the alias relabelling and the line counts below see the folded
       # node rather than the members it replaced.
       #
-      # The sizes come back changed, since a collapsed node carries the sum
+      # The sizes come back changed, since a folded node carries the sum
       # of what it stands for.
       (def [folded sizes]
-        (select/collapse trimmed (state :collapsed) (tree :sizes)))
+        (select/fold trimmed (state :folded) (tree :sizes)))
       # AN ALIAS RELABELS THE NODES IT COVERS. `(prefix ~ src.visualize)`
       # makes `src.visualize.color` read `~.color`, so the picture speaks the
       # vocabulary the config is written in -- which is most of the point of
