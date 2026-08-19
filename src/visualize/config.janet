@@ -114,13 +114,13 @@
 # for the reader, and the parser never sees it.
 (def verb-specs
   [{:name "prefix" :args [:alias :name]
-    :blurb "Bind a name to a prefix. Nodes under it wear the name, later prefixes starting with it expand, and binding one twice is an error."}
+    :blurb "Bind a name to a prefix. This lets you use an arbitrary name as an arbitrary prefix. Binding the same name twice is an error."}
    {:name "box" :args [:name :color?]
-    :blurb "Draw a coloured box around everything under a prefix. A colour is a name like blue or six bare hex digits like 22a6f2; without one the palette picks, and the others shuffle to stay distinct."}
+    :blurb "Draw a box around nodes starting with the provided prefix. Give an optional color (blue, red, ..., or rrggbb)."}
    {:name "hide" :args [:name]
-    :blurb "Drop everything under a prefix from the drawing. Its edges go with it."}
+    :blurb "Hide all nodes starting with the given prefix."}
    {:name "only" :args [:name]
-    :blurb "Narrow to everything under a prefix, several narrowing to the union. Applied before hide, so (only src) then (hide src.test) reads the way it is written."}
+    :blurb "Only visualize nodes that start with the provided prefix. Multiple onlys will create a union of nodes."}
    {:name "lines" :args []
     :blurb "Write each file's line count under its name."}])
 
