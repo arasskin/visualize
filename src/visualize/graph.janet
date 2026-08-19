@@ -104,13 +104,10 @@
       # each node's box, colour and flash onto the node -- so what goes to
       # the renderer is a tree that already answers every question a drawing
       # asks, and the renderer needs no opinion about the config.
-      # THE PALETTE, handed to select rather than imported by it. What a
-      # colour is -- which hue means ungrouped, how one deepens to read
-      # against the page, how one tints for a flash -- is one module's
-      # business, and this is the seam it reaches the drawing through.
+      # THE PALETTE, handed to select rather than imported by it: what a
+      # colour is stays one module's business, and this is the seam it
+      # reaches the drawing through.
       (def resolved (select/resolve labelled (state :groups)
                                     (if (state :animated) flashing {})
-                                    {:ungrouped color/ungrouped
-                                     :ink color/ink-on-page
-                                     :tint |(color/tint $ 0.3)}))
+                                    color/for-drawing))
       (layout/draw resolved))))

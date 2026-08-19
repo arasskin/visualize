@@ -195,3 +195,19 @@
       # quadratic, and a big repo has thousands of nodes.
       (def rank-of (table ;(mapcat |[(tiers $) (/ $ last)] (range (length tiers)))))
       (table ;(mapcat |[$ (rank-of (counts $))] (keys counts))))))
+
+# WHAT A DRAWING NEEDS FROM A PALETTE, in one table.
+#
+# select/resolve writes a node's exact colours and takes these three as an
+# argument rather than importing this file -- so nothing downstream of the
+# config does contrast arithmetic. The table lives HERE because every entry
+# in it does: assembling it elsewhere meant a module importing this one just
+# to hand it along.
+#
+# The tint strength is the flash's, and the only number in it. A node
+# breathes in its own colour at 0.3 rather than being lit up; see the
+# `animate` verb.
+(def for-drawing
+  {:ungrouped ungrouped
+   :ink ink-on-page
+   :tint |(tint $ 0.3)})
