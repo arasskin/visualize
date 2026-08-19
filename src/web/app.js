@@ -354,7 +354,7 @@ function draw() {
     const hold = document.createElement('span');
     hold.className = 'hold';
     hold.textContent = '⋮⋮';
-    hold.title = 'drag to reorder  (alt+j and alt+k move the selection)';
+    hold.title = 'drag to reorder  (alt+h and alt+l carry the selected line)';
 
     const box = document.createElement('input');
     box.value = text;
@@ -1020,6 +1020,12 @@ function altChord(e) {
   const up = e.code === 'KeyK' || e.code === 'ArrowUp';
   const del = e.code === 'KeyD';
   const comment = e.code === 'KeyC';
+  // CARRY THE LINE, where j/k walk past it. h and l are vim's left and
+  // right, and the arrows agree -- sideways for "take this with you", which
+  // is the gesture a drag makes and reads as different from moving the
+  // cursor even though both end up moving vertically.
+  const lift = e.code === 'KeyH' || e.code === 'ArrowLeft';
+  const drop = e.code === 'KeyL' || e.code === 'ArrowRight';
   // SHIFT PICKS THE SIDE. alt+n opens a line under the selected one, alt+N
   // over it -- the same key, and which way is the shift, the way a capital
   // reads as the mirror of its letter.
@@ -1030,7 +1036,7 @@ function altChord(e) {
   // `e.key` here is `Dead` -- and the preventDefault below is what stops the
   // accent being armed at all. See also the compositionstart guard.
   const fresh = e.code === 'KeyN';
-  if (!down && !up && !del && !comment && !fresh) return false;
+  if (!down && !up && !del && !comment && !fresh && !lift && !drop) return false;
   e.preventDefault();
   // ACTIONS NEED SOMETHING TO ACT ON, and the check has to happen BEFORE
   // the panel opens: opening focuses a row, and focusing a row selects it,
@@ -1050,6 +1056,18 @@ function altChord(e) {
   // One request in flight at a time: `send` refuses while busy, and a held
   // key repeats fast enough to reach that.
   if (busy) return true;
+
+  if (lift || drop) {
+    if (nothingPicked || lines.length < 2) return true;
+    // WRAPS, like j/k: a line carried off the top arrives at the bottom.
+    // The move is a rotation there rather than a swap -- there is nothing
+    // above the first line to trade places with -- and every line between
+    // shifts one, which is what carrying a line past the end has to mean.
+    const to = ((picked + (drop ? 1 : -1)) % lines.length + lines.length)
+               % lines.length;
+    move(picked, to);
+    return true;
+  }
 
   if (fresh) {
     // With nothing selected a new line goes at the end, which is where the
