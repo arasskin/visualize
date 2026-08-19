@@ -29,7 +29,7 @@
      src/visualize/config.janet, rendered by app.js, because a list of verbs
      written out in HTML is a list that goes stale the first time one
      changes. -->
-<button id="help-open" title="what the config can say (?)" aria-label="help">?</button>
+<button id="help-open" title="what the config can say  (? or F1)" aria-label="help">?</button>
 <!-- aria-label rather than aria-labelledby: there is no heading to point at,
      but a dialog still has to announce itself as something. -->
 <div id="help" class="shut" role="dialog" aria-modal="true" aria-label="config verbs">
@@ -37,7 +37,7 @@
 </div>
 
 <div id="config" class="panel shut">
-  <div id="bar" class="bar" title="click to open, drag to move">
+  <div id="bar" class="bar" title="click to open, drag to move  (alt to toggle, hold alt to peek)">
     <span class="name">{{CONFIG_NAME}}</span>
   </div>
   <div id="body" class="panel-body">

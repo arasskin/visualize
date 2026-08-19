@@ -354,7 +354,7 @@ function draw() {
     const hold = document.createElement('span');
     hold.className = 'hold';
     hold.textContent = '⋮⋮';
-    hold.title = 'drag to reorder';
+    hold.title = 'drag to reorder  (alt+j and alt+k move the selection)';
 
     const box = document.createElement('input');
     box.value = text;
@@ -385,13 +385,19 @@ function draw() {
     // Commenting is a TEXT EDIT, not an action of its own: the button writes
     // the line the way you would have typed it and sends the file. That is
     // why the server knows nothing about it -- there is nothing to know.
-    const up = icon('↑', 'insert a line above', 'up');
+    // The tooltip names the chord that does the same thing. ON THE SELECTED
+    // LINE, which is worth spelling out: a button acts on its own row, and
+    // the chord acts on whichever row is picked -- usually but not always
+    // the same one.
+    const up = icon('↑', `insert a line above  (alt+N on the selected line)`, 'up');
     up.onclick = () => send('insert-above', i);
-    const down = icon('↓', 'insert a line below', 'down');
+    const down = icon('↓', `insert a line below  (alt+n on the selected line)`, 'down');
     down.onclick = () => send('insert-below', i);
-    const hash = icon('#', commented ? 'uncomment this line' : 'comment this line out', 'hash');
+    const hash = icon('#',
+      (commented ? 'uncomment this line' : 'comment this line out')
+        + '  (alt+c on the selected line)', 'hash');
     hash.onclick = () => toggleComment(i);
-    const del = icon('✕', 'delete this line', 'del');
+    const del = icon('✕', 'delete this line  (alt+d on the selected line)', 'del');
     del.onclick = () => send('delete', i);
 
     row.append(box, up, down, hash, del, hold);
