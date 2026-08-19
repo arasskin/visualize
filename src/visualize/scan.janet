@@ -80,11 +80,19 @@
   of order still knows which file it belongs to.``
   [[index job]]
   (def text (try (slurp (job :path)) ([_] nil)))
-  # WHEN THE FILE WAS LAST WRITTEN, carried so a redraw can tell which files
-  # moved since the one before it -- see `animate` in the config language.
-  # Taken on the worker beside the read, because that is where the file is
-  # already being touched.
-  (def stamp (try (os/stat (job :path) :modified) ([_] nil)))
+  # WHAT THE FILE LOOKED LIKE WHEN IT WAS READ, so a redraw can tell which
+  # files moved since the one before it -- see `animate` in the config
+  # language. Taken on the worker beside the read, because that is where the
+  # file is already being touched.
+  #
+  # MTIME AND SIZE TOGETHER, not mtime alone. `os/stat :modified` counts
+  # whole seconds, and the case animate exists for -- save a file, the
+  # watcher redraws a moment later -- happens well inside one. An edit that
+  # changes the length is caught by the size even when the clock has not
+  # moved; one that changes the same second AND keeps the length exactly is
+  # the pair this cannot see, and that is a narrow enough miss to accept.
+  (def st (try (os/stat (job :path)) ([_] nil)))
+  (def stamp (when st [(st :modified) (st :size)]))
   [index
    (if-not text
      # An unreadable file is skipped rather than fatal: a broken symlink or a

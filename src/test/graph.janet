@@ -57,4 +57,53 @@
          "the flash is the verb's, not the watcher's")
   (os/rm conf))
 
+(t/test "a file added, edited or removed between drawings"
+  # A TREE OF ITS OWN, so adding and removing files is not done to the repo
+  # the suite is running out of.
+  (def dir "/tmp/visualize-animate-tree")
+  # Removed file by file: this Janet has no recursive rmdir, and the tree is
+  # flat by construction.
+  (defn clear []
+    (each entry (try (os/dir dir) ([_] []))
+      (os/rm (string dir "/" entry)))
+    (try (os/rmdir dir) ([_] nil)))
+  (clear)
+  (os/mkdir dir)
+  (def conf (string dir "/vz.conf"))
+  (spit conf "(animate)\n")
+  (spit (string dir "/a.py") "import b\n")
+  (spit (string dir "/b.py") "x = 1\n")
+
+  (defn flashed []
+    (graph/forget-scan)
+    (sort (peg/match ~(any (+ (* `class="node fresh"` (any (if-not "<title>" 1))
+                                 "<title>" (<- (some (if-not "<" 1)))) 1))
+                     (string ((graph/draw dir conf) 3)))))
+
+  # THE BASELINE IS PER PROCESS, not per tree -- "since you last looked" is
+  # a question about this session. The test above drew this repository, so
+  # the first drawing of a DIFFERENT tree finds every node new, which is
+  # correct and is why this one is discarded rather than asserted on.
+  (flashed)
+  (t/is= [] (flashed) "a second drawing of an unchanged tree flashes nothing")
+
+  # A FILE THAT DID NOT EXIST is new to this drawing.
+  (spit (string dir "/c.py") "import a\n")
+  (t/is= ["c"] (flashed) "a new file flashes")
+
+  (t/is= [] (flashed) "and stops once it has been seen")
+
+  # WITHIN THE SAME SECOND, which is the case animate exists for: save a
+  # file and the watcher redraws a moment later. mtime counts whole seconds,
+  # so the size is what catches this.
+  (spit (string dir "/b.py") "x = 222222222\n")
+  (t/is= ["b"] (flashed) "an edit inside one second still flashes")
+
+  # A REMOVED FILE flashes nothing -- it is not there to flash, and the
+  # nodes that remain have not moved.
+  (os/rm (string dir "/c.py"))
+  (t/is= [] (flashed))
+
+  (clear))
+
 (os/rm scratch)

@@ -126,7 +126,7 @@
    {:name "lines" :args []
     :blurb "Write each file's line count under its name."}
    {:name "animate" :args []
-    :blurb "Flash a node when its file is new or has been written since the last drawing. Nothing flashes on the first draw, since there is no previous one to differ from."}])
+    :blurb "Flash a node when its file is new or has been written since the last drawing. Nothing flashes on the first drawing, since there is no earlier one to differ from."}])
 
 # LONGEST NAME FIRST is not cosmetic: a PEG alternation takes the first
 # branch that matches, so a verb whose name STARTS WITH another one -- were
