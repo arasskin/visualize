@@ -239,18 +239,33 @@
   (string "(" (string/join (array (spec :name) ;parts) " ") ")"))
 
 (defn docs
-  ``Every verb as {:name :usage :blurb}, in the order they are written above.
+  ``Every verb as {:name :usage :args :blurb}, in the order written above.
 
   FROM THE GRAMMAR'S OWN TABLE, so the help the page shows cannot describe a
   verb the parser does not have, or miss one it does. That is the whole
   reason `verb-specs` is a table of data rather than seven lines of PEG:
-  documentation that is derived cannot go stale.``
+  documentation that is derived cannot go stale.
+
+  `:args` IS THE KIND OF EACH SLOT -- "alias", "name", "color?" -- and it is
+  here so the page can complete the right thing in each. Without it the
+  editor had to assume every argument after a verb was a prefix, which is
+  wrong for the colour `box` takes second. As names rather than keywords,
+  since this crosses into JSON.``
   []
   (map (fn [spec]
          {:name (spec :name)
           :usage (usage spec)
+          :args (map |(string $) (spec :args))
           :blurb (spec :blurb)})
        verb-specs))
+
+(defn colours
+  ``Every colour a config can name.
+
+  For the editor to complete: the closed set is worth offering, since a
+  colour is either in it or it is a hex triple you already know.``
+  []
+  (sorted (keys color/named)))
 
 (defn- normalise
   ``A name as the prefix it selects: slashes to dots, edges trimmed.

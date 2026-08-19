@@ -934,27 +934,47 @@ function rank(candidates, typed) {
   return hits.map(h => h.text);
 }
 
-// The word the caret sits in, and what kind of thing it is. A line is
-// `verb arg...`, so the first word is a verb and the rest are prefixes.
+// The word the caret sits in, and which slot of the line it occupies.
 function wordAtCaret() {
   const text = composeInput.value;
   const caret = composeInput.selectionStart ?? text.length;
   const before = text.slice(0, caret);
   const start = before.lastIndexOf(' ') + 1;
-  return {
-    word: before.slice(start),
-    start,
-    end: caret,
-    first: start === 0,
-  };
+  // How many words precede this one: 0 is the verb, 1 is its first argument.
+  const slot = before.slice(0, start).split(/\s+/).filter(Boolean).length;
+  return { word: before.slice(start), start, end: caret, slot };
+}
+
+// WHAT GOES IN THIS SLOT, asked of the verb rather than assumed. The config
+// module publishes each verb's argument kinds -- `box` is ["name", "color?"]
+// -- so a second argument to `box` completes colours while a second argument
+// to `hide` completes nothing, because `hide` does not take one.
+//
+// Nothing here knows which verb has a colour: change the table in
+// config.janet and this follows.
+function poolFor(slot) {
+  const text = composeInput.value;
+  const verb = text.trimStart().split(/\s+/)[0] || '';
+  if (slot === 0) return (window.CONFIG_DOCS || []).map(d => d.name);
+
+  const spec = (window.CONFIG_DOCS || []).find(d => d.name === verb);
+  if (!spec) return [];
+  // `?` marks an optional argument and is not part of the kind.
+  const kind = (spec.args || [])[slot - 1];
+  if (!kind) return [];              // the verb takes no argument here
+  switch (kind.replace(/\?$/, '')) {
+    case 'color': return window.CONFIG_COLOURS || [];
+    // A bound name and a prefix are both prefixes as far as completing goes;
+    // `prefix`'s first argument is a name you are inventing, so nothing is
+    // offered for it.
+    case 'name': return prefixCandidates();
+    default: return [];
+  }
 }
 
 function completions() {
-  const { word, first } = wordAtCaret();
-  const pool = first
-    ? (window.CONFIG_DOCS || []).map(d => d.name)
-    : prefixCandidates();
-  return rank(pool, word);
+  const { word, slot } = wordAtCaret();
+  return rank(poolFor(slot), word);
 }
 
 

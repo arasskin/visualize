@@ -218,7 +218,8 @@
                   # The help panel's content, generated from the grammar's
                   # own verb table -- so the list cannot describe a verb the
                   # parser does not have, or miss one it does.
-                  (string/replace "{{CONFIG_DOCS}}" (json/encode (config/docs)))))
+                  (string/replace "{{CONFIG_DOCS}}" (json/encode (config/docs)))
+                  (string/replace "{{CONFIG_COLOURS}}" (json/encode (config/colours)))))
     (eachp [key value] fill
       (set out (string/replace (string "{{" key "}}") value out)))
     # The SVG goes in last, and with a function rather than a literal:

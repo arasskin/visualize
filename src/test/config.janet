@@ -267,6 +267,27 @@
     (t/ok (string/find name (unknown 0))
           (string name " must be offered when a verb is misspelled"))))
 
+(t/test "the docs carry each argument's kind"
+  # THE EDITOR COMPLETES BY KIND, not by position: a second argument to `box`
+  # is a colour and a second argument to `hide` is nothing at all. That is
+  # decided by this table and shipped to the page, so the completion follows
+  # the grammar rather than a copy of it written in JavaScript.
+  (def by-name (tabseq [d :in (config/docs)] (d :name) d))
+  (t/is= ["name" "color?"] (get-in by-name ["box" :args]))
+  (t/is= ["name"] (get-in by-name ["hide" :args]) "no second slot to fill")
+  (t/is= ["alias" "name"] (get-in by-name ["prefix" :args]))
+  (t/is= [] (get-in by-name ["lines" :args]))
+  # Strings, since this crosses into JSON.
+  (each d (config/docs)
+    (each a (d :args) (t/ok (string? a) (string (d :name) "'s args are strings"))))
+
+  # The colours the editor offers are the ones the parser accepts.
+  (def named (config/colours))
+  (t/ok (index-of "blue" named))
+  (each colour named
+    (t/ok (not (nil? (color/as-hex colour)))
+          (string colour " must be a colour the config accepts"))))
+
 (t/test "a usage line comes from the arguments the parser takes"
   (def by-name (tabseq [d :in (config/docs)] (d :name) d))
   (t/is= "(prefix name p)" (get-in by-name ["prefix" :usage]))
