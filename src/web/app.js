@@ -1054,6 +1054,18 @@ const COMPOSE_MAX_PX = 17;
 const COMPOSE_MIN_PX = 12;
 const COMPOSE_ROWS = 7;
 
+// PUT THE BAR IN THE MODE ITS TAB WANTS. Called whenever the selection
+// changes, and on opening. Cheap enough to call when nothing has changed:
+// the class toggles are no-ops and the sizing is a couple of measurements.
+function refitCompose() {
+  if (!compose.isConnected || compose.classList.contains('shut')) return;
+  compose.classList.toggle('typing', !!composeTarget());
+  // THE LIST BELONGS TO THE CONFIG. Switching to a terminal has to take it
+  // down rather than leave a stale set of verbs hanging over a shell.
+  renderList();
+  sizeCompose();
+}
+
 function sizeCompose() {
   const term = composeTarget();
   if (!term) {
@@ -1175,9 +1187,6 @@ function shutList() {
 
 function openCompose(seed) {
   compose.classList.remove('shut');
-  // THE PARENS ARE THE CONFIG LANGUAGE'S. Every line of the config is a
-  // call, so they are the shape of what you are writing there -- and they
-  // are nothing at all to a shell.
   compose.classList.toggle('typing', !!composeTarget());
   composeFault.textContent = '';
   composeInput.value = seed || '';
@@ -3255,6 +3264,15 @@ function selectPane(root) {
     p.classList.remove('picked');
   }
   if (root) root.classList.add('picked');
+  // THE BAR FOLLOWS THE SELECTION, mid-sentence if need be. Its mode was
+  // settled when it opened, so walking from the config to a terminal with
+  // half a line typed left you writing shell into a box still wrapped in
+  // parens and still offering config verbs -- and the other way round left a
+  // config line in a box that would have sent it to a shell.
+  //
+  // Every path that changes the selection comes through here: a click, an
+  // alt-walk, a tab closing.
+  refitCompose();
 }
 
 // The panel that is selected right now, or the config when somehow none is.
