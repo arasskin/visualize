@@ -41,12 +41,15 @@
 
   --shadow: 0 6px 18px #0004;
 
-  /* The harness terminal's ground. Translucent so the graph it is talking
-     about stays visible underneath -- the panel covers a corner of the
-     canvas, and an opaque one hides exactly the part you were looking at.
-     Alpha rather than `opacity` on the panel: opacity would fade the TEXT
-     too, and terminal output at 70% on a busy graph is unreadable. */
-  --term: #fdfdfbb3;
+  /* The terminal's ground, OPAQUE. It was translucent so the graph behind it
+     stayed visible, which was a fair trade when there was one pane pinned in
+     a corner; with several, a stack of washes over the drawing makes both
+     the terminals and the graph harder to read than either would be alone.
+     A terminal is its own surface now, and moving it is how you see what is
+     under it.
+     --term-ground is the same colour and stays as the name for the places
+     that always needed a solid one (the cursor cell, inverse video). */
+  --term: #fdfdfb;
   --term-ink: #2c2c2a;
   --term-line: #0002;
   --term-hint: #6a6a68;
@@ -94,7 +97,7 @@
     /* Lightened to read against the dark ground -- the mirror image of the
        light palette's problem: stock black and dim colours vanish here. */
 
-    --term: #1b1b19b3;
+    --term: #1b1b19;
     --term-ink: #d6d6d2;
     --term-ground: #1b1b19;
     --term-line: #fff2;
@@ -833,15 +836,15 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 }
 /* The terminal's ground, on the parts that ARE the terminal. */
 .term > .bar, .term > .panel-body { background: var(--term); }
-/* NO LINE WHERE THE TAB MEETS ITS WINDOW. The base rule erases that seam by
-   painting the bar's bottom edge in the body's own colour, the way a folder
-   tab merges into the folder; this pane restored a visible one, so an open
-   terminal wore a rule across its top.
-   TRANSPARENT rather than --term, because --term is translucent: painting
-   the seam in it would stack two washes over the graph and read as a line
-   again, just a paler one. Shut, the base rule puts the full border back --
-   a tab with nothing under it needs its own bottom edge. */
-.term .bar { border-bottom-color: transparent; }
+/* NO LINE WHERE THE TAB MEETS ITS WINDOW, the same way the base rule does
+   it: the bar's bottom edge painted in the body's own colour, so the tab
+   merges into the folder rather than sitting on it. This wanted
+   `transparent` while --term was translucent, since painting the seam in a
+   wash would have stacked two of them and read as a line again; with an
+   opaque ground the body's colour is simply the right answer. Shut, the
+   base rule puts the full border back -- a tab with nothing under it needs
+   its own bottom edge. */
+.term .bar { border-bottom-color: var(--term); }
 .term .panel-body { padding: .35rem .5rem; }
 
 .screen {
