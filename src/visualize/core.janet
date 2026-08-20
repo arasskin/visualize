@@ -188,6 +188,41 @@
   # means "since the server started" rather than "ever".
   (def page-born (os/time))
 
+  # THE TERMINAL LIVES IN ANOTHER PROCESS, so this one can be restarted
+  # without killing what is running in it -- the pty's master fd belongs to
+  # whoever called forkpty and cannot be handed on. This client knows where
+  # to look for a host and how to start one; it never holds the fd itself.
+  #
+  # The socket path is computed ONCE and passed twice: the address we look on
+  # and the address we tell a new host to bind have to be the same string,
+  # and two calls is two chances for that to stop being true.
+  # `here` is src/, which is what web-dir wants; the runtime and this file
+  # are named from the REPO root, one level further up. Spelled out rather
+  # than reusing `here` with a "/.." glued on, because the two are different
+  # anchors and gluing hid that -- the first version spawned
+  # src/external-src/janet/janet and the pane just never started.
+  (def repo (os/realpath (string here "/..")))
+  (def pane-socket (socket-for root))
+  (def pane-client
+    (term/make-client pane-socket
+                      [(string repo "/external-src/janet/janet")
+                       (string repo "/src/visualize/core.janet")
+                       "--supervise" pane-socket]))
+
+  # WHAT THE TERMINAL RUNS. An environment variable rather than a config verb
+  # for now: the config's verb table describes fixed-arity calls over graph
+  # prefixes, and a command line is neither -- `(harness claude --flag x)` is
+  # variadic free text, which the grammar has no kind for. Adding one is a
+  # config-language decision, not a terminal one, so this stays out of the
+  # way until that is made. VISUALIZE_HARNESS is read per request, so
+  # changing it and pressing start does the new thing.
+  (defn harness-argv []
+    (def named (os/getenv "VISUALIZE_HARNESS"))
+    (if (and named (not (empty? named)))
+      (string/split " " named)
+      # A shell is the honest default: it needs nothing installed, and it
+      # proves the pane works before anything is pointed at it.
+      [(or (os/getenv "SHELL") "/bin/sh") "-i"]))
 
   (defn permitted?
     ``May this request drive the terminal?
@@ -233,6 +268,9 @@
     (var out (->> template
                   (string/replace "{{TITLE}}" title)
                   (string/replace "{{CONFIG_NAME}}" config/config-title)
+                  # The pane's bar says what it runs, so a glance tells you
+                  # which harness this run would start.
+                  (string/replace "{{HARNESS_NAME}}" (first (harness-argv)))
                   (string/replace "{{CONFIG_LINES}}" (json/encode lines))
                   (string/replace "{{CONFIG_PROBLEMS}}" (json/encode problems))
                   # The help panel's content, generated from the grammar's
@@ -396,6 +434,51 @@
       (and (= (request :method) "POST") (= path "/config"))
       ["200 OK" "application/json"
        (json/encode (config-edit (request :body)))]
+
+      # -- the terminal pane ------------------------------------------------
+      # Every one of these drives a session this process does not own. They
+      # are all `guarded`: the endpoint runs a program, so no token means no
+      # answer. See `permitted?`.
+      #
+      # THE /pane/ PREFIX EARNS ITS KEYSTROKES. A route called /term/poll
+      # reads as though it polled a terminal emulator; this is a pane in the
+      # page talking about the session behind it, and the prefix says so.
+      (and (= method "POST") (= path "/pane/harness/start"))
+      (guarded (fn []
+                 (def sent (json/decode (request :body)))
+                 (def rows (math/floor (or (get sent "rows") 24)))
+                 (def cols (math/floor (or (get sent "cols") 100)))
+                 ["200 OK" "application/json"
+                  (json/encode (:start pane-client (harness-argv) root rows cols))]))
+
+      (and (= method "POST") (= path "/pane/harness/stop"))
+      (guarded (fn [] ["200 OK" "application/json"
+                       (json/encode (:stop pane-client))]))
+
+      (and (= method "POST") (= path "/pane/harness/input"))
+      (guarded (fn []
+                 (def sent (json/decode (request :body)))
+                 # `at` turns this into "type, and tell me what came back" --
+                 # one round trip for a keystroke and its echo.
+                 (def echo (:send pane-client (string (get sent "text" ""))
+                                  (when-let [a (get sent "at")] (math/floor a))))
+                 ["200 OK" "application/json" (json/encode echo)]))
+
+      (and (= method "POST") (= path "/pane/harness/redraw"))
+      (guarded (fn []
+                 (:redraw pane-client)
+                 ["200 OK" "application/json" (json/encode {"ok" true})]))
+
+      (and (= method "POST") (= path "/pane/harness/resize"))
+      (guarded (fn []
+                 (def sent (json/decode (request :body)))
+                 (:resize pane-client (math/floor (or (get sent "rows") 24))
+                          (math/floor (or (get sent "cols") 100)))
+                 ["200 OK" "application/json" (json/encode {"ok" true})]))
+
+      (and (= method "POST") (= path "/pane/harness/poll"))
+      (guarded (fn [] (poll-answer (fn [at gen wait] (:poll pane-client at gen wait))
+                                   (request :body))))
 
       ["404 Not Found" "text/plain" "not found"]))
 

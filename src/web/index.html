@@ -56,6 +56,20 @@
   <div id="help-verbs"></div>
 </div>
 
+<!-- The terminal pane. The screen is a <pre>: the emulator writes a grid of
+     cells into it, which is exactly the shape a terminal is, and tabindex
+     makes it focusable so keystrokes are captured without a text input. -->
+<div id="harness" class="panel term shut">
+  <div class="bar" title="click to open, drag to move">
+    <span class="name">{{HARNESS_NAME}}</span>
+    <span class="state"></span>
+  </div>
+  <div class="panel-body">
+    <pre class="screen" tabindex="0" spellcheck="false"></pre>
+  </div>
+  <div class="grip" title="drag to resize"></div>
+</div>
+
 <div id="config" class="panel shut">
   <div id="bar" class="bar" title="click to open, drag to move  (alt to toggle, hold alt to peek)">
     <span class="name">{{CONFIG_NAME}}</span>
