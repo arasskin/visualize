@@ -22,7 +22,9 @@
 (import ./json)
 (import ./scan)
 (import ./graph)
-# These spawn real processes (and the watchdog a real thread). Nothing may
+# These spawn real processes -- ptys, shells and host processes. Nothing may
 # be imported below them.
+(import ./pty)
+(import ./term)
 
 (os/exit (t/report))

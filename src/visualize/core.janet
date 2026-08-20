@@ -51,6 +51,12 @@
 (import ./config)
 (import ./graph)
 (import ./scan)
+# The terminal pane: a client here, and a host in another process. The pty's
+# master fd belongs to whoever called forkpty and cannot be handed on, so the
+# session has to outlive this server rather than live in it -- see
+# ./term/host.janet. This process only ever speaks to it over a socket.
+(import ./term/client :as term)
+(import ./term/host :as term-host)
 
 # The env the dev repl evaluates in protos to THIS one, captured at load so
 # a connection sees the same names this file sees -- every module above,
@@ -119,6 +125,20 @@
   (string base "/visualize-" (string/format "%08x" digest) tag))
 
 (defn main [& args]
+  # ONE PROGRAM, TWO ROLES. Run plainly, this is the web server. Run with
+  # --supervise it is the process that owns a terminal, spawned by the
+  # server's own client half and outliving it -- see ./term/host.janet for
+  # why the pty cannot live here. Both roles from one entry point means one
+  # program to install, one to spawn, and one place that knows how the
+  # pieces fit.
+  #
+  # BEFORE the flag filtering below, and before anything reads a directory:
+  # this branch never returns.
+  (when (= (get args 1) "--supervise")
+    (def path (or (get args 2) (error "usage: visualize --supervise <socket-path>")))
+    (term-host/host path)
+    (os/exit 0))
+
   # The dev flags were consumed at load (they had to be -- see the top of
   # this file); here they just must not be mistaken for the directory.
   (def args (filter |(not (index-of $ ["--dev" "--no-dev"])) args))
