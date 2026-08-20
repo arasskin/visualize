@@ -760,6 +760,12 @@ function makePanel(root, options = {}) {
     } else if (options.onShut) {
       options.onShut(panel);
     }
+    // THE ROW MOVES WITH THE CLICK, not a quarter-second later. Opening a
+    // panel changes what it takes up in the row, and waiting for the tick
+    // that notices meant the neighbours visibly caught up afterwards --
+    // the tick is for widths that change with nobody touching anything (a
+    // pane retitling itself), not for the one case we are already in.
+    if (onRail(panel)) packRail();
   });
 
   return panel;
@@ -2783,6 +2789,17 @@ function railShape() {
 }
 
 function packRail() {
+  // THE SCROLL CANNOT OUTLIVE WHAT IT WAS SCROLLING. Shutting a panel,
+  // pulling a tab out, or a window that grew all make the row shorter -- and
+  // a scroll left over from when it was longer holds the whole row off the
+  // left edge with nothing out to the right to justify it. That is the tab
+  // stuck where no scrolling brings it back: the row was already at its
+  // stop, so scrolling right did nothing and there was nothing to the left
+  // to scroll toward. Clamped here, where the row is measured anyway.
+  if (railEnd) {
+    const most = railOverflows() ? Math.min(0, (innerWidth - inset) - railEnd) : 0;
+    railScroll = Math.max(most, Math.min(0, railScroll));
+  }
   let x = inset + railScroll;
   railWidths = railShape();
   for (const p of rail) {
@@ -2947,6 +2964,16 @@ function railDrop(panel) {
     // PULLED OUT. It keeps where the drag left it -- that is what pulling a
     // tab out is for.
     removeFromRail(panel);
+    // BUT IT HAS TO BE REACHABLE. On the rail a tab may sit far off the left
+    // edge, because the row is scrolled and scrolling back is how it
+    // returns; off the rail there is nothing to scroll, so a tab dropped out
+    // there is lost -- no bar to grab and no way to bring it in. The drag
+    // itself is placed freely, so this is the moment to put it back in
+    // reach, and only in the direction it is actually stranded.
+    const box = panel.root.getBoundingClientRect();
+    const edge = 28;
+    if (box.right < edge) panel.place(edge - box.width, box.top);
+    else if (box.left > innerWidth - edge) panel.place(innerWidth - edge, box.top);
   }
 }
 

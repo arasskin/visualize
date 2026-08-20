@@ -150,7 +150,15 @@
 
 * { box-sizing: border-box; }
 
-body { margin: 0; font: 14px/1.5 var(--font-ui); }
+body {
+  margin: 0; font: 14px/1.5 var(--font-ui);
+  /* NO SCROLLBARS, EVER. Panels are positioned absolutely and the tab row
+     puts them deliberately off both sides -- scrolled left, dragged right --
+     which grows the document and hands the window a horizontal bar for a
+     page that does not scroll. The row has its own scrolling and the graph
+     has its own panning; the document itself is a fixed viewport. */
+  overflow: hidden;
+}
 
 button {
   font: inherit; padding: .4rem .9rem;
