@@ -1066,13 +1066,44 @@ function refitCompose() {
   sizeCompose();
 }
 
-function sizeCompose() {
+function sizeCompose() { sizeFor(composeInput.value); }
+
+// WHAT THE FIELD WOULD BE after this input event, or null when that cannot
+// be worked out. Insertions and deletions cover everything the bar sees;
+// anything stranger (a drop, a composition) falls through to the `input`
+// handler, which is a frame late but always right.
+function nextValue(e) {
+  const v = composeInput.value;
+  const a = composeInput.selectionStart, b = composeInput.selectionEnd;
+  if (a === null || b === null) return null;
+  switch (e.inputType) {
+    case 'insertText':
+    case 'insertFromPaste':
+    case 'insertReplacementText':
+      return v.slice(0, a) + (e.data ?? '') + v.slice(b);
+    case 'insertLineBreak':
+    case 'insertParagraph':
+      return v.slice(0, a) + '\n' + v.slice(b);
+    case 'deleteContentBackward':
+      return a === b ? v.slice(0, Math.max(0, a - 1)) + v.slice(b) : v.slice(0, a) + v.slice(b);
+    case 'deleteContentForward':
+      return a === b ? v.slice(0, a) + v.slice(b + 1) : v.slice(0, a) + v.slice(b);
+    case 'deleteByCut':
+    case 'deleteWordBackward':
+    case 'deleteWordForward':
+      return null;        // let `input` handle it; the shape is not obvious
+    default:
+      return null;
+  }
+}
+
+function sizeFor(value) {
   const term = composeTarget();
   if (!term) {
     // THE CONFIG BAR IS ONE LINE, as wide as its text. The field is measured
     // in `ch` so the closing paren sits just after what you wrote.
     composeInput.style.font = '';
-    composeInput.style.width = Math.max(1, composeInput.value.length) + 'ch';
+    composeInput.style.width = Math.max(1, value.length) + 'ch';
     composeInput.style.height = '';
     composeInput.rows = 1;
     return;
@@ -1087,8 +1118,7 @@ function sizeCompose() {
   // box is full, and anything more wraps -- so by the time there is a second
   // line the type is ALREADY at 12px and never changes again. Nothing shrinks
   // while you are typing line four; it cannot, it is at the floor.
-  const text = composeInput.value;
-  const lines = text.split('\n');
+  const lines = value.split('\n');
   const longest = Math.max(1, ...lines.map(l => l.length));
 
   // How wide a character is at a given size, in this face. Monospace, so one
@@ -1333,6 +1363,19 @@ async function commitCompose() {
 compose.addEventListener('mousemove', () => compose.classList.add('mousing'));
 composeInput.addEventListener('keydown', () => compose.classList.remove('mousing'));
 
+// SIZED BEFORE THE CHARACTER LANDS. `input` fires after the value has
+// changed AND after the browser has laid the field out at its old size, so
+// resizing there is always one frame behind what you typed -- most visible
+// on a newline, where the line arrives in a box that has not grown yet.
+// `beforeinput` knows what the value is about to be, so the box is already
+// the right size when the text appears in it.
+composeInput.addEventListener('beforeinput', (e) => {
+  if (!composeTarget()) return;
+  const next = nextValue(e);
+  if (next === null) return;
+  sizeFor(next);
+});
+
 composeInput.addEventListener('input', () => {
   sizeCompose();
   // Typing NARROWS rather than moves: the highlight goes back to nothing, so
@@ -1384,8 +1427,12 @@ composeInput.addEventListener('keydown', (e) => {
   // the config bar is one line and the browser's own default is prevented
   // above. Left to the textarea rather than inserted here, so undo and the
   // caret behave the way they do in any other multi-line field.
+  //
+  // The box is grown for it in `beforeinput`, which runs before the newline
+  // lands -- a timer here cost a whole frame, and the line appeared in a box
+  // that was still one line tall.
   else if (e.key === 'Enter' && e.shiftKey) {
-    if (composeTarget()) setTimeout(sizeCompose, 0); else e.preventDefault();
+    if (!composeTarget()) e.preventDefault();
   }
   else if (e.key === 'Escape') {
     e.preventDefault();
