@@ -2110,15 +2110,12 @@ function makeTerminalPane(root, prefix) {
   const nameLabel = root.querySelector('.name');
   const screen = root.querySelector('.screen');
 
-  // A CROSS ON THE ONES YOU MADE. The pane the page ships with is not
-  // closable -- it is what Control-era muscle memory reaches for, its socket
-  // is the one a restarting server looks for by name, and a row with nothing
-  // in it is a worse place to arrive than a row with one terminal. Panes
-  // opened since are yours to close, so they say so.
-  //
-  // A numbered prefix is exactly the test: the first pane is called
-  // `harness`, and every one after it is a number.
-  if (/^\d+$/.test(prefix)) {
+  // A CROSS ON EVERY TERMINAL. The first one used to be exempt, on the
+  // grounds that an empty row is a worse place to arrive than a row with one
+  // terminal -- but a tab you cannot close is a tab you have to work around,
+  // and the `+` makes a new one whenever the row is empty. visualize is
+  // still not closable: it is the page, not a thing on it.
+  {
     const close = document.createElement('button');
     close.className = 'close';
     close.type = 'button';
@@ -3107,19 +3104,33 @@ document.addEventListener('pointerdown', (e) => {
   if (inPanel) selectPane(inPanel);
 }, true);
 
+// THE SHAPE OF A TERMINAL PANE, taken from the page once and kept. It used
+// to be cloned from the live harness element every time, which was fine
+// while that one could never be closed -- now that it can, a page with no
+// terminals left would have nothing to copy.
+const paneTemplate = (() => {
+  const copy = document.getElementById('harness').cloneNode(true);
+  // WITHOUT WHATEVER THE LIVE ONE HAS GROWN. This is taken after the first
+  // pane was wired, so the copy arrives carrying that pane's close button --
+  // and every clone then got a second one appended, two crosses to a tab.
+  // The template is the markup, not the state.
+  for (const extra of copy.querySelectorAll('.close')) extra.remove();
+  copy.querySelector('.screen').textContent = '';
+  copy.querySelector('.state').textContent = '';
+  copy.classList.remove('picked');
+  return copy;
+})();
+
 function openTerminal() {
   const id = String(++paneCount);
-  const root = document.getElementById('harness').cloneNode(true);
+  const root = paneTemplate.cloneNode(true);
   root.id = 'pane-' + id;
   root.classList.add('shut');
-  // A CLONE CARRIES THE ORIGINAL'S SCREEN. Whatever the first pane had
-  // painted comes along in the copy, and it belongs to a session this one
-  // has nothing to do with.
   root.querySelector('.screen').textContent = '';
   root.querySelector('.state').textContent = '';
   root.querySelector('.name').textContent = 'terminal ' + id;
   // Cleared, so the panel starts at its own default size rather than
-  // inheriting whatever the original was dragged to.
+  // inheriting whatever the template was captured with.
   root.style.cssText = '';
   document.body.appendChild(root);
 
@@ -3153,9 +3164,11 @@ function openTerminal() {
 // over the wire, and a pane whose element has already gone has nothing to
 // report a failure on.
 function closeTerminal(pane) {
+  // The list is only of the ones `+` made; the first terminal is not in it
+  // and is closed just the same. Guarding on membership would have made it
+  // quietly unclosable again.
   const at = extraPanes.indexOf(pane);
-  if (at < 0) return;
-  extraPanes.splice(at, 1);
+  if (at >= 0) extraPanes.splice(at, 1);
   removeFromRail(pane);
   if (pane.stop) pane.stop();
   // SELECTION CANNOT POINT AT A PANE THAT IS GONE. Alt would have nothing to
