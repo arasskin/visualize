@@ -404,6 +404,10 @@
         # it may chain polls with no timer instead of pacing them.
         "waited" (truthy? (get reply "waited"))
         "stamp" (or (get reply "stamp") "")
+        # What the terminal is running now, for the tab's title. Empty from
+        # a supervisor that predates it, which the page reads as "no answer"
+        # and leaves the title alone.
+        "program" (or (get reply "program") "")
         "reachable" true}
        # UNREACHABLE IS NOT DEAD. This fallback used to say running=false,
        # generation=0 -- and the page, taking it as truth, blanked its screen

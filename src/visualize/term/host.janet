@@ -241,12 +241,59 @@
   (drain)
   (and session (not exited) (pty/alive? session)))
 
+(defn- foreground
+  ``What the terminal is actually running, or nil.
+
+  THE ARGV IS WHAT WAS LAUNCHED, which stops being the answer the moment the
+  shell runs anything: a pane running `vim` is a pane whose argv still says
+  zsh. The kernel knows better -- a terminal has a FOREGROUND PROCESS GROUP,
+  the one allowed to read from it, and that is the definition of the program
+  the terminal is running.
+
+  `ps` rather than a syscall, for the reason `resize` shells out to `stty`:
+  tcgetpgrp is reachable through the FFI but naming the process behind the
+  pid is not, and the answer wanted here is a name. The `+` in STAT is the
+  flag for that group; the LAST such line is the innermost program, since a
+  shell running a program has both in its own group.
+
+  Nil when it cannot tell, which the caller treats as "say nothing" rather
+  than as an answer.``
+  []
+  (when-let [device (and session (session :device))
+             short (when (string/has-prefix? "/dev/" device)
+                     (string/slice device 5))]
+    (try
+      (let [proc (os/spawn ["ps" "-t" short "-o" "stat=,command="] :px {:out :pipe})
+            text (or (:read (proc :out) :all) "")]
+        (os/proc-wait proc)
+        (var found nil)
+        (each raw (string/split "\n" (string text))
+          (def line (string/trim raw))
+          (unless (empty? line)
+            # `ps` pads its columns, so the fields are separated by RUNS of
+            # spaces rather than single ones -- splitting on one space gave
+            # a list full of empty strings and a stat that never matched.
+            (def parts (filter |(not (empty? $)) (string/split " " line)))
+            (def stat (first parts))
+            # The foreground group is the one marked `+`. A login shell that
+            # is merely waiting is not it.
+            (when (and stat (string/find "+" stat) (> (length parts) 1))
+              # The leaf of argv[0] is the name a person would use for it.
+              # A login shell arrives as `-zsh`, hence the trim.
+              (def leaf (last (string/split "/" (string/trim (get parts 1) "-"))))
+              (unless (or (empty? leaf) (string/has-prefix? "<" leaf))
+                (set found leaf)))))
+        found)
+      ([_] nil))))
+
 (defn- session-state
   "What the page needs to know about the session, without its output."
   []
   {"running" (truthy? (running?))
    "generation" generation
    "argv" (if session (session :argv) [])
+   # What it is running NOW, which is not always what it was started with.
+   "program" (or (foreground) "")
    "chunks" (+ base (length backlog))
    "rows" pty-rows
    "trimmed" (pos? base)
@@ -575,6 +622,11 @@
           "cols" (now "cols")
           "trimmed" (now "trimmed")
           "stamp" (now "stamp")
+          # What the terminal is running now, for the tab's title. This reply
+          # names its keys one by one rather than passing the state through,
+          # so anything added to `session-state` has to be added here too --
+          # which is how `program` was computed correctly and never arrived.
+          "program" (now "program")
           "waited" (pos? wait)}
          false]))
 

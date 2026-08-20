@@ -2443,6 +2443,20 @@ function makeTerminalPane(root, prefix) {
   //
   // The LEAF of the path, because /bin/zsh and /opt/homebrew/bin/zsh are the
   // same answer to "what is this?" and a bar is a few characters wide.
+  // WHAT THE TERMINAL IS RUNNING NOW, from the foreground process group the
+  // host reads off the pty. A pane that has run `vim` says vim; when vim
+  // exits and the shell is back, it says zsh again.
+  //
+  // Empty means the host could not tell -- an older supervisor, or a moment
+  // between programs -- and the title is left alone rather than blanked.
+  function setProgram(name) {
+    if (!name) return;
+    if (nameLabel.textContent === name) return;
+    nameLabel.textContent = name;
+    // The tab just changed width, so the row has to close up around it.
+    if (typeof packRail === 'function') packRail();
+  }
+
   function setName(argv) {
     if (!Array.isArray(argv) || !argv.length) return;
     // THE LEAF, and only the leaf. The pane's number used to ride along
@@ -2469,6 +2483,7 @@ function makeTerminalPane(root, prefix) {
       // truth is what blanked the screen after a suspend. Absent -- the socket
       // file itself gone -- is different again: that is a supervisor shut down
       // for real, and the honest state is exited, not eternal reconnecting.
+      setProgram(out.program);
       if (out.reachable === false) {
         if (out.absent) { setState('exited'); stopPolling(); return; }
         throw new Error('supervisor unreachable');
