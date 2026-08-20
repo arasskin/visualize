@@ -709,9 +709,14 @@ function makePanel(root, options = {}) {
 
   // Keep the panel reachable: at least a bar's worth has to stay on screen, or
   // it can be dragged somewhere it can never be grabbed again.
-  function place(left, top) {
+  // `free` skips the clamp. The clamp is there so a DRAGGED panel cannot be
+  // put somewhere it can never be grabbed again; a scrolled row is moving
+  // tabs off the side on purpose, and they come back by scrolling the other
+  // way -- clamped, they would pile up against the edge instead of leaving.
+  function place(left, top, free) {
     const w = root.offsetWidth, edge = 28;
-    root.style.left = Math.min(Math.max(left, edge - w), innerWidth - edge) + 'px';
+    root.style.left = (free ? left
+      : Math.min(Math.max(left, edge - w), innerWidth - edge)) + 'px';
     root.style.top = Math.min(Math.max(top, 0), innerHeight - edge) + 'px';
   }
 
@@ -2738,6 +2743,13 @@ const extraPanes = [];
    and keeps whatever position the drag gave it; dropped back on, it rejoins
    at the slot it was over. */
 
+// HOW FAR THE ROW IS SLID, in pixels, negative to see later tabs. Zero until
+// there is something off-screen to reach.
+let railScroll = 0;
+// Where the row ends when unscrolled -- set by the packing, read to decide
+// whether scrolling means anything.
+let railEnd = 0;
+
 const RAIL_TOP = 12;          // where the row sits
 const RAIL_GRAB = 56;         // how near a drag has to come to count as "on"
 const TAB_GAP = 6;
@@ -2750,20 +2762,84 @@ function onRail(panel) { return rail.includes(panel); }
 
 // Lay the row out: every tab against the one before it, starting where the
 // config's tab starts. Called whenever the list changes or a width does.
+// HOW MUCH ROOM A TAB TAKES IN THE ROW. Shut, that is its bar and nothing
+// else. OPEN, it is the whole panel: a window is far wider than the tab that
+// opens it, and advancing by the bar alone let an opened pane lie across
+// every tab after it -- so the one thing you could not do was open two
+// neighbours and see both.
+function railSpan(p) {
+  const bar = p.root.querySelector('.bar').offsetWidth;
+  if (p.shut) return bar;
+  // The body can be narrower than the bar on a short window; the row has to
+  // clear whichever reaches further.
+  return Math.max(bar, p.root.offsetWidth);
+}
+
+// What the row measures, as a string, so a tick can tell whether anything
+// moved without laying anything out. Spans rather than bar widths: opening a
+// panel changes what it occupies without touching its bar.
+function railShape() {
+  return rail.map(railSpan).join(',');
+}
+
 function packRail() {
-  let x = inset;
-  railWidths = rail.map(p => p.root.querySelector('.bar').offsetWidth).join(',');
+  let x = inset + railScroll;
+  railWidths = railShape();
   for (const p of rail) {
     // Skip the one being dragged: it is under the pointer, not in the row,
     // and moving it would fight the hand.
     if (p.root === railDragging) {
-      x += p.root.querySelector('.bar').offsetWidth + TAB_GAP;
+      x += railSpan(p) + TAB_GAP;
       continue;
     }
-    p.place(x, RAIL_TOP);
-    x += p.root.querySelector('.bar').offsetWidth + TAB_GAP;
+    p.place(x, RAIL_TOP, true);
+    x += railSpan(p) + TAB_GAP;
   }
+  railEnd = x - TAB_GAP - railScroll;   // where the row ends, unscrolled
 }
+
+// SCROLLING THE ROW, and only when there is a reason to.
+//
+// THE LIMITS ARE THE ENDS, not a guess at how much is hidden: the row stops
+// with its first tab at the left inset, and stops again with its last tab
+// against the right edge. Between those it moves freely.
+//
+// NOTHING HAPPENS WHEN IT ALL FITS. A row shorter than the window has no
+// off-screen part to bring into view, and sliding it then would just be a
+// way to lose your tabs off the side.
+function railOverflows() { return railEnd > innerWidth - inset; }
+
+function scrollRail(by) {
+  if (!railOverflows()) {
+    if (railScroll === 0) return false;
+    railScroll = 0;                 // a window that grew: put the row back
+    packRail();
+    return true;
+  }
+  // How far left the row may slide: enough to bring its end to the right
+  // edge, and no further.
+  const most = Math.min(0, (innerWidth - inset) - railEnd);
+  const next = Math.max(most, Math.min(0, railScroll + by));
+  if (next === railScroll) return false;
+  railScroll = next;
+  packRail();
+  return true;
+}
+
+// A WHEEL OVER THE ROW, either axis. A trackpad swipe sideways arrives as
+// deltaX and a mouse wheel as deltaY, and both mean the same thing here --
+// there is one direction the row can go.
+window.addEventListener('wheel', (e) => {
+  // Only over the row itself: the graph owns the wheel everywhere else, and
+  // taking it here would break zooming for the top of the page.
+  if (e.clientY > RAIL_TOP + railHeight()) return;
+  if (!railOverflows()) return;
+  const by = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? -e.deltaX : -e.deltaY;
+  if (scrollRail(by)) e.preventDefault();
+}, { passive: false });
+
+// A window that changed size changes whether the row fits at all.
+window.addEventListener('resize', () => { scrollRail(0); });
 
 // WIDTHS CHANGE WITHOUT ANYONE DRAGGING ANYTHING -- a pane retitles itself
 // when its session reports what it is running, and the tab grows or shrinks
@@ -2777,7 +2853,7 @@ function packRail() {
 // are there costs one offsetWidth per tab and cannot miss.
 let railWidths = '';
 function railChanged() {
-  const now = rail.map(p => p.root.querySelector('.bar').offsetWidth).join(',');
+  const now = railShape();
   if (now === railWidths) return false;
   railWidths = now;
   return true;
