@@ -2654,3 +2654,17 @@ function makeTerminalPane(root, prefix) {
 // onto this server's own repl, and went with the debugging rig. What is left
 // is the pane the name describes.
 const harnessPane = makeTerminalPane(document.getElementById('harness'), 'harness');
+
+// BESIDE THE CONFIG'S TAB, not on top of it. Both panels are absolutely
+// positioned, and a panel that was never placed sits at 0,0 -- which is
+// exactly where the config bar already is. Measured rather than guessed at a
+// constant: the config tab is as wide as the file it names, so a number
+// written here would be wrong for every project but this one.
+//
+// After a frame, and after the config's own placement, for the same reason
+// that one waits: a collapsed bar has no width to measure until layout runs.
+requestAnimationFrame(() => {
+  const configBar = panel.querySelector('.bar');
+  const gap = 8;
+  harnessPane.place(inset + configBar.offsetWidth + gap, inset);
+});

@@ -801,7 +801,15 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   --gutter: 0px;
   background: var(--term); color: var(--term-ink);
 }
-.term .bar { border-bottom-color: var(--term-line); }
+/* NO LINE WHERE THE TAB MEETS ITS WINDOW. The base rule erases that seam by
+   painting the bar's bottom edge in the body's own colour, the way a folder
+   tab merges into the folder; this pane restored a visible one, so an open
+   terminal wore a rule across its top.
+   TRANSPARENT rather than --term, because --term is translucent: painting
+   the seam in it would stack two washes over the graph and read as a line
+   again, just a paler one. Shut, the base rule puts the full border back --
+   a tab with nothing under it needs its own bottom edge. */
+.term .bar { border-bottom-color: transparent; }
 .term .panel-body { padding: .35rem .5rem; }
 
 .screen {
