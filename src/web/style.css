@@ -663,6 +663,11 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   stroke: #e5484d;
   stroke-width: 6;
   stroke-linecap: round;
+  /* THE BROWSER KEEPS THE WIDTH. The arrow sits under a counter-scale so it
+     holds its size through a zoom, and that would thin the stroke by the same
+     factor -- this exempts it, which is the whole reason the width is not
+     arithmetic in app.js any more. */
+  vector-effect: non-scaling-stroke;
 }
 .find-head { fill: #e5484d; }
 

@@ -39,10 +39,9 @@ function repaint() {
   const svg = pane.querySelector('svg');
   if (!svg) return;
   svg.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
-  // The arrow is sized in screen pixels, which means its graph-unit lengths
-  // depend on the zoom this line just wrote. Redrawn here rather than only
-  // where a hit is chosen, so zooming keeps it the size it was.
-  resizeArrow();
+  // The arrow is built in screen pixels and un-scaled by the transform this
+  // line just wrote. One attribute, so a zoom frame costs nothing.
+  placeArrow();
   zoomLabel.textContent = Math.round(scale * 100) + '%';
   // Visible while it is changing, gone a moment later: the number matters
   // during a zoom and is clutter once the view has settled.
@@ -60,14 +59,10 @@ function zoomAt(factor, cx, cy) {
   ty = cy - (cy - ty) * applied;
   scale = next;
   touched = true;
-  // A ZOOM CAN CARRY THE MARK OFF THE SCREEN. Zooming is about a point, so
-  // everything else swings away from it -- and a found node can swing right
-  // out of the pane, leaving an arrow drawn perfectly somewhere nobody is
-  // looking. Bring it back BEFORE the frame is written: `paint` defers, so
-  // adjusting tx/ty after it would be overwritten by the frame already
-  // queued with the old values.
-  keepHitInView();
   paint();
+  // A ZOOM CAN CARRY THE MARK OFF THE SCREEN, since everything not under the
+  // cursor swings away from it. Bring it back once the zooming stops.
+  keepHitInView();
 }
 
 function fit() {
@@ -1561,13 +1556,11 @@ function approachFor(svg, target, node) {
   // the tail runs off the edge with only the shaft crossing the screen. A
   // quarter of the smaller side leaves it clearly an arrow and clearly
   // inside.
-  const room = Math.min(pane.clientWidth, pane.clientHeight) || 600;
-  // Wanted length in SCREEN pixels: a fixed run, plus a little for the size
-  // of what it points at, so a big box gets a proportionate arrow.
-  const wantedPx = 90 + Math.max(target.w, target.h) * zoomNow() * 0.35;
-  // Capped at a third of the smaller side, which keeps the tail inside the
-  // pane without shrinking the arrow to a stub at ordinary zooms.
-  const reach = Math.min(wantedPx, room / 3) / zoomNow();
+  // How far out the tail sits, in GRAPH units -- this is only used to score
+  // which way is clearest, and the arrow that gets drawn is a fixed length in
+  // screen pixels. Scaled by the zoom so the sampling covers roughly what the
+  // drawn arrow will cover.
+  const reach = (96 + Math.max(target.w, target.h) * 0.35) / zoomNow() + edgeOf(target);
   let best = null;
   for (let i = 0; i < 8; i++) {
     const angle = (i / 8) * Math.PI * 2;
@@ -1603,26 +1596,13 @@ function approachFor(svg, target, node) {
 
 const ARROW_NS = 'http://www.w3.org/2000/svg';
 
+// Roughly how far the shape reaches from its own centre. Only used to start
+// the clearance sampling outside the node it belongs to.
+function edgeOf(t) { return Math.max(t.w, t.h) / 2; }
+
 // The live zoom. Read through a function so the arrow geometry and the
 // approach search agree even though they run at different moments.
 function zoomNow() { return scale || 1; }
-
-// The arrow's weight, as the stylesheet names it. Measured from a probe that
-// has never been drawn into, so nothing this file writes can feed back into
-// it -- and measured lazily, since the first read must happen after the
-// stylesheet is in.
-let arrowStroke = 0;
-function strokeFromCss() {
-  if (arrowStroke) return arrowStroke;
-  const svg = pane.querySelector('svg');
-  if (!svg) return 6;
-  const probe = document.createElementNS(ARROW_NS, 'line');
-  probe.setAttribute('class', 'find-shaft');
-  svg.append(probe);
-  arrowStroke = parseFloat(getComputedStyle(probe).strokeWidth) || 6;
-  probe.remove();
-  return arrowStroke;
-}
 
 function clearArrow() {
   const old = pane.querySelector('#find-arrow');
@@ -1650,87 +1630,64 @@ function drawArrow(hit) {
   // THE EDGE IN THE DIRECTION WE COME FROM, not the widest one. A node is a
   // wide flat ellipse -- 201 by 36 here -- and backing off by half its
   // WIDTH when approaching from above left the point a hundred units short,
-  // an arrow aimed at empty space near something. The radius of an ellipse
-  // along a direction is the ellipse's own parametric form; a small margin
-  // is added so the head sits beside the outline rather than on it.
+  // an arrow aimed at empty space near something.
   const rx = target.w / 2, ry = target.h / 2;
   const ca = Math.cos(aim.angle), sa = Math.sin(aim.angle);
   const edge = (rx * ry) / Math.hypot(ry * ca, rx * sa);
-  const gap = edge + 10 / scale;
-  const tip = {
-    x: target.x + ca * gap,
-    y: target.y + sa * gap
-  };
 
   const g = document.createElementNS(ARROW_NS, 'g');
   g.setAttribute('id', 'find-arrow');
-  // A RESIZE IS NOT AN ARRIVAL. The fade-in plays when the arrow first
-  // lands on a node; redrawing it at a new zoom is the same arrow, and
-  // restarting the animation on every frame of a pan left it flickering at
-  // whatever opacity each frame caught it at.
-  if (sizing) g.style.animation = 'none';
-  // Not a pointer target: the arrow lies over edges, and catching the mouse
-  // there would show an edge label for a line the cursor is not really on.
   g.setAttribute('pointer-events', 'none');
 
-  // SIZED ON SCREEN, NOT IN THE GRAPH. Every length here is divided by the
-  // current zoom, so the arrow is the same size to look at whatever the
-  // scale -- drawn in fixed graph units it grew with the drawing, and at 4x
-  // a shaft two hundred units long reached a thousand pixels off-screen with
-  // its point somewhere you were not looking. That is the "too far away".
-  const size = 20 / scale;
-  const spread = 0.38;
+  // DRAWN ONCE, IN ITS OWN LITTLE SPACE. The shape below is written in plain
+  // pixels along a straight line -- tip at the origin, tail out to the right
+  // -- and then placed by a transform: moved to the node's edge, turned to
+  // the approach angle, and scaled by 1/zoom. Only that last number changes
+  // when the view moves, so a zoom re-writes ONE attribute instead of
+  // re-deciding the whole arrow, and the browser does the rest.
+  const L = 96;                       // shaft length, in screen pixels
+  const HEAD = 22, SPREAD = 0.38;
+  const meet = HEAD * Math.cos(SPREAD);
 
-  // THE SHAFT STOPS AT THE HEAD'S BASE, not at the tip. Run to the tip, its
-  // last `size` units lie inside the triangle -- and a round cap carries the
-  // stroke past the apex, so the point grew a stub out the front. The base
-  // corners sit at `size` along `angle +/- spread`, so their reach along the
-  // shaft's own axis is that times cos(spread); the cap's half-width comes
-  // off as well, since a round cap extends beyond the coordinate it ends on.
   const shaft = document.createElementNS(ARROW_NS, 'line');
   shaft.setAttribute('class', 'find-shaft');
-  // In the tree before it is measured -- an element outside the document has
-  // no computed style, and the width is the stylesheet's to name, not a
-  // number to keep a second copy of here.
-  g.append(shaft);
-  // THE WIDTH COMES FROM THE STYLESHEET, ONCE. Reading it back off the
-  // element re-read the `stroke-width` a previous draw had already scaled and
-  // divided it again -- 6, then 0.6, then 60 as the zoom went the other way.
-  // The computed style is taken from a bare probe that carries only the
-  // class, so it is always the rule's own number.
-  const stroke = strokeFromCss() / scale;
-  shaft.setAttribute('stroke-width', stroke);
-  const meet = size * Math.cos(spread) - stroke / 2;
-  const base = {
-    x: tip.x + Math.cos(aim.angle) * meet,
-    y: tip.y + Math.sin(aim.angle) * meet
-  };
-  shaft.setAttribute('x1', aim.tail.x);
-  shaft.setAttribute('y1', aim.tail.y);
-  shaft.setAttribute('x2', base.x);
-  shaft.setAttribute('y2', base.y);
+  shaft.setAttribute('x1', L);
+  shaft.setAttribute('y1', 0);
+  // Stops at the head's base, not the tip: run to the point and the round
+  // cap carries the stroke out through it.
+  shaft.setAttribute('x2', meet);
+  shaft.setAttribute('y2', 0);
 
-  // The head as a triangle rather than a marker: markers scale with the
-  // stroke and are styled through a separate <defs> entry, which is more
-  // machinery than three points need.
   const head = document.createElementNS(ARROW_NS, 'polygon');
-  // THE FLARE GOES BACK UP THE SHAFT, which is `aim.angle` -- the angle
-  // points from the node OUT to the tail, so the two base corners are along
-  // it and the apex is the tip. Adding pi here (the reading of "back" that
-  // looks right until you check which end the angle starts from) put the
-  // flare on the node side and the point on the tail side, drawing the head
-  // reversed: an arrow aimed away from the thing it had found.
-  const points = [
-    [tip.x, tip.y],
-    [tip.x + Math.cos(aim.angle - spread) * size, tip.y + Math.sin(aim.angle - spread) * size],
-    [tip.x + Math.cos(aim.angle + spread) * size, tip.y + Math.sin(aim.angle + spread) * size]
-  ];
-  head.setAttribute('points', points.map(p => p.join(',')).join(' '));
   head.setAttribute('class', 'find-head');
+  head.setAttribute('points', [
+    [0, 0],
+    [HEAD * Math.cos(SPREAD), HEAD * Math.sin(SPREAD)],
+    [HEAD * Math.cos(-SPREAD), HEAD * Math.sin(-SPREAD)]
+  ].map(p => p.join(',')).join(' '));
 
-  g.append(head);
+  g.append(shaft, head);
+  // Where the point goes and which way it faces -- fixed in graph units, so
+  // panning is the browser moving the drawing and this never runs.
+  g.dataset.x = target.x + ca * edge;
+  g.dataset.y = target.y + sa * edge;
+  g.dataset.deg = (aim.angle * 180) / Math.PI;
   host.append(g);
+  placeArrow();
   hit.node.classList.add('found');
+}
+
+// THE ONLY THING A ZOOM CHANGES. The arrow is built in screen pixels, so it
+// needs undoing exactly as much as the view does it: a counter-scale of
+// 1/zoom keeps it the size it was drawn, and the stroke holds its width
+// through `vector-effect` in the stylesheet rather than arithmetic here.
+// One attribute, no geometry, nothing measured.
+function placeArrow() {
+  const g = pane.querySelector('#find-arrow');
+  if (!g) return;
+  const k = 1 / (scale || 1);
+  g.setAttribute('transform',
+    `translate(${g.dataset.x} ${g.dataset.y}) rotate(${g.dataset.deg}) scale(${k})`);
 }
 
 // BRING IT INTO VIEW, but only when it is not already there: a hit you can
@@ -1784,28 +1741,23 @@ function revealHit(hit) {
 // Follow the current hit after the view moves under it. Guarded, because
 // revealHit pans and painting is what called us in the first place.
 let keeping = false;
+// AFTER THE GESTURE, NOT DURING IT. Zooming is about a point: the thing
+// under the cursor is meant to stay put, and re-centring on every notch
+// fought the hand doing the zooming. It also cost a forced layout per wheel
+// event, since deciding takes measuring. So the check waits for the scroll
+// to stop, and only then, and only if the mark has actually left the pane,
+// does it come back.
+let keepTimer = 0;
 function keepHitInView() {
-  if (keeping) return;
-  const hit = hits[hitAt];
-  if (!hit || !hit.node.isConnected) return;
-  if (!pane.querySelector('#find-arrow')) return;
-  keeping = true;
-  // The rects below are read off the live DOM, so the transform this zoom
-  // just computed has to be on the element before they are measured -- the
-  // queued frame has not run yet.
-  try { repaint(); revealHit(hit); } finally { keeping = false; }
-}
-
-// Redraw the current arrow at the current zoom. NOT revealHit: this runs
-// from repaint, and panning there would call repaint again.
-let sizing = false;
-function resizeArrow() {
-  if (sizing) return;
-  if (!pane.querySelector('#find-arrow')) return;
-  const hit = hits[hitAt];
-  if (!hit || !hit.node.isConnected) return;
-  sizing = true;
-  try { drawArrow(hit); } finally { sizing = false; }
+  clearTimeout(keepTimer);
+  keepTimer = setTimeout(() => {
+    if (keeping) return;
+    const hit = hits[hitAt];
+    if (!hit || !hit.node.isConnected) return;
+    if (!pane.querySelector('#find-arrow')) return;
+    keeping = true;
+    try { revealHit(hit); } finally { keeping = false; }
+  }, 180);
 }
 
 function runFind() {
