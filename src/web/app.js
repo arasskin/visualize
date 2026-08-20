@@ -1226,17 +1226,17 @@ async function checkLines(candidate, at) {
 
 async function commitCompose() {
   // TO THE TERMINAL, if that is what is selected: what you typed is typed at
-  // the shell, with the newline that runs it. The bar clears and stays open,
-  // because the next thing you type is usually the next command.
+  // the shell, with the newline that runs it. The bar goes away afterwards,
+  // the same as it does when a config line is committed -- sending is
+  // finishing, and typing anywhere brings it straight back.
   const term = composeTarget();
   if (term) {
     const typed = composeInput.value;
     if (!typed) { shutCompose(); return; }
-    composeInput.value = '';
-    sizeCompose();
     // Newline-terminated, so it runs rather than sitting on the prompt --
     // pressing enter here is pressing enter there.
     if (term.type) term.type(typed.endsWith('\n') ? typed : typed + '\n');
+    shutCompose();
     return;
   }
 
