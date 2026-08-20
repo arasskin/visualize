@@ -751,6 +751,22 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
      what happens to the rest. */
   overflow-y: auto;
   white-space: pre-wrap; word-break: break-word;
+  /* A THINNER BAR. The default is built for a page, and this is a field a
+     few lines tall -- at that size the standard width is a stripe down the
+     side of what you are writing. `thin` is the standards property; the
+     -webkit rules below are what actually applies in this browser, and both
+     are here so neither engine is the odd one out. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+#compose.typing #compose-input::-webkit-scrollbar { width: 6px; }
+#compose.typing #compose-input::-webkit-scrollbar-track { background: transparent; }
+#compose.typing #compose-input::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 3px;
+}
+#compose.typing #compose-input::-webkit-scrollbar-thumb:hover {
+  background: var(--ink);
 }
 
 #compose-input {
