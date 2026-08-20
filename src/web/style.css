@@ -394,20 +394,25 @@ button:disabled { opacity: .5; cursor: progress; }
 .bar:active { cursor: grabbing; }
 /* A panel's own status, right of its name: how many config lines failed.
    Quiet enough to ignore. */
-/* THE TITLE SITS IN THE MIDDLE of the tab. The bar is a flex row, so the
-   name takes the free space and centres inside it rather than being pushed
-   about by whatever else the bar carries -- the state note on a terminal,
-   nothing at all on a shut one. */
-.bar .name { flex: 1 1 auto; text-align: center; }
-/* OUT OF THE FLOW, so it cannot push the title off centre. The state note is
-   a word that comes and goes -- `starting...`, `exited`, nothing at all --
-   and a title that shifts when a session changes its mind is a title that
-   never looks still. Absolute, hung off the right edge, where it reads as a
-   note ON the tab rather than as another thing in it. */
+/* THE TITLE AND ITS NOTE SIT IN THE MIDDLE. The bar centres its contents
+   and the name takes only the room it needs, so the pair is what gets
+   centred -- a note appearing widens the tab and both shift together rather
+   than the name staying put while the note grows off one side. */
+.bar { justify-content: center; }
+.bar .name { flex: none; text-align: center; }
+/* THE NOTE CENTRES WITH THE TITLE, as one thing. A tab saying `exited` or
+   `reconnecting...` grows to show it, and what sits in the middle is the
+   name and its note together rather than the name alone with the note
+   hanging off an edge.
+   
+   It was absolute for a while, hung off the right so it could not push the
+   title off centre -- which bought a still title at the price of the note:
+   laid over the tab rather than in it, it covered the name at one end and
+   had no width, so nothing made room for it and a tab in trouble looked
+   exactly like a tab that was fine. */
 .bar .state {
   opacity: .55; font-size: 11px;
-  position: absolute; right: .4rem; top: 50%; transform: translateY(-50%);
-  pointer-events: none;
+  flex: none; white-space: nowrap;
 }
 
 
