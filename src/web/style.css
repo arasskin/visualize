@@ -346,6 +346,24 @@ button:disabled { opacity: .5; cursor: progress; }
    Quiet enough to ignore. */
 .bar .state { opacity: .55; font-size: 11px; margin-left: auto; }
 
+/* THE CLOSE CROSS on a terminal you opened. Quiet until the tab is under the
+   pointer: a row of tabs should read as names, not as a row of crosses, and
+   the one you are reaching for is the one you are over.
+   
+   It keeps its space while invisible rather than appearing on hover -- a
+   button that widens its tab when you approach it moves the thing you were
+   aiming at, and the row would repack under the pointer every time. */
+.bar .close {
+  flex: none; margin-left: .1rem;
+  border: 0; background: none; padding: 0 .1rem;
+  font: inherit; line-height: 1; color: var(--ink);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s ease-out;
+}
+.bar:hover .close, .close:focus-visible { opacity: .5; }
+.bar .close:hover { opacity: 1; color: var(--bad); background: none; }
+
 /* The scrolling part. flex:1 so it takes whatever the resize left it. */
 .panel-body {
   flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;

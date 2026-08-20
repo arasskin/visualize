@@ -554,6 +554,15 @@
             "stop"
             ["200 OK" "application/json" (json/encode (:stop client))]
 
+            # A TAB THAT IS BEING DESTROYED, not merely put away. `stop` ends
+            # the session and leaves the host running to take another; this
+            # ends the host as well, because nothing will ever ask about this
+            # pane again and a supervisor per closed tab is a process leak.
+            "shutdown"
+            (do (:shutdown client)
+                (put panes id nil)
+                ["200 OK" "application/json" (json/encode {"ok" true})])
+
             # `at` turns this into "type, and tell me what came back" -- one
             # round trip for a keystroke and its echo.
             "input"

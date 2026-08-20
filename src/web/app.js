@@ -2044,10 +2044,35 @@ function redrawFind() {
 function makeTerminalPane(root, prefix) {
   const stateLine = root.querySelector('.state');
   const nameLabel = root.querySelector('.name');
-  // Numbered panes carry their number beside the process name; the one the
-  // page ships with has a name of its own and does not need one.
-  const paneName = /^\d+$/.test(prefix) ? prefix : '';
   const screen = root.querySelector('.screen');
+
+  // A CROSS ON THE ONES YOU MADE. The pane the page ships with is not
+  // closable -- it is what Control-era muscle memory reaches for, its socket
+  // is the one a restarting server looks for by name, and a row with nothing
+  // in it is a worse place to arrive than a row with one terminal. Panes
+  // opened since are yours to close, so they say so.
+  //
+  // A numbered prefix is exactly the test: the first pane is called
+  // `harness`, and every one after it is a number.
+  if (/^\d+$/.test(prefix)) {
+    const close = document.createElement('button');
+    close.className = 'close';
+    close.type = 'button';
+    close.textContent = '\u2715';
+    close.title = 'close this terminal';
+    close.setAttribute('aria-label', 'close this terminal');
+    // On pointerdown rather than click, and stopped there: the bar's own
+    // pointerdown starts a drag and its click toggles the panel, and a
+    // cross that opened the thing it was closing would be a strange
+    // button.
+    close.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeTerminal(termPanel);
+    });
+    close.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
+    root.querySelector('.bar').appendChild(close);
+  }
 
   // Follow the output the way a terminal does -- but only while the view is at
   // the bottom. The flag comes from the user's own scrolling, so scrolling up
@@ -2188,8 +2213,11 @@ function makeTerminalPane(root, prefix) {
   // same answer to "what is this?" and a bar is a few characters wide.
   function setName(argv) {
     if (!Array.isArray(argv) || !argv.length) return;
-    const leaf = String(argv[0]).split('/').filter(Boolean).pop();
-    nameLabel.textContent = paneName ? `${leaf} ${paneName}` : leaf;
+    // THE LEAF, and only the leaf. The pane's number used to ride along
+    // because several tabs saying `zsh` were otherwise indistinguishable --
+    // the cross beside each one tells them apart now, and a number was
+    // never what anyone wanted to read.
+    nameLabel.textContent = String(argv[0]).split('/').filter(Boolean).pop();
   }
 
   async function poll() {
@@ -2700,6 +2728,17 @@ function makeTerminalPane(root, prefix) {
     });
   }
 
+  // CLOSING THE TAB CLOSES THE SESSION. The route has always been there and
+  // the page has never called it: shutting a panel only stopped polling,
+  // because the pty was meant to outlive a reload. A tab being destroyed is
+  // the other case -- nothing will ever ask about that session again, so the
+  // supervisor is told to end it and go.
+  termPanel.stop = async () => {
+    stopPolling();
+    try { await post('stop', {}); } catch (e) { /* it may already be gone */ }
+    try { await post('shutdown', {}); } catch (e) { /* likewise */ }
+  };
+
   return termPanel;
 }
 
@@ -3041,6 +3080,29 @@ function openTerminal() {
 // away first. Cmd is the modifier to spend on it because the emulator
 // already refuses it outright (see keyToBytes), so nothing is taken from
 // the program that it ever had.
+// CLOSING ONE MEANS CLOSING IT. The pane leaves the row and the page, and
+// the session behind it is shut down -- a terminal whose tab is gone is a
+// pty nobody can reach, and leaving it running would leak a process and its
+// supervisor for every tab anyone ever opened.
+//
+// The panel is asked to stop first and removed after: `stop` is a request
+// over the wire, and a pane whose element has already gone has nothing to
+// report a failure on.
+function closeTerminal(pane) {
+  const at = extraPanes.indexOf(pane);
+  if (at < 0) return;
+  extraPanes.splice(at, 1);
+  removeFromRail(pane);
+  if (pane.stop) pane.stop();
+  // SELECTION CANNOT POINT AT A PANE THAT IS GONE. Alt would have nothing to
+  // open and the row would show nothing marked; the config is where a
+  // selection goes when the thing it was on leaves.
+  const wasPicked = pane.root.classList.contains('picked');
+  pane.root.remove();
+  if (wasPicked) selectPane(panel);
+  packRail();
+}
+
 document.getElementById('term-new')
   .addEventListener('click', () => { openTerminal(); });
 
