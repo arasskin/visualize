@@ -295,6 +295,16 @@ button:disabled { opacity: .5; cursor: progress; }
 }
 .panel.shut .bar { border-bottom: 1px solid var(--line-strong); margin-bottom: 0; }
 
+/* TABS TOUCH, AND SHARE THE LINE BETWEEN THEM. Sitting flush, each tab's
+   left border lands on its neighbour's right one and the pair read as a 2px
+   rule -- twice the weight of every other line on the page. Pulled back by
+   one pixel so the two overlap into one.
+   
+   Not applied to the first tab, which has nothing to its left to share
+   with: the row would start a pixel off the edge. The rail decides which
+   that is -- it reorders -- so the class is set in app.js. */
+.panel.tab-joined > .bar { margin-left: -1px; }
+
 /* THE RAILS. Two lines marking where the tab row sits, drawn ONLY while a
    tab is being dragged near them -- the bar has no body and nothing to see,
    and a strip of furniture across the top of the drawing would cost the page

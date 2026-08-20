@@ -3098,7 +3098,16 @@ let railEnd = 0;
 
 const RAIL_TOP = 12;          // where the row sits
 const RAIL_GRAB = 56;         // how near a drag has to come to count as "on"
-const TAB_GAP = 6;
+// TABS TOUCH. No gap between them and none before the first: a row of tabs
+// is one strip of them, and a tab's own border is the line between it and
+// its neighbour. Spacing them turned that one line into two with a stripe of
+// graph showing through, which reads as several small windows rather than as
+// a row.
+const TAB_GAP = 0;
+// WHERE THE ROW STARTS: hard against the left edge, for the same reason. The
+// corner marks keep their own inset -- they are single glyphs floating on
+// the drawing, where this is a strip anchored to the top of it.
+const RAIL_LEFT = 0;
 
 // The tabs on the rail, in the order they sit. Panels not in here are the
 // ones that have been pulled off.
@@ -3137,11 +3146,15 @@ function packRail() {
   // stop, so scrolling right did nothing and there was nothing to the left
   // to scroll toward. Clamped here, where the row is measured anyway.
   if (railEnd) {
-    const most = railOverflows() ? Math.min(0, (innerWidth - inset) - railEnd) : 0;
+    const most = railOverflows() ? Math.min(0, (innerWidth - RAIL_LEFT) - railEnd) : 0;
     railScroll = Math.max(most, Math.min(0, railScroll));
   }
-  let x = inset + railScroll;
+  let x = RAIL_LEFT + railScroll;
   railWidths = railShape();
+  // WHICH TABS HAVE A NEIGHBOUR to their left, and so share a border with
+  // it. Set here because this is what knows the order, and the order
+  // changes whenever a tab is dragged.
+  rail.forEach((p, i) => p.root.classList.toggle('tab-joined', i > 0));
   for (const p of rail) {
     // Skip the one being dragged: it is under the pointer, not in the row,
     // and moving it would fight the hand.
@@ -3164,7 +3177,7 @@ function packRail() {
 // NOTHING HAPPENS WHEN IT ALL FITS. A row shorter than the window has no
 // off-screen part to bring into view, and sliding it then would just be a
 // way to lose your tabs off the side.
-function railOverflows() { return railEnd > innerWidth - inset; }
+function railOverflows() { return railEnd > innerWidth - RAIL_LEFT; }
 
 function scrollRail(by) {
   if (!railOverflows()) {
@@ -3175,7 +3188,7 @@ function scrollRail(by) {
   }
   // How far left the row may slide: enough to bring its end to the right
   // edge, and no further.
-  const most = Math.min(0, (innerWidth - inset) - railEnd);
+  const most = Math.min(0, (innerWidth - RAIL_LEFT) - railEnd);
   const next = Math.max(most, Math.min(0, railScroll + by));
   if (next === railScroll) return false;
   railScroll = next;
