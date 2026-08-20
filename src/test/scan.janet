@@ -190,6 +190,13 @@ const fs = require('fs')
   (t/is= [] (imports `<link href="//cdn.example.com/f.css">`))
   (t/is= [] (imports `<img src="data:image/png;base64,iVBOR">`))
   (t/is= [] (imports `<a href="#top">top</a>`))
+  # A TEMPLATE HOLE IS NOT A FILENAME. A page the server fills in before
+  # serving carries {{...}} where a value will go; this one drew a node
+  # called FAVICON, as though the page depended on a file by that name.
+  (t/is= [] (imports `<link rel="icon" href="{{FAVICON}}">`))
+  (t/is= ["./style.css"]
+         (imports `<link rel="icon" href="{{FAVICON}}"><link href="style.css">`)
+         "and the hole beside a real file does not take it with it")
 
   # A query is not part of the name, and a site-absolute path is read as a
   # sibling: the server maps / to the directory the page sits in.

@@ -50,6 +50,15 @@
   # WHAT IS NOT A LOCAL FILE. An absolute URL is somewhere else, an anchor is
   # a place in this page, and a data: URI is the file itself rather than a
   # reference to one.
+  #
+  # A TEMPLATE HOLE IS NOT A FILENAME EITHER. An html file that a server fills
+  # in before serving carries `{{...}}` where a value will go, and one of
+  # those in an href is a promise about the response, not a reference to
+  # anything on disk -- `href="{{FAVICON}}"` became a node called FAVICON,
+  # drawn as though the page depended on a file by that name. Whatever the
+  # hole is finally filled with is the server's business and may not be a
+  # path at all; this one becomes a data: URI, which the line above would
+  # have refused had the scan seen it.
   (def keep
     (filter (fn [ref]
               (and (not (empty? ref))
@@ -58,7 +67,8 @@
                    (not (string/has-prefix? "//" ref))
                    (not (string/has-prefix? "data:" ref))
                    (not (string/has-prefix? "mailto:" ref))
-                   (not (string/has-prefix? "tel:" ref))))
+                   (not (string/has-prefix? "tel:" ref))
+                   (not (string/find "{{" ref))))
             found))
 
   # Relative, so the scanner resolves against the importing file -- see
