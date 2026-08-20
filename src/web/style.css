@@ -303,7 +303,12 @@ button:disabled { opacity: .5; cursor: progress; }
    Not applied to the first tab, which has nothing to its left to share
    with: the row would start a pixel off the edge. The rail decides which
    that is -- it reorders -- so the class is set in app.js. */
-.panel.tab-joined > .bar { margin-left: -1px; }
+/* THE WHOLE PANEL SHIFTS, not just the bar. Pulling only the bar left put
+   its window a pixel to the right of it, so an open tab no longer lined up
+   with the thing it opened -- the one alignment a tab has to keep. Moving
+   the panel takes the body with it and the tabs still overlap by the pixel
+   that collapses their shared border. */
+.panel.tab-joined { margin-left: -1px; }
 
 /* THE CORNER. Firefox rounds the window's own corners, so a square tab
    pressed into one has its top-left poking past the curve -- a small wedge
