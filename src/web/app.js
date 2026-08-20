@@ -1614,25 +1614,42 @@ function drawArrow(hit) {
   // there would show an edge label for a line the cursor is not really on.
   g.setAttribute('pointer-events', 'none');
 
+  const size = 20;
+  const spread = 0.38;
+
+  // THE SHAFT STOPS AT THE HEAD'S BASE, not at the tip. Run to the tip, its
+  // last `size` units lie inside the triangle -- and a round cap carries the
+  // stroke past the apex, so the point grew a stub out the front. The base
+  // corners sit at `size` along `angle +/- spread`, so their reach along the
+  // shaft's own axis is that times cos(spread); the cap's half-width comes
+  // off as well, since a round cap extends beyond the coordinate it ends on.
   const shaft = document.createElementNS(ARROW_NS, 'line');
+  shaft.setAttribute('class', 'find-shaft');
+  // In the tree before it is measured -- an element outside the document has
+  // no computed style, and the width is the stylesheet's to name, not a
+  // number to keep a second copy of here.
+  g.append(shaft);
+  const stroke = parseFloat(getComputedStyle(shaft).strokeWidth) || 6;
+  const meet = size * Math.cos(spread) - stroke / 2;
+  const base = {
+    x: tip.x + Math.cos(aim.angle) * meet,
+    y: tip.y + Math.sin(aim.angle) * meet
+  };
   shaft.setAttribute('x1', aim.tail.x);
   shaft.setAttribute('y1', aim.tail.y);
-  shaft.setAttribute('x2', tip.x);
-  shaft.setAttribute('y2', tip.y);
-  shaft.setAttribute('class', 'find-shaft');
+  shaft.setAttribute('x2', base.x);
+  shaft.setAttribute('y2', base.y);
 
   // The head as a triangle rather than a marker: markers scale with the
   // stroke and are styled through a separate <defs> entry, which is more
   // machinery than three points need.
   const head = document.createElementNS(ARROW_NS, 'polygon');
-  const size = 20;
   // THE FLARE GOES BACK UP THE SHAFT, which is `aim.angle` -- the angle
   // points from the node OUT to the tail, so the two base corners are along
   // it and the apex is the tip. Adding pi here (the reading of "back" that
   // looks right until you check which end the angle starts from) put the
   // flare on the node side and the point on the tail side, drawing the head
   // reversed: an arrow aimed away from the thing it had found.
-  const spread = 0.38;
   const points = [
     [tip.x, tip.y],
     [tip.x + Math.cos(aim.angle - spread) * size, tip.y + Math.sin(aim.angle - spread) * size],
@@ -1641,7 +1658,7 @@ function drawArrow(hit) {
   head.setAttribute('points', points.map(p => p.join(',')).join(' '));
   head.setAttribute('class', 'find-head');
 
-  g.append(shaft, head);
+  g.append(head);
   host.append(g);
   hit.node.classList.add('found');
 }
