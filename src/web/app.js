@@ -1377,10 +1377,21 @@ function altChord(e) {
   // `e.key` here is `Dead` -- and the preventDefault below is what stops the
   // accent being armed at all. See also the compositionstart guard.
   const fresh = e.code === 'KeyN';
-  if (!down && !up && !del && !comment && !fresh && !walkLeft && !walkRight) {
+  // A NEW TERMINAL. Enter rather than a letter because every letter worth
+  // having is a config operation, and because `+` is what this does -- a key
+  // that makes a thing rather than editing one.
+  const newTab = e.code === 'Enter' || e.code === 'NumpadEnter';
+  if (!down && !up && !del && !comment && !fresh && !walkLeft && !walkRight
+      && !newTab) {
     return false;
   }
   e.preventDefault();
+  // A NEW TAB IS NOT A CONFIG OPERATION either, so it goes before everything
+  // below opens the config panel on its way to asking what line is picked.
+  if (newTab) {
+    openTerminal();
+    return true;
+  }
   // WALKING IS NOT A CONFIG OPERATION, so it happens before everything below
   // -- which opens the config panel, asks what line is picked, and would
   // otherwise pull the config up on its way to a terminal.
@@ -2765,6 +2776,35 @@ function makeTerminalPane(root, prefix) {
     });
   }
 
+  // A TAB HAS ITS TERMINAL FROM THE MOMENT IT EXISTS, whether or not anyone
+  // has opened it. Starting on first open meant a new tab was an empty
+  // promise until clicked -- and worse, a row of tabs you had made but not
+  // looked at was a row of nothing, so walking them with alt started three
+  // shells one after another while you were still looking.
+  //
+  // AT A DEFAULT GEOMETRY, because a shut panel has no size to measure: the
+  // pty is told 24x80 to begin with, and `onOpen` reflows it to whatever the
+  // panel turns out to be. A shell does not mind being resized; it is the
+  // same thing that happens when a window is dragged.
+  //
+  // Nothing is polled yet. The backlog is the supervisor's, and it keeps
+  // whatever the program writes until a panel opens and asks for it.
+  termPanel.boot = async () => {
+    if (generation) return;                 // already has one
+    try {
+      const now = await post('poll', { at: 0, generation: 0 });
+      // A session that is already running is one to leave alone -- this is
+      // the reload case, and shooting it is exactly what the open path
+      // learned not to do.
+      if (now.running) { generation = now.generation; return; }
+      if (now.reachable === false && !now.absent) return;
+      const out = await post('start', { rows: 24, cols: 80 });
+      generation = out.generation;
+      at = 0;
+      setName(out.argv);
+    } catch (e) { /* a tab that cannot start says so when it is opened */ }
+  };
+
   // CLOSING THE TAB CLOSES THE SESSION. The route has always been there and
   // the page has never called it: shutting a panel only stopped polling,
   // because the pty was meant to outlive a reload. A tab being destroyed is
@@ -3187,6 +3227,8 @@ function openTerminal() {
   // ON THE RAIL, at the end of the row -- the packing puts it against the
   // last tab and keeps it there however the ones before it change width.
   addToRail(pane);
+  // Its terminal starts now, not when someone gets round to looking at it.
+  pane.boot();
   return pane;
 }
 
@@ -3225,6 +3267,7 @@ document.addEventListener('keydown', (e) => {
 // the rail's business from here.
 addToRail(configPanel);
 addToRail(harnessPane);
+harnessPane.boot();
 
 // SOMETHING IS ALWAYS SELECTED, because an unmarked row raises "which one is
 // it then?" -- the question the mark exists to answer. The CONFIG to start

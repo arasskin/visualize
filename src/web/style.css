@@ -569,9 +569,10 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    low-contrast until hovered: it is here for the first five minutes of using
    the config, and should not compete with the graph after that. */
 #help-open {
-  /* INSET EQUALLY, like the config panel: 12px of gap above the glyph and
-     12px to its right, so both bits of furniture sit the same distance into
-     the same corner.
+  /* INSET EQUALLY: 12px of gap below the glyph and 12px to its right, so
+     both marks sit the same distance into the same corner. Bottom right,
+     because the tab row owns the top and the HUD and the bin own the
+     bottom left -- this is the corner nothing else wants.
      
      The offsets are not 12px themselves, because the padding is a HIT TARGET
      rather than spacing -- it sits between the glyph and the edge and has to
@@ -580,12 +581,12 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   --inset: 12px;
   --pad-y: .35rem;
   --pad-x: .5rem;
-  /* A pixel further in than the top gap. The glyph's right side is its
-     thin stroke where the top is its full bowl, so matching the numbers
+  /* A pixel further in than the bottom gap. The glyph's right side is its
+     thin stroke where its foot is a full stop, so matching the numbers
      leaves it looking a touch further out than it is. */
   --nudge: 1px;
   position: fixed; z-index: 6;
-  top: calc(var(--inset) - var(--pad-y));
+  bottom: calc(var(--inset) - var(--pad-y));
   right: calc(var(--inset) - var(--pad-x) + var(--nudge));
   /* Bare glyph: the generic button rule gives every button a border and a
      wash, and both are undone here. A chrome-less mark reads as part of the
@@ -614,7 +615,7 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   --pad-y: .35rem;
   --pad-x: .5rem;
   position: fixed; z-index: 6;
-  top: calc(var(--inset) - var(--pad-y));
+  bottom: calc(var(--inset) - var(--pad-y));
   right: calc(var(--inset) - var(--pad-x) + 1.6rem);
   border: 0; background: none;
   padding: var(--pad-y) var(--pad-x);
