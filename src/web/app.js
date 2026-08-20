@@ -1316,6 +1316,9 @@ let altCaret = null;
 // The panel this press is driving -- read once on the way down, so a keyup
 // puts away exactly what the keydown put up even if the selection moved.
 let altPanel = null;
+// The tab the WALK opened, which the walk is therefore responsible for
+// shutting -- distinct from `altOpened`, which is about the press itself.
+let altPeeked = null;
 // Generous, because the cost is asymmetric: a slow tap misread as a hold
 // puts away a panel you asked to keep, while a quick hold misread as a tap
 // just leaves it up. Only the no-chord case depends on this at all.
@@ -1358,8 +1361,12 @@ function altChord(e) {
   // right, and the arrows agree -- sideways for "take this with you", which
   // is the gesture a drag makes and reads as different from moving the
   // cursor even though both end up moving vertically.
-  const lift = e.code === 'KeyH' || e.code === 'ArrowLeft';
-  const drop = e.code === 'KeyL' || e.code === 'ArrowRight';
+  // h and l WALK THE TABS now, left and right along the row -- see altWalk.
+  // They used to carry a config line up and down, which was the same gesture
+  // aimed at the smaller of the two things alt can move; a row of tabs has
+  // nowhere else to put that, and j/k still carry nothing but the selection.
+  const walkLeft = e.code === 'KeyH' || e.code === 'ArrowLeft';
+  const walkRight = e.code === 'KeyL' || e.code === 'ArrowRight';
   // SHIFT PICKS THE SIDE. alt+n opens a line under the selected one, alt+N
   // over it -- the same key, and which way is the shift, the way a capital
   // reads as the mirror of its letter.
@@ -1370,8 +1377,17 @@ function altChord(e) {
   // `e.key` here is `Dead` -- and the preventDefault below is what stops the
   // accent being armed at all. See also the compositionstart guard.
   const fresh = e.code === 'KeyN';
-  if (!down && !up && !del && !comment && !fresh && !lift && !drop) return false;
+  if (!down && !up && !del && !comment && !fresh && !walkLeft && !walkRight) {
+    return false;
+  }
   e.preventDefault();
+  // WALKING IS NOT A CONFIG OPERATION, so it happens before everything below
+  // -- which opens the config panel, asks what line is picked, and would
+  // otherwise pull the config up on its way to a terminal.
+  if (walkLeft || walkRight) {
+    altWalk(walkRight ? 1 : -1);
+    return true;
+  }
   // ACTIONS NEED SOMETHING TO ACT ON, and the check has to happen BEFORE
   // the panel opens: opening focuses a row, and focusing a row selects it,
   // so asking afterwards would find a selection the open had just invented
@@ -1391,17 +1407,6 @@ function altChord(e) {
   // key repeats fast enough to reach that.
   if (busy) return true;
 
-  if (lift || drop) {
-    if (nothingPicked || lines.length < 2) return true;
-    // WRAPS, like j/k: a line carried off the top arrives at the bottom.
-    // The move is a rotation there rather than a swap -- there is nothing
-    // above the first line to trade places with -- and every line between
-    // shifts one, which is what carrying a line past the end has to mean.
-    const to = ((picked + (drop ? 1 : -1)) % lines.length + lines.length)
-               % lines.length;
-    move(picked, to);
-    return true;
-  }
 
   if (fresh) {
     // With nothing selected a new line goes at the end, which is where the
@@ -1457,6 +1462,47 @@ document.addEventListener('keydown', (e) => {
   if (altOpened) altPanel.open();
 }, true);
 
+// WALKING THE ROW WHILE ALT IS HELD. Each step moves the selection one tab
+// along and shows what it lands on, so holding alt and tapping l is a way to
+// look through the tabs rather than to guess which is which from its name.
+//
+// WHAT IT OPENS, IT CLOSES. A tab that was already open stays open when you
+// leave it -- you did not open it and it is not yours to put away. One that
+// this opened is shut again the moment the walk moves on, and the last one
+// is shut when alt comes up, unless the release is a tap on it. That is the
+// same rule the plain hold already follows, applied per step.
+function altWalk(by) {
+  if (rail.length < 2) return;
+  // Where we are now: the selected tab if it is on the rail, else the start.
+  const here = rail.indexOf(pickedPanel());
+  const from = here < 0 ? 0 : here;
+  const to = ((from + by) % rail.length + rail.length) % rail.length;
+  const next = rail[to];
+
+  // PUT AWAY WHAT THIS PRESS PUT UP, before moving off it. That is either a
+  // tab an earlier step of this walk opened, or the one the alt-down itself
+  // opened -- both are this press's doing and neither should be left behind.
+  const leaving = altPeeked || (altOpened ? altPanel : null);
+  if (leaving && leaving !== next) {
+    leaving.toggle();
+    altPeeked = null;
+    altOpened = false;
+  }
+  selectPane(next.root);
+  // The panel the keyup will act on is the one we are on NOW.
+  altPanel = next;
+  if (next.shut) {
+    next.open();
+    altPeeked = next;
+    // A tab opened by walking is not a tab the release should close as
+    // though the press had opened it: the walk owns it, and the keyup asks
+    // `altPeeked` rather than `altOpened`.
+    altOpened = false;
+  } else {
+    altOpened = false;
+  }
+}
+
 document.addEventListener('keyup', (e) => {
   if (e.key !== 'Alt') return;
   altDown = false;
@@ -1477,6 +1523,16 @@ document.addEventListener('keyup', (e) => {
 
   const target = altPanel || configPanel;
   altPanel = null;
+  // A TAB THE WALK OPENED goes away with the release, whatever else this
+  // press was. Walking is looking; stopping on something is not the same as
+  // asking for it to stay.
+  const peeked = altPeeked;
+  altPeeked = null;
+  if (peeked) {
+    peeked.toggle();
+    restore();
+    return;
+  }
   if (held) {
     // A HOLD IS A PEEK: it puts away what it put up, and leaves alone what
     // was already there.
