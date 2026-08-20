@@ -906,8 +906,15 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    At the top, where the compose bar is at the bottom: they are both a line
    you type into over the drawing, and putting them at opposite ends means
    neither covers the other when both are up. */
+/* BOTTOM RIGHT, sitting on the same line as the compose bar. The two are
+   both things you type into over the drawing, and having one at each end of
+   the page meant looking in two places for the same kind of thing -- `5.5rem`
+   is the compose bar's own offset, so their bottoms agree.
+   
+   To the RIGHT rather than centred, because the compose bar has the middle
+   and a search field is the smaller errand. */
 #find {
-  position: fixed; top: 1.15rem; left: 50%; transform: translateX(-50%);
+  position: fixed; bottom: 5.5rem; right: 1.25rem;
   z-index: 15;
   min-width: min(20rem, 70vw);
   font: 15px/1.5 ui-monospace, monospace;
@@ -989,14 +996,19 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    in both cases the list grows away from the edge it is against and the field
    keeps its place. */
 #find-list {
+  /* ABOVE THE FIELD, now that the bar is at the bottom of the page: a list
+     dropping down from here would run off the edge. Absolute, so opening it
+     does not move the field -- the thing you are typing in should not jump
+     when a list appears under your hands. */
+  position: absolute; bottom: 100%; left: 0; right: 0;
   margin: 0; padding: 0; list-style: none;
   max-height: calc(5 * (1.9em + .2rem) + 1px);
   overflow-y: auto;
   background: var(--field);
-  /* Flush to the field, sharing the one border where they meet -- the top
-     edge here, since the list hangs below. */
+  /* Flush to the field, sharing the one border where they meet -- the
+     BOTTOM edge here, since the list now sits on top of it. */
   border: 1px solid var(--line-strong);
-  border-top: 0;
+  border-bottom: 0;
   font: inherit;
 }
 #find-list:empty { display: none; }
