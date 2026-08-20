@@ -726,10 +726,19 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    shape of a config call and mean nothing to a terminal -- and the box is
    free to grow both ways. */
 #compose.typing .paren { display: none; }
-/* WIDER THAN A CONFIG LINE. 32rem is the right cap for a call in the config
-   language; a shell command is longer, and the box has somewhere to go
-   before the type has to start shrinking. */
-#compose.typing { max-width: min(66rem, 88vw); }
+/* WIDER THAN A CONFIG LINE, and the width is app.js's to decide: it sizes
+   the field to 88 characters of 12px type and no more. The cap here only
+   stops a narrow window being overrun -- `none` rather than a number,
+   because a second opinion about the width is a second thing to keep in
+   step with the first. */
+#compose.typing { max-width: 94vw; }
+/* NO FLASH WHILE IT RESIZES. The box changes size on almost every keystroke
+   -- a character wider, or a whole step smaller -- and a transition on those
+   turns each one into a little animation that is still running when the next
+   arrives. Nothing here animates; the size is simply what it is. */
+#compose.typing #compose-box, #compose.typing #compose-input {
+  transition: none;
+}
 #compose.typing #compose-box {
   /* Top-aligned, so a box several lines tall grows downward from where the
      first line was rather than centring and pushing the first line up. */

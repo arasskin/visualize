@@ -1078,30 +1078,80 @@ function sizeCompose() {
     return;
   }
 
-  // A TERMINAL BAR GROWS BOTH WAYS. Wider until it hits the cap, then the
-  // type shrinks, then it wraps and grows taller -- and past seven lines it
-  // scrolls instead, because a bar taller than that is a window and this is
-  // still a bar.
+  // A TERMINAL BAR GROWS BOTH WAYS, in that order and only that order.
+  //
+  // THE BOX IS 88 CHARACTERS OF 12px WIDE, and that is the whole budget. The
+  // type shrinks ONLY WHILE THE TEXT IS ON ONE LINE: a first line that keeps
+  // growing is a first line that keeps needing more room, so it buys that
+  // room by getting smaller until it is as small as it goes. Past that the
+  // box is full, and anything more wraps -- so by the time there is a second
+  // line the type is ALREADY at 12px and never changes again. Nothing shrinks
+  // while you are typing line four; it cannot, it is at the floor.
   const text = composeInput.value;
-  const longest = Math.max(1, ...text.split('\n').map(l => l.length));
-  // HOW MANY CHARACTERS FIT AT FULL SIZE, against the width the box is
-  // ALLOWED -- its max-width, not its current width. Measuring what it
-  // happens to be right now reads a narrow box while the text is short and
-  // concludes there is no room, which shrank the type to the floor at sixty
-  // characters. The allowance is the CSS cap, read once.
-  const cap = Math.min(innerWidth * 0.88, 66 * 16);
-  const room = Math.max(8, Math.floor(cap / (COMPOSE_MAX_PX * 0.6)));
-  const over = longest / room;
-  const px = over <= 1 ? COMPOSE_MAX_PX
-    : Math.max(COMPOSE_MIN_PX, Math.round(COMPOSE_MAX_PX / over));
-  composeInput.style.font = `${px}px/1.45 ui-monospace, monospace`;
-  composeInput.style.width = Math.max(longest + 1, 24) + 'ch';
-  // Measured rather than counted: a line long enough to wrap is more than
-  // one row, and only the browser knows where it broke.
-  composeInput.style.height = 'auto';
-  const line = px * 1.45;
-  const rows = Math.min(COMPOSE_ROWS, Math.max(1, Math.round(composeInput.scrollHeight / line)));
+  const lines = text.split('\n');
+  const longest = Math.max(1, ...lines.map(l => l.length));
+
+  // How wide a character is at a given size, in this face. Monospace, so one
+  // number does for all of them -- measured once rather than guessed at, so
+  // the 88 is 88 and not "about 88".
+  const em = charWidth();
+  const capPx = Math.round(88 * COMPOSE_MIN_PX * em);
+
+  // WHAT SIZE FITS THIS LINE. At the full size a line of `longest` wants
+  // `longest * MAX * em` pixels; if that is over budget, the size that fits
+  // is the budget divided by the characters -- floored at 12, which is where
+  // the box stops giving and the text starts wrapping instead.
+  // MORE THAN ONE LINE MEANS 12px, whatever the lines say. Deriving the size
+  // from the longest line let three SHORT lines sit at 17px -- true to the
+  // arithmetic and not to the rule, which is that the small type is what
+  // buys the first line its room, and once a second line exists that room
+  // has already been spent.
+  const wanted = longest * COMPOSE_MAX_PX * em;
+  const px = lines.length > 1 ? COMPOSE_MIN_PX
+    : wanted > capPx
+      ? Math.max(COMPOSE_MIN_PX,
+                 Math.min(COMPOSE_MAX_PX, Math.floor(capPx / (longest * em))))
+      : COMPOSE_MAX_PX;
+
+  // HOW MANY LINES THAT MAKES, counted rather than measured. Measuring means
+  // writing `height: auto`, reading scrollHeight and writing the height back
+  // -- three layouts, the middle one of which the browser can paint, which
+  // is the flash. At 12px the box holds a known number of characters, so
+  // wrapping is arithmetic.
+  const per = Math.max(1, Math.floor(capPx / (px * em)));
+  const rows = Math.min(COMPOSE_ROWS,
+                        lines.reduce((n, l) => n + Math.max(1, Math.ceil(l.length / per)), 0));
+
+  const line = Math.round(px * 1.45);
+  composeInput.style.font = `${px}px/${line}px ui-monospace, monospace`;
+  // THE WIDTH ONLY EVER GROWS on the way out. Sized to the text at the
+  // current size, each step DOWN in font makes the same text narrower in
+  // pixels -- so the box sprang back a few tens of pixels at every step and
+  // crept out again, three times over, which is a stutter under the hand
+  // rather than a resize. Once the type has started shrinking the line is
+  // as wide as the box goes, so it stays there.
+  const width = px < COMPOSE_MAX_PX || rows > 1
+    ? capPx
+    : Math.min(capPx, Math.max(longest + 1, 24) * px * em);
+  composeInput.style.width = Math.round(width) + 'px';
   composeInput.style.height = (rows * line) + 'px';
+}
+
+// ONE CHARACTER WIDE, as a fraction of the font size. Measured from the real
+// face rather than assumed to be .6 -- the assumption was close enough for a
+// rough cap and not for a promise of 88 characters. Cached: it is a property
+// of the font, and the font does not change.
+let charEm = 0;
+function charWidth() {
+  if (charEm) return charEm;
+  const probe = document.createElement('span');
+  probe.style.cssText =
+    'position:absolute;visibility:hidden;white-space:pre;font:100px/1 ui-monospace, monospace';
+  probe.textContent = '0'.repeat(100);
+  document.body.appendChild(probe);
+  charEm = probe.getBoundingClientRect().width / 100 / 100;
+  probe.remove();
+  return charEm || 0.6;
 }
 
 // -- the list --------------------------------------------------------------
