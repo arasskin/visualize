@@ -1209,12 +1209,11 @@ composeInput.addEventListener('keydown', (e) => {
     moveList(e.key === 'n' ? 1 : -1);
     return;
   }
-  // THE ARROWS AGREE WITH WHAT YOU SEE. The list is drawn bottom-up, best
-  // match nearest the field, so DOWN walks toward the field and UP away
-  // from it -- the opposite of the index, and the same direction as the eye.
+  // THE ARROWS AGREE WITH WHAT YOU SEE. The list reads top-down now, so down
+  // is down: the same direction as the index, the eye, and ctrl-n.
   if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && listItems.length) {
     e.preventDefault();
-    moveList(e.key === 'ArrowUp' ? 1 : -1);
+    moveList(e.key === 'ArrowDown' ? 1 : -1);
     return;
   }
   if (e.key === 'Tab' && listItems.length) {

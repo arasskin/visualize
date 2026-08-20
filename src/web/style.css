@@ -564,15 +564,13 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 #compose-list {
   position: absolute; bottom: 100%; left: 0; right: 0;
   margin: 0; padding: 0; list-style: none;
-  /* BEST MATCH AT THE BOTTOM, nearest the text it is completing. The rows
-     are written in rank order and the column is reversed, so the first
-     candidate sits against the field and the list grows upward away from
-     it -- the eye does not travel to read the answer it is most likely to
-     want. */
-  display: flex; flex-direction: column-reverse;
+  /* BEST MATCH AT THE TOP, and the rows in the order they are ranked. The
+     list reads down the way a list reads, so ctrl-n walking down the rows
+     walks down the ranking too. */
+  display: flex; flex-direction: column;
   /* A flex item shrinks to fit by default, so eight rows squeeze into the
      five-row box rather than overflowing it. Told not to, the box overflows
-     and scrolls as it did before the reversal. */
+     and scrolls. */
   /* FIVE ROWS, then scroll. Enough to see the shape of what matched without
      the list becoming the page. */
   /* Five WHOLE rows: a row is its line-height plus its padding, and the
