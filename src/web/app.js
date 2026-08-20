@@ -659,6 +659,13 @@ async function send(action, index, keepView) {
 // the same furniture with different contents. A second copy of this logic
 // would be a second place for the drag-versus-click rule to drift.
 
+// Every panel that can be driven, by its root element -- a selection is a
+// DOM node and the thing that opens and shuts is an object, so one has to
+// find the other. Declared HERE, above the function that fills it: the
+// config's panel is made while this file is still evaluating, so a `const`
+// further down would be in its dead zone and throw on the way past.
+const panelsByRoot = new Map();
+
 function makePanel(root, options = {}) {
   const bar = root.querySelector('.bar');
   const body = root.querySelector('.panel-body');
@@ -723,6 +730,7 @@ function makePanel(root, options = {}) {
     open() { if (panel.shut) bar.click(); },
     toggle() { bar.click(); },
   };
+  panelsByRoot.set(root, panel);
 
   bar.addEventListener('click', () => {
     // A drag that ended on the bar is not a click asking to collapse it.
@@ -1291,6 +1299,9 @@ let altAt = 0;
 // were typing in -- and a modifier you held for a moment should not cost you
 // your place in a half-written line.
 let altCaret = null;
+// The panel this press is driving -- read once on the way down, so a keyup
+// puts away exactly what the keydown put up even if the selection moved.
+let altPanel = null;
 // Generous, because the cost is asymmetric: a slow tap misread as a hold
 // puts away a panel you asked to keep, while a quick hold misread as a tap
 // just leaves it up. Only the no-chord case depends on this at all.
@@ -1418,11 +1429,18 @@ document.addEventListener('keydown', (e) => {
   altCaret = (el === composeInput && typeof el.selectionStart === 'number')
     ? { el, start: el.selectionStart, end: el.selectionEnd }
     : null;
-  altOpened = configPanel.shut;
-  // Opening on the way DOWN, so a hold shows the config for as long as it is
-  // held. A tap over an open panel closes it instead -- see the keyup, which
+  // WHICHEVER TAB IS SELECTED. Alt is one gesture with one target, and the
+  // target is the thing the row already says you are working in -- so there
+  // is no second modifier to remember and no rule about which key opens
+  // which panel. Held for the whole press, since the selection could move
+  // under a chord and the keyup must put away exactly what the keydown put
+  // up.
+  altPanel = pickedPanel();
+  altOpened = altPanel.shut;
+  // Opening on the way DOWN, so a hold shows the panel for as long as it is
+  // held. A tap over an open one closes it instead -- see the keyup, which
   // is where a tap is finally told from a hold.
-  if (altOpened) configPanel.open();
+  if (altOpened) altPanel.open();
 }, true);
 
 document.addEventListener('keyup', (e) => {
@@ -1443,84 +1461,27 @@ document.addEventListener('keyup', (e) => {
     }
   };
 
+  const target = altPanel || configPanel;
+  altPanel = null;
   if (held) {
     // A HOLD IS A PEEK: it puts away what it put up, and leaves alone what
     // was already there.
-    if (altOpened) configPanel.toggle();
+    if (altOpened) target.toggle();
     restore();
     return;
   }
   // A TAP IS A TOGGLE. Pressing down already opened a shut panel, so that
   // half is done; tapping over one that was open is what closes it.
-  if (!altOpened) configPanel.toggle();
+  if (!altOpened) target.toggle();
   restore();
 });
 
 window.addEventListener('blur', () => {
-  if (altDown && altOpened) configPanel.toggle();
+  if (altDown && altOpened && altPanel) altPanel.toggle();
+  altPanel = null;
   altDown = false;
 });
 
-
-// -- control, for the terminal -----------------------------------------------
-//
-// WHAT ALT IS TO THE CONFIG, CONTROL IS TO THE TERMINAL: tap to toggle, hold
-// to peek. The same two gestures on the same two rules -- a hold puts away
-// only what it itself put up, and a tap over an open panel closes it.
-//
-// A MODIFIER, WHICH IS WHY THIS IS SHORT. Control means nothing pressed on
-// its own, so claiming a lone press costs nobody a key they were using; the
-// moment another key joins it the press is a chord -- ctrl-c, ctrl-n in the
-// completion list, ctrl-anything the shell wants -- and this gets out of the
-// way, exactly as alt does for the config.
-let ctrlDown = false;
-let ctrlOpened = false;
-let ctrlUsed = false;
-let ctrlAt = 0;
-const CTRL_HOLD_MS = ALT_HOLD_MS;
-
-document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Control') {
-    // Any other key during the press makes it a chord, and a chord belongs
-    // to whatever it was aimed at -- not to us.
-    if (ctrlDown) ctrlUsed = true;
-    return;
-  }
-  // Auto-repeat while held: the press has already been handled.
-  if (ctrlDown) return;
-  ctrlDown = true;
-  ctrlUsed = false;
-  ctrlAt = performance.now();
-  ctrlOpened = harnessPane.shut;
-  // Opening on the way DOWN, so a hold shows the terminal for as long as it
-  // is held. A tap over an open one closes it instead -- see the keyup,
-  // which is where a tap is finally told from a hold.
-  if (ctrlOpened) harnessPane.open();
-}, true);
-
-document.addEventListener('keyup', (e) => {
-  if (e.key !== 'Control' || !ctrlDown) return;
-  ctrlDown = false;
-  // A chord counts as a hold however brief it was: ctrl-c was never a
-  // request to leave the terminal up.
-  const held = ctrlUsed || performance.now() - ctrlAt >= CTRL_HOLD_MS;
-  if (held) {
-    // A HOLD IS A PEEK: it puts away what it put up, and leaves alone what
-    // was already there.
-    if (ctrlOpened) harnessPane.toggle();
-    return;
-  }
-  // A TAP IS A TOGGLE. Pressing down already opened a shut panel, so that
-  // half is done; tapping over one that was open is what closes it.
-  if (!ctrlOpened) harnessPane.toggle();
-});
-
-// A peek that loses the window never gets its keyup, and would otherwise
-// leave the terminal up and `ctrlDown` stuck true.
-window.addEventListener('blur', () => {
-  if (ctrlDown && ctrlOpened) harnessPane.toggle();
-  ctrlDown = false;
-});
 
 
 /* -- find ------------------------------------------------------------------
@@ -2755,19 +2716,31 @@ const extraPanes = [];
 // A CLASS ON THE PANEL rather than a variable the stylesheet cannot see, and
 // exactly one at a time: the mark answers "which one", and two of them
 // answers nothing.
+// EVERY PANEL IS A TAB, the config among them. It is one of the things in
+// the row, it is one of the things alt can open, and leaving it out made it
+// a special case in both places for no reason a person looking at the row
+// would guess.
 function selectPane(root) {
-  for (const p of document.querySelectorAll('.panel.term.picked')) {
+  for (const p of document.querySelectorAll('.panel.picked')) {
     p.classList.remove('picked');
   }
   if (root) root.classList.add('picked');
 }
 
-// Clicking anywhere in a terminal -- its tab, its screen -- is choosing it.
-// On the panel rather than on the bar, so clicking into the screen to type
-// counts as picking the thing you are typing in.
+// The panel that is selected right now, or the config when somehow none is.
+// The panel object that is selected right now, or the config's when somehow
+// none is.
+function pickedPanel() {
+  const root = document.querySelector('.panel.picked');
+  return (root && panelsByRoot.get(root)) || configPanel;
+}
+
+// Clicking anywhere in a panel -- its tab, its screen, a config row -- is
+// choosing it. On the panel rather than on the bar, so clicking into the
+// thing to work in it counts as picking the thing you are working in.
 document.addEventListener('pointerdown', (e) => {
-  const term = e.target.closest && e.target.closest('.panel.term');
-  if (term) selectPane(term);
+  const inPanel = e.target.closest && e.target.closest('.panel');
+  if (inPanel) selectPane(inPanel);
 }, true);
 
 function openTerminal() {
@@ -2844,7 +2817,15 @@ requestAnimationFrame(() => {
   const configBar = panel.querySelector('.bar');
   const gap = 8;
   harnessPane.place(inset + configBar.offsetWidth + gap, inset);
-  // Something is always selected: an unmarked row raises "which one is it
-  // then?", which is the question the mark exists to answer.
-  selectPane(document.getElementById('harness'));
 });
+
+// SOMETHING IS ALWAYS SELECTED, because an unmarked row raises "which one is
+// it then?" -- the question the mark exists to answer. The CONFIG to start
+// with: it is the leftmost tab, it is what the page is for, and alt over a
+// fresh page should open the thing you came to edit.
+//
+// OUTSIDE THE FRAME ABOVE. Placement genuinely needs a laid-out bar to
+// measure, but this needs nothing -- and rAF does not fire in a hidden tab,
+// so a page opened in the background came up with the wrong tab selected and
+// stayed that way until something else moved it.
+selectPane(panel);

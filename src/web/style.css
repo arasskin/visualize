@@ -281,6 +281,24 @@ button:disabled { opacity: .5; cursor: progress; }
   margin-bottom: -1px; position: relative; z-index: 1;
 }
 .panel.shut .bar { border-bottom: 1px solid var(--line-strong); margin-bottom: 0; }
+
+/* THE SELECTED TAB, in the same green as the selected config line -- the two
+   mark the same idea, so they are one colour from one token.
+
+   ON THE BAR, because the bar IS the tab: a shut panel is nothing else, and
+   an outline round the whole panel would jump from a tab-sized mark to a
+   window-sized one on opening.
+
+   `border-color` rather than an `outline`, so the green replaces the edge
+   the tab already has instead of drawing a second line outside it -- which
+   at this size reads as a thicker border rather than a coloured one. */
+.panel.picked > .bar { border-color: var(--pick); }
+.panel.picked.shut > .bar { border-bottom-color: var(--pick); }
+.panel.picked > .panel-body { border-color: var(--pick); }
+/* The seam stays the body's colour on an open tab, whichever panel it is:
+   green across it would put back the line the merge removes. The terminal
+   sets its own above; the config's body is the canvas. */
+.panel.picked:not(.shut):not(.term) > .bar { border-bottom-color: var(--canvas); }
 .bar:active { cursor: grabbing; }
 /* A panel's own status, right of its name: how many config lines failed.
    Quiet enough to ignore. */
@@ -865,6 +883,11 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    base rule puts the full border back -- a tab with nothing under it needs
    its own bottom edge. */
 .term .bar { border-bottom-color: var(--term); }
+/* Selected AND open: the sides go green, the seam does not. `.panel.picked >
+   .bar` sets all four edges and outranks the rule above, so the seam has to
+   say so at a specificity that beats it -- otherwise a green line lands
+   exactly where the tab is supposed to merge into its window. */
+.term.picked:not(.shut) > .bar { border-bottom-color: var(--term); }
 
 /* THE SELECTED TAB, in the same green as the selected config line -- the two
    mark the same idea, so they are the same colour.
@@ -879,9 +902,6 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    edge is left to the rule above: an OPEN tab merges into its window, and a
    green line across that seam would put back the very rule that one
    removes. */
-.term.picked > .bar { border-color: var(--pick); }
-.term.picked.shut > .bar { border-bottom-color: var(--pick); }
-.term.picked > .panel-body { border-color: var(--pick); }
 .term .panel-body { padding: .35rem .5rem; }
 
 .screen {
