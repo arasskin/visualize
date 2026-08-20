@@ -613,3 +613,76 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 /* The row ctrl-n moved to. Its text is already in the field, so this marks
    where you are in the list rather than offering something to accept. */
 #compose-list li.at { background: var(--wash-strong); }
+
+/* -- find ------------------------------------------------------------------
+   At the top, where the compose bar is at the bottom: they are both a line
+   you type into over the drawing, and putting them at opposite ends means
+   neither covers the other when both are up. */
+#find {
+  position: fixed; top: 1.15rem; left: 50%; transform: translateX(-50%);
+  z-index: 15;
+  min-width: min(20rem, 70vw);
+  font: 15px/1.5 ui-monospace, monospace;
+}
+#find.shut { display: none; }
+
+#find-box {
+  display: flex; align-items: center; gap: .5rem;
+  height: 2.2rem; padding: 0 .7rem;
+  background: var(--field);
+  border: 1px solid var(--line-strong);
+}
+/* NOTHING MATCHED reads on the field itself, the same way a refused config
+   line does -- there is one thing here to be wrong. */
+#find.empty #find-box {
+  border-color: var(--bad);
+  background: var(--bad-wash);
+}
+
+#find-input {
+  flex: 1 1 auto; min-width: 0;
+  border: 0; background: none; outline: none; padding: 0;
+  font: inherit; color: var(--ink);
+}
+#find-input::placeholder { color: var(--ink); opacity: .4; }
+
+/* Which hit you are on. Only shown when there is more than one, so a single
+   match does not get a "1/1" that says nothing. */
+#find-count {
+  flex: none;
+  font: 12px/1 var(--font-ui);
+  color: var(--ink); opacity: .55;
+  font-variant-numeric: tabular-nums;
+}
+
+/* THE ARROW. Drawn into the svg in its own units, so it pans and zooms with
+   the node it points at. Red because nothing else in the drawing is: the
+   palette is the config's, and a colour no box can be given cannot be
+   confused for one that was. */
+.find-shaft {
+  stroke: #e5484d;
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+.find-head { fill: #e5484d; }
+
+/* The arrow ARRIVES rather than appearing: a mark that fades in is a mark you
+   watch land, which is what tells you where to look. Short, because the
+   answer should not be behind an animation. */
+#find-arrow {
+  animation: arrive .22s ease-out;
+}
+@keyframes arrive {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* The node itself, so the arrow is confirmed by what it points at rather
+   than being the only mark. The shape only -- not the text, which stays the
+   colour it was drawn. */
+#graph svg g.node.found ellipse,
+#graph svg g.node.found polygon,
+#graph svg g.node.found path {
+  stroke: #e5484d;
+  stroke-width: 2.5;
+}

@@ -28,6 +28,19 @@
   <p id="compose-fault" role="status" aria-live="polite"></p>
 </div>
 
+<!-- The search bar, at the top: the browser's own find cannot see into a
+     drawing -- it matches text, but a node's name is scattered across
+     <text> elements and finding it neither says where it is nor moves the
+     view to it. Cmd-F opens this instead, and a hit gets an arrow drawn at
+     it in the graph's own coordinates. -->
+<div id="find" class="shut">
+  <div id="find-box">
+    <input id="find-input" spellcheck="false" autocomplete="off"
+      placeholder="find a node" aria-label="find a node">
+    <span id="find-count" aria-live="polite"></span>
+  </div>
+</div>
+
 <!-- The help panel. Empty here: its content is the verb table from
      src/visualize/config.janet, rendered by app.js, because a list of verbs
      written out in HTML is a list that goes stale the first time one

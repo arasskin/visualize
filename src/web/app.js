@@ -609,6 +609,10 @@ async function send(action, index, keepView) {
         pane.innerHTML = out.svg;
         pane.appendChild(edgeLabel);
         wireEdges();
+        // The arrow was drawn into the svg that just went. Re-find against
+        // the new one, so a hit survives a redraw rather than leaving the
+        // bar claiming a match that is no longer marked.
+        redrawFind();
         // A different set of files is a different shape, so start it framed
         // rather than under the previous view's pan -- EXCEPT when the
         // watcher redrew after an edit on disk AND the view is one someone
@@ -1448,3 +1452,295 @@ window.addEventListener('blur', () => {
   if (altDown && altOpened) configPanel.toggle();
   altDown = false;
 });
+
+
+/* -- find ------------------------------------------------------------------
+   THE BROWSER'S OWN FIND CANNOT DO THIS. Cmd-F matches text in the document,
+   and a node's name in a graphviz SVG is scattered across sibling <text>
+   elements -- so `src.visualize.scan` is not findable as itself, and a match
+   that did land would be highlighted somewhere off-screen with the view left
+   where it was. There is also no way to read what the user typed into it: no
+   event fires, and nothing exposes the query or the hit.
+
+   So the key is taken and this opens instead. It searches the names the
+   graph actually has, and marks a hit by DRAWING IN THE GRAPH -- an arrow in
+   the svg's own user units, so it pans and zooms with the thing it points
+   at rather than sliding off it. */
+
+const find = document.getElementById('find');
+const findInput = document.getElementById('find-input');
+const findCount = document.getElementById('find-count');
+
+// The current hits, and where in them we are. Held rather than recomputed on
+// Enter: the list must not reorder under the cursor while stepping through
+// it, the same reason the completion list freezes during ctrl-n.
+let hits = [];
+let hitAt = 0;
+
+function finding() { return !find.classList.contains('shut'); }
+
+// A node matches on either name it has: the dotted key (`src.visualize.scan`)
+// or the label as drawn, which is the key minus whatever prefix an alias
+// replaced. Typing what you SEE has to work, and so does typing the full
+// path -- they differ whenever a `prefix` is in play.
+function searchNodes(query) {
+  const svg = pane.querySelector('svg');
+  if (!svg || !query) return [];
+  const names = moduleNames(svg);
+  const needle = query.toLowerCase();
+  const found = [];
+  for (const node of svg.querySelectorAll('g.node')) {
+    const title = node.querySelector('title');
+    if (!title) continue;
+    const key = title.textContent.trim();
+    const label = names.get(key) || key;
+    const hay = (key + ' ' + label).toLowerCase();
+    const at = hay.indexOf(needle);
+    if (at < 0) continue;
+    // A NAME THAT STARTS WITH THE QUERY BEATS ONE THAT MERELY CONTAINS IT,
+    // and shorter beats longer among those -- `scan` should find `scan`
+    // before `src.visualize.scan.helper`.
+    const starts = key.toLowerCase().startsWith(needle) ||
+                   label.toLowerCase().startsWith(needle);
+    found.push({ node, key, label, rank: (starts ? 0 : 1) * 1000 + key.length });
+  }
+  found.sort((a, b) => a.rank - b.rank);
+  return found;
+}
+
+// Where to point AT: the middle of the node's shape, in the svg's user units.
+// getBBox is in those units already, which is what the arrow is drawn in --
+// so nothing here has to know the current pan or zoom.
+function centreOf(node) {
+  const shape = node.querySelector('ellipse, polygon, path');
+  if (!shape) return null;
+  const b = shape.getBBox();
+  return { x: b.x + b.width / 2, y: b.y + b.height / 2, w: b.width, h: b.height };
+}
+
+// THE ARROW COMES FROM WHERE THERE IS ROOM. A fixed approach angle means a
+// dense graph gets an arrow laid across three unrelated nodes on its way in,
+// which points at everything it crosses. Each candidate direction is scored
+// by what its shaft would cover, and the emptiest wins.
+function approachFor(svg, target, node) {
+  const others = [...svg.querySelectorAll('g.node')]
+    .filter(n => n !== node)
+    .map(centreOf)
+    .filter(Boolean);
+  // EDGES COUNT AS THINGS TO AVOID, not just nodes. Scoring against nodes
+  // alone sent the arrow straight up the line into its target -- clear of
+  // every box and laid along an edge for its whole length, which reads as
+  // pointing at the edge. Sampled along each path, since an arbitrary curve
+  // has no box to test against.
+  const lines = [];
+  for (const path of svg.querySelectorAll('g.edge path')) {
+    let len = 0;
+    try { len = path.getTotalLength(); } catch (err) { continue; }
+    if (!len) continue;
+    for (let d = 0; d <= len; d += Math.max(12, len / 12)) {
+      const pt = path.getPointAtLength(d);
+      lines.push({ x: pt.x, y: pt.y, w: 0, h: 0 });
+    }
+  }
+  // Eight compass points, at a distance that scales with the node so the
+  // arrow reads the same next to a big box and a small one.
+  const reach = Math.max(target.w, target.h) * 2.2 + 60;
+  let best = null;
+  for (let i = 0; i < 8; i++) {
+    const angle = (i / 8) * Math.PI * 2;
+    const tail = {
+      x: target.x + Math.cos(angle) * reach,
+      y: target.y + Math.sin(angle) * reach
+    };
+    // How close does the shaft pass to anything else? Sampled along its
+    // length -- exact segment/box intersection would be more precise than
+    // this needs to be, since ANY near miss is reason enough to prefer
+    // another direction.
+    let worst = Infinity;
+    for (let t = 0.15; t <= 1; t += 0.15) {
+      const px = tail.x + (target.x - tail.x) * t;
+      const py = tail.y + (target.y - tail.y) * t;
+      for (const o of others) {
+        const dx = Math.abs(px - o.x) - o.w / 2;
+        const dy = Math.abs(py - o.y) - o.h / 2;
+        worst = Math.min(worst, Math.max(dx, dy));
+      }
+      // An edge point has no extent, so the distance to it is plain -- but
+      // it is capped, because a shaft only has to clear a line, not stay as
+      // far from it as it would from a whole box.
+      for (const o of lines) {
+        const d = Math.hypot(px - o.x, py - o.y);
+        worst = Math.min(worst, Math.min(d, 40));
+      }
+    }
+    if (!best || worst > best.clear) best = { tail, angle, clear: worst };
+  }
+  return best;
+}
+
+const ARROW_NS = 'http://www.w3.org/2000/svg';
+
+function clearArrow() {
+  const old = pane.querySelector('#find-arrow');
+  if (old) old.remove();
+  for (const n of pane.querySelectorAll('g.node.found')) n.classList.remove('found');
+}
+
+// Drawn INSIDE the svg, in its coordinate system, so the arrow is part of the
+// drawing: pan and zoom move it with its target, and it is in the image if
+// the drawing is saved. Appended last so it sits over the nodes it passes.
+function drawArrow(hit) {
+  clearArrow();
+  const svg = pane.querySelector('svg');
+  if (!svg || !hit) return;
+  const target = centreOf(hit.node);
+  if (!target) return;
+  // The root <svg> has a transform on its child <g> (graphviz's translate);
+  // drawing into that group puts us in the same units as the node boxes.
+  const host = svg.querySelector('g') || svg;
+  const aim = approachFor(svg, target, hit.node);
+
+  // Stop at the edge of the shape rather than the centre, so the head sits
+  // against the node and does not cover the name it just found.
+  const gap = Math.max(target.w, target.h) * 0.55 + 8;
+  const tip = {
+    x: target.x + Math.cos(aim.angle) * gap,
+    y: target.y + Math.sin(aim.angle) * gap
+  };
+
+  const g = document.createElementNS(ARROW_NS, 'g');
+  g.setAttribute('id', 'find-arrow');
+  // Not a pointer target: the arrow lies over edges, and catching the mouse
+  // there would show an edge label for a line the cursor is not really on.
+  g.setAttribute('pointer-events', 'none');
+
+  const shaft = document.createElementNS(ARROW_NS, 'line');
+  shaft.setAttribute('x1', aim.tail.x);
+  shaft.setAttribute('y1', aim.tail.y);
+  shaft.setAttribute('x2', tip.x);
+  shaft.setAttribute('y2', tip.y);
+  shaft.setAttribute('class', 'find-shaft');
+
+  // The head as a triangle rather than a marker: markers scale with the
+  // stroke and are styled through a separate <defs> entry, which is more
+  // machinery than three points need.
+  const head = document.createElementNS(ARROW_NS, 'polygon');
+  const size = 20;
+  const back = aim.angle + Math.PI;
+  const spread = 0.38;
+  const points = [
+    [tip.x, tip.y],
+    [tip.x + Math.cos(back - spread) * size, tip.y + Math.sin(back - spread) * size],
+    [tip.x + Math.cos(back + spread) * size, tip.y + Math.sin(back + spread) * size]
+  ];
+  head.setAttribute('points', points.map(p => p.join(',')).join(' '));
+  head.setAttribute('class', 'find-head');
+
+  g.append(shaft, head);
+  host.append(g);
+  hit.node.classList.add('found');
+}
+
+// BRING IT INTO VIEW, but only when it is not already there: a hit you can
+// see should not make the graph jump, and stepping through hits that share a
+// corner should not re-centre on each one.
+function revealHit(hit) {
+  const svg = pane.querySelector('svg');
+  if (!svg || !hit) return;
+  const box = hit.node.getBoundingClientRect();
+  const view = pane.getBoundingClientRect();
+  const margin = 80;
+  const inside = box.left > view.left + margin && box.right < view.right - margin &&
+                 box.top > view.top + margin && box.bottom < view.bottom - margin;
+  if (inside) return;
+  // Shift by the difference between the node's centre and the pane's, in
+  // screen pixels -- tx/ty are screen-space, so no unit conversion is needed.
+  tx += (view.left + view.width / 2) - (box.left + box.width / 2);
+  ty += (view.top + view.height / 2) - (box.top + box.height / 2);
+  touched = true;
+  paint();
+}
+
+function runFind() {
+  const query = findInput.value.trim();
+  hits = searchNodes(query);
+  hitAt = 0;
+  if (!query) {
+    findCount.textContent = '';
+    find.classList.remove('empty');
+    clearArrow();
+    return;
+  }
+  if (!hits.length) {
+    findCount.textContent = 'no match';
+    find.classList.add('empty');
+    clearArrow();
+    return;
+  }
+  find.classList.remove('empty');
+  showHit();
+}
+
+function showHit() {
+  const hit = hits[hitAt];
+  if (!hit) return;
+  findCount.textContent = hits.length > 1 ? `${hitAt + 1}/${hits.length}` : '';
+  drawArrow(hit);
+  revealHit(hit);
+}
+
+function stepHit(by) {
+  if (hits.length < 2) return;
+  // WRAPS, like the completion list and the config selection.
+  hitAt = (hitAt + by + hits.length) % hits.length;
+  showHit();
+}
+
+function openFind() {
+  if (!help.classList.contains('shut')) shutHelp();
+  find.classList.remove('shut');
+  findInput.select();
+  findInput.focus();
+  // Re-run rather than clear: reopening with the last query still in the
+  // field should show what it found, not an empty bar you have to retype.
+  if (findInput.value.trim()) runFind();
+}
+
+function shutFind() {
+  find.classList.add('shut');
+  find.classList.remove('empty');
+  clearArrow();
+  hits = [];
+  findInput.blur();
+}
+
+findInput.addEventListener('input', runFind);
+
+findInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { e.preventDefault(); shutFind(); return; }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    // Shift-Enter goes back, the one convention the native find does have
+    // that is worth keeping.
+    stepHit(e.shiftKey ? -1 : 1);
+    return;
+  }
+  if (e.key === 'ArrowDown') { e.preventDefault(); stepHit(1); }
+  if (e.key === 'ArrowUp') { e.preventDefault(); stepHit(-1); }
+});
+
+// TAKING CMD-F. On the capture phase and before the compose bar's own
+// handler, so the keystroke opens this rather than starting a config line.
+document.addEventListener('keydown', (e) => {
+  if (!(e.metaKey || e.ctrlKey) || e.key !== 'f') return;
+  e.preventDefault();
+  if (finding()) { findInput.select(); findInput.focus(); return; }
+  openFind();
+}, true);
+
+// A redraw replaces the svg, and the arrow was drawn into the old one.
+// Called from the redraw itself rather than listening for an event, since
+// that is the only place the swap happens.
+function redrawFind() {
+  if (finding() && findInput.value.trim()) runFind();
+}
