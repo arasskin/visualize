@@ -95,6 +95,19 @@
   []
   (string/join (map |(string/format "%02x" $) (os/cryptorand 24)) ""))
 
+# `/pane/<id>/<op>` split into its two halves, or nil when the path is not
+# one -- which is what the route match tests.
+#
+# THE ID IS CONSTRAINED BECAUSE IT BECOMES A FILENAME. It is passed to
+# `socket-for` as a tag and lands in $TMPDIR, so `..` or a slash in it would
+# be a path this server was asked to bind rather than a name. Lowercase
+# letters, digits and dashes only: everything a pane needs to be called and
+# nothing that can leave the directory.
+(defn- pane-route [path]
+  (peg/match ~(* "/pane/" (<- (some (+ (range "az") (range "09") "-"))) "/"
+                 (<- (some (range "az"))) -1)
+             path))
+
 (defn- socket-for
   ``Where this project's supervisor listens.
 
@@ -208,12 +221,30 @@
   # anchors and gluing hid that -- the first version spawned
   # src/external-src/janet/janet and the pane just never started.
   (def repo (os/realpath (string here "/..")))
-  (def pane-socket (socket-for root))
-  (def pane-client
-    (term/make-client pane-socket
-                      [(string repo "/external-src/janet/janet")
-                       (string repo "/src/visualize/core.janet")
-                       "--supervise" pane-socket]))
+
+  # A CLIENT PER PANE, MADE ON DEMAND. Panes are numbered, and a number is
+  # all the page sends: the first request naming one builds its client and
+  # its socket, and every request after finds the same one. Nothing is
+  # started here, because a client that has never been asked for anything
+  # has no host behind it -- the pane the page opens is what spawns one.
+  #
+  # KEYED BY THE SAME NUMBER ON BOTH SIDES. The socket tag is the pane's
+  # number, so pane 2 always finds pane 2's host across a server restart --
+  # which is the property the whole split exists for.
+  (def panes @{})
+  (defn pane-for [id]
+    (or (get panes id)
+        (let [socket (socket-for root (string "." id ".sock"))
+              client (term/make-client
+                       socket
+                       [(string repo "/external-src/janet/janet")
+                        (string repo "/src/visualize/core.janet")
+                        "--supervise" socket])]
+          (put panes id client)
+          client)))
+  # The pane Control opens. Numbered like the rest so nothing special-cases
+  # it, and made eagerly because the page's markup names it at load.
+  (def pane-client (pane-for "harness"))
 
   # WHAT THE TERMINAL RUNS. An environment variable rather than a config verb
   # for now: the config's verb table describes fixed-arity calls over graph
@@ -318,7 +349,12 @@
                   (string/replace "{{CONFIG_NAME}}" config/config-title)
                   # The pane's bar says what it runs, so a glance tells you
                   # which harness this run would start.
-                  (string/replace "{{HARNESS_NAME}}" (first (harness-argv)))
+                  # The LEAF, matching what the pane writes into its own bar
+                  # once a session reports its argv -- /bin/zsh and zsh are
+                  # the same answer, and the two should not disagree for the
+                  # moment before the first start reply lands.
+                  (string/replace "{{HARNESS_NAME}}"
+                                  (escaped (last (string/split "/" (first (harness-argv))))))
                   (string/replace "{{CONFIG_LINES}}" (json/encode lines))
                   (string/replace "{{CONFIG_PROBLEMS}}" (json/encode problems))
                   # The help panel's content, generated from the grammar's
@@ -494,42 +530,51 @@
       # THE /pane/ PREFIX EARNS ITS KEYSTROKES. A route called /term/poll
       # reads as though it polled a terminal emulator; this is a pane in the
       # page talking about the session behind it, and the prefix says so.
-      (and (= method "POST") (= path "/pane/harness/start"))
-      (guarded (fn []
-                 (def sent (json/decode (request :body)))
-                 (def rows (math/floor (or (get sent "rows") 24)))
-                 (def cols (math/floor (or (get sent "cols") 100)))
-                 ["200 OK" "application/json"
-                  (json/encode (:start pane-client (harness-argv) root rows cols))]))
+      #
+      # ONE MATCH FOR EVERY PANE. The id is read out of the path rather than
+      # written into five routes per pane -- the page opens as many as it
+      # likes, and the first request naming one is what brings its client
+      # into being. A pane id is [a-z0-9-]: it becomes a socket filename, so
+      # anything that could climb out of a directory is not a name.
+      (and (= method "POST") (string/has-prefix? "/pane/" path)
+           (pane-route path))
+      (guarded
+        (fn []
+          (def [id op] (pane-route path))
+          (def client (pane-for id))
+          (def sent (if (empty? (or (request :body) ""))
+                      {} (or (json/decode (request :body)) {})))
+          (defn rows [] (math/floor (or (get sent "rows") 24)))
+          (defn cols [] (math/floor (or (get sent "cols") 100)))
+          (case op
+            "start"
+            ["200 OK" "application/json"
+             (json/encode (:start client (harness-argv) root (rows) (cols)))]
 
-      (and (= method "POST") (= path "/pane/harness/stop"))
-      (guarded (fn [] ["200 OK" "application/json"
-                       (json/encode (:stop pane-client))]))
+            "stop"
+            ["200 OK" "application/json" (json/encode (:stop client))]
 
-      (and (= method "POST") (= path "/pane/harness/input"))
-      (guarded (fn []
-                 (def sent (json/decode (request :body)))
-                 # `at` turns this into "type, and tell me what came back" --
-                 # one round trip for a keystroke and its echo.
-                 (def echo (:send pane-client (string (get sent "text" ""))
-                                  (when-let [a (get sent "at")] (math/floor a))))
-                 ["200 OK" "application/json" (json/encode echo)]))
+            # `at` turns this into "type, and tell me what came back" -- one
+            # round trip for a keystroke and its echo.
+            "input"
+            ["200 OK" "application/json"
+             (json/encode (:send client (string (get sent "text" ""))
+                                 (when-let [a (get sent "at")] (math/floor a))))]
 
-      (and (= method "POST") (= path "/pane/harness/redraw"))
-      (guarded (fn []
-                 (:redraw pane-client)
-                 ["200 OK" "application/json" (json/encode {"ok" true})]))
+            "redraw"
+            (do (:redraw client)
+                ["200 OK" "application/json" (json/encode {"ok" true})])
 
-      (and (= method "POST") (= path "/pane/harness/resize"))
-      (guarded (fn []
-                 (def sent (json/decode (request :body)))
-                 (:resize pane-client (math/floor (or (get sent "rows") 24))
-                          (math/floor (or (get sent "cols") 100)))
-                 ["200 OK" "application/json" (json/encode {"ok" true})]))
+            "resize"
+            (do (:resize client (rows) (cols))
+                ["200 OK" "application/json" (json/encode {"ok" true})])
 
-      (and (= method "POST") (= path "/pane/harness/poll"))
-      (guarded (fn [] (poll-answer (fn [at gen wait] (:poll pane-client at gen wait))
-                                   (request :body))))
+            "poll"
+            (poll-answer (fn [at gen wait] (:poll client at gen wait))
+                         (request :body))
+
+            ["404 Not Found" "application/json"
+             (json/encode {"error" (string "no such pane op '" op "'")})])))
 
       ["404 Not Found" "text/plain" "not found"]))
 

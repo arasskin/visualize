@@ -2068,6 +2068,10 @@ function redrawFind() {
 
 function makeTerminalPane(root, prefix) {
   const stateLine = root.querySelector('.state');
+  const nameLabel = root.querySelector('.name');
+  // Numbered panes carry their number beside the process name; the one the
+  // page ships with has a name of its own and does not need one.
+  const paneName = /^\d+$/.test(prefix) ? prefix : '';
   const screen = root.querySelector('.screen');
 
   // Follow the output the way a terminal does -- but only while the view is at
@@ -2199,6 +2203,19 @@ function makeTerminalPane(root, prefix) {
   }
 
   function setState(text) { stateLine.textContent = text; }
+
+  // THE BAR SAYS WHAT IS RUNNING, from the argv the host reports rather than
+  // from anything this page chose -- the two can differ, since the command
+  // is read per request and the pane may have been started by a page that is
+  // now closed.
+  //
+  // The LEAF of the path, because /bin/zsh and /opt/homebrew/bin/zsh are the
+  // same answer to "what is this?" and a bar is a few characters wide.
+  function setName(argv) {
+    if (!Array.isArray(argv) || !argv.length) return;
+    const leaf = String(argv[0]).split('/').filter(Boolean).pop();
+    nameLabel.textContent = paneName ? `${leaf} ${paneName}` : leaf;
+  }
 
   async function poll() {
     try {
@@ -2425,6 +2442,7 @@ function makeTerminalPane(root, prefix) {
       generation = out.generation;
       at = 0;
       term.reset();
+      setName(out.argv);
       setState('');
       startPolling();
       screen.focus();
@@ -2715,6 +2733,75 @@ function makeTerminalPane(root, prefix) {
 // onto this server's own repl, and went with the debugging rig. What is left
 // is the pane the name describes.
 const harnessPane = makeTerminalPane(document.getElementById('harness'), 'harness');
+
+
+// -- more terminals ----------------------------------------------------------
+//
+// CTRL-T OPENS ANOTHER ONE. Panes are numbered, and the number is the whole
+// address: it names the route the driver posts to and the socket the server
+// keys a host by, so pane 2 finds pane 2's session again across a reload or a
+// server restart -- the property the client/host split exists for.
+//
+// The panel is CLONED from the one in the page rather than written out again
+// here. A second copy of that markup is a second place to change when the bar
+// grows a button, and the two would drift.
+let paneCount = 1;
+const extraPanes = [];
+
+function openTerminal() {
+  const id = String(++paneCount);
+  const root = document.getElementById('harness').cloneNode(true);
+  root.id = 'pane-' + id;
+  root.classList.add('shut');
+  // A CLONE CARRIES THE ORIGINAL'S SCREEN. Whatever the first pane had
+  // painted comes along in the copy, and it belongs to a session this one
+  // has nothing to do with.
+  root.querySelector('.screen').textContent = '';
+  root.querySelector('.state').textContent = '';
+  root.querySelector('.name').textContent = 'terminal ' + id;
+  // Cleared, so the panel starts at its own default size rather than
+  // inheriting whatever the original was dragged to.
+  root.style.cssText = '';
+  document.body.appendChild(root);
+
+  const pane = makeTerminalPane(root, id);
+  extraPanes.push(pane);
+  pane.open();
+  // STAGGERED off the pane before it, so a new one is not hidden under the
+  // last -- and placed AFTER opening, in the frame after that. `place`
+  // clamps against the panel's own width so a drag cannot throw it off the
+  // screen, and a panel that has not been laid out yet has no width to clamp
+  // against: measured too early, every pane landed at the clamp's floor
+  // (-28,-28) instead of where it was sent. The same reason the config's own
+  // first placement waits a frame.
+  requestAnimationFrame(() => {
+    const configBar = panel.querySelector('.bar');
+    const step = 26;
+    const n = extraPanes.length;
+    pane.place(inset + configBar.offsetWidth + 8 + step * n, inset + step * n);
+  });
+  return pane;
+}
+
+// CTRL-T EVERYWHERE BUT INSIDE A TERMINAL, where it is the shell's
+// (transpose-chars) and the program should get the keys it expects.
+//
+// CMD-T ALWAYS, INCLUDING INSIDE ONE. Without a second way in, opening a
+// pane focused its screen and every ctrl-t after the first went to the
+// shell -- one terminal, and no way to ask for another without clicking
+// away first. Cmd is the modifier to spend on it because the emulator
+// already refuses it outright (see keyToBytes), so nothing is taken from
+// the program that it ever had.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 't' && e.key !== 'T') return;
+  if (e.altKey) return;
+  const el = document.activeElement;
+  const inTerm = !!(el && el.closest && el.closest('.term'));
+  if (e.metaKey || (e.ctrlKey && !inTerm)) {
+    e.preventDefault();
+    openTerminal();
+  }
+}, true);
 
 // BESIDE THE CONFIG'S TAB, not on top of it. Both panels are absolutely
 // positioned, and a panel that was never placed sits at 0,0 -- which is
