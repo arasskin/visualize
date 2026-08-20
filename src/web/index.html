@@ -18,9 +18,13 @@
   <!-- The box is the bordered thing; the parens live INSIDE it, one at each
        end of the line. Printed, not typed -- every line of the config is a
        call, so they are the shape of what you are writing. -->
+  <!-- A TEXTAREA, not an input, because on a terminal tab this grows to as
+       many lines as you type. On the config tab it is held to one line and
+       behaves exactly as an input did -- see app.js. -->
   <div id="compose-box">
-    <span class="paren">(</span><input id="compose-input" spellcheck="false"
-      autocomplete="off" aria-label="add a config line"><span class="paren">)</span>
+    <span class="paren">(</span><textarea id="compose-input" rows="1"
+      spellcheck="false" autocomplete="off" autocapitalize="off"
+      aria-label="add a config line"></textarea><span class="paren">)</span>
   </div>
   <!-- Completions, ABOVE the bar: the graph is behind, and a list dropping
        down would cover the part you are looking at while you filter it. -->

@@ -1038,9 +1038,58 @@ function completions() {
 // rather than the `size` attribute, because `size` is a hint the flex
 // layout can overrule -- and it did, letting a long line push the closing
 // paren out through the border.
+// WHICH BAR THIS IS. One box, two jobs: on the config tab it writes a line
+// of the config language, on a terminal tab it types at a shell. The
+// selected tab decides, so the bar is about whatever you are working in.
+function composeTarget() {
+  const p = pickedPanel();
+  return (p && p !== configPanel && p.root.classList.contains('term')) ? p : null;
+}
+
+// HOW SMALL THE TEXT GETS. A shell command can be long, and a bar that only
+// ever grows wider walks off the screen; letting the type shrink buys about
+// twice the characters before that happens. 12px is the floor -- past that it
+// stops being text you can check before sending.
+const COMPOSE_MAX_PX = 17;
+const COMPOSE_MIN_PX = 12;
+const COMPOSE_ROWS = 7;
+
 function sizeCompose() {
-  const n = Math.max(1, composeInput.value.length);
-  composeInput.style.width = n + 'ch';
+  const term = composeTarget();
+  if (!term) {
+    // THE CONFIG BAR IS ONE LINE, as wide as its text. The field is measured
+    // in `ch` so the closing paren sits just after what you wrote.
+    composeInput.style.font = '';
+    composeInput.style.width = Math.max(1, composeInput.value.length) + 'ch';
+    composeInput.style.height = '';
+    composeInput.rows = 1;
+    return;
+  }
+
+  // A TERMINAL BAR GROWS BOTH WAYS. Wider until it hits the cap, then the
+  // type shrinks, then it wraps and grows taller -- and past seven lines it
+  // scrolls instead, because a bar taller than that is a window and this is
+  // still a bar.
+  const text = composeInput.value;
+  const longest = Math.max(1, ...text.split('\n').map(l => l.length));
+  // HOW MANY CHARACTERS FIT AT FULL SIZE, against the width the box is
+  // ALLOWED -- its max-width, not its current width. Measuring what it
+  // happens to be right now reads a narrow box while the text is short and
+  // concludes there is no room, which shrank the type to the floor at sixty
+  // characters. The allowance is the CSS cap, read once.
+  const cap = Math.min(innerWidth * 0.88, 66 * 16);
+  const room = Math.max(8, Math.floor(cap / (COMPOSE_MAX_PX * 0.6)));
+  const over = longest / room;
+  const px = over <= 1 ? COMPOSE_MAX_PX
+    : Math.max(COMPOSE_MIN_PX, Math.round(COMPOSE_MAX_PX / over));
+  composeInput.style.font = `${px}px/1.45 ui-monospace, monospace`;
+  composeInput.style.width = Math.max(longest + 1, 24) + 'ch';
+  // Measured rather than counted: a line long enough to wrap is more than
+  // one row, and only the browser knows where it broke.
+  composeInput.style.height = 'auto';
+  const line = px * 1.45;
+  const rows = Math.min(COMPOSE_ROWS, Math.max(1, Math.round(composeInput.scrollHeight / line)));
+  composeInput.style.height = (rows * line) + 'px';
 }
 
 // -- the list --------------------------------------------------------------
@@ -1052,7 +1101,10 @@ let listAt = -1;
 let listItems = [];
 
 function renderList() {
-  listItems = composing() ? completions() : [];
+  // NO COMPLETIONS ON A TERMINAL TAB. The list offers node names and config
+  // verbs, which is the wrong vocabulary entirely for a shell -- and the
+  // shell has its own completion, on the key it expects.
+  listItems = (composing() && !composeTarget()) ? completions() : [];
   renderRows();
 }
 
@@ -1123,6 +1175,10 @@ function shutList() {
 
 function openCompose(seed) {
   compose.classList.remove('shut');
+  // THE PARENS ARE THE CONFIG LANGUAGE'S. Every line of the config is a
+  // call, so they are the shape of what you are writing there -- and they
+  // are nothing at all to a shell.
+  compose.classList.toggle('typing', !!composeTarget());
   composeFault.textContent = '';
   composeInput.value = seed || '';
   sizeCompose();
@@ -1160,6 +1216,21 @@ async function checkLines(candidate, at) {
 }
 
 async function commitCompose() {
+  // TO THE TERMINAL, if that is what is selected: what you typed is typed at
+  // the shell, with the newline that runs it. The bar clears and stays open,
+  // because the next thing you type is usually the next command.
+  const term = composeTarget();
+  if (term) {
+    const typed = composeInput.value;
+    if (!typed) { shutCompose(); return; }
+    composeInput.value = '';
+    sizeCompose();
+    // Newline-terminated, so it runs rather than sitting on the prompt --
+    // pressing enter here is pressing enter there.
+    if (term.type) term.type(typed.endsWith('\n') ? typed : typed + '\n');
+    return;
+  }
+
   const text = composeInput.value.trim();
   if (!text) { shutCompose(); return; }
   if (busy) return;
@@ -1249,7 +1320,14 @@ composeInput.addEventListener('keydown', (e) => {
     renderList();
     return;
   }
-  if (e.key === 'Enter') { e.preventDefault(); commitCompose(); }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commitCompose(); }
+  // SHIFT-ENTER IS A NEWLINE, which is only meaningful on a terminal tab --
+  // the config bar is one line and the browser's own default is prevented
+  // above. Left to the textarea rather than inserted here, so undo and the
+  // caret behave the way they do in any other multi-line field.
+  else if (e.key === 'Enter' && e.shiftKey) {
+    if (composeTarget()) setTimeout(sizeCompose, 0); else e.preventDefault();
+  }
   else if (e.key === 'Escape') {
     e.preventDefault();
     // The list first, then the bar: an escape closes the thing that is in
@@ -2789,6 +2867,11 @@ function makeTerminalPane(root, prefix) {
   //
   // Nothing is polled yet. The backlog is the supervisor's, and it keeps
   // whatever the program writes until a panel opens and asks for it.
+  // TYPED AT FROM OUTSIDE. The compose bar sends a whole command this way
+  // when a terminal tab is the selected one -- the same path a keystroke
+  // takes, so the echo and the polling need no special case.
+  termPanel.type = (text) => { if (text) sendInput(text); };
+
   termPanel.boot = async () => {
     if (generation) return;                 // already has one
     try {

@@ -722,6 +722,28 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   margin: 0 .1rem;
 }
 
+/* TYPING AT A SHELL, not writing a config line. The parens go -- they are the
+   shape of a config call and mean nothing to a terminal -- and the box is
+   free to grow both ways. */
+#compose.typing .paren { display: none; }
+/* WIDER THAN A CONFIG LINE. 32rem is the right cap for a call in the config
+   language; a shell command is longer, and the box has somewhere to go
+   before the type has to start shrinking. */
+#compose.typing { max-width: min(66rem, 88vw); }
+#compose.typing #compose-box {
+  /* Top-aligned, so a box several lines tall grows downward from where the
+     first line was rather than centring and pushing the first line up. */
+  align-items: flex-start;
+  height: auto; min-height: var(--field-h);
+  padding: .35rem .55rem;
+}
+#compose.typing #compose-input {
+  /* SCROLLS PAST SEVEN LINES. sizeCompose caps the height there; this is
+     what happens to the rest. */
+  overflow-y: auto;
+  white-space: pre-wrap; word-break: break-word;
+}
+
 #compose-input {
   /* Sized to its content by sizeCompose, and allowed to shrink no further
      than the box: flex-shrink keeps a long line inside the border, and the
@@ -732,6 +754,9 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
      gap to the brackets comes from their own margin instead. */
   border: 0; background: none; outline: none; padding: 0;
   font: inherit; color: var(--ink);
+  /* It is a textarea now: none of these are an input's defaults. */
+  resize: none; overflow: hidden; white-space: pre;
+  line-height: 1.45; display: block;
 }
 
 /* The complaint, under the line it is about. The FIELD turns red rather than
