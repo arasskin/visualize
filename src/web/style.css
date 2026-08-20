@@ -823,8 +823,16 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    one see-through window. */
 .term {
   --gutter: 0px;
-  background: var(--term); color: var(--term-ink);
+  color: var(--term-ink);
+  /* NO BACKGROUND ON THE PANEL. The panel is a column whose bar keeps its
+     own narrow width while the body stretches -- so a ground painted here
+     covers the panel's full width at the bar's height, and the strip beside
+     the tab was a pane of translucent white over the graph with nothing on
+     it. The base rule says the panel is transparent for exactly this
+     reason; the two pieces paint themselves, below. */
 }
+/* The terminal's ground, on the parts that ARE the terminal. */
+.term > .bar, .term > .panel-body { background: var(--term); }
 /* NO LINE WHERE THE TAB MEETS ITS WINDOW. The base rule erases that seam by
    painting the bar's bottom edge in the body's own colour, the way a folder
    tab merges into the folder; this pane restored a visible one, so an open

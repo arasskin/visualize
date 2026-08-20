@@ -2614,14 +2614,7 @@ function makeTerminalPane(root, prefix) {
 
   const termPanel = makePanel(root, {
     minWidth: 360, minHeight: 200,
-    // NARROWER WHEN THERE ARE SEVERAL. 52rem is the right width for the one
-    // terminal this page used to have; at that size two will not fit beside
-    // each other on an ordinary window, so a second pane asked to sit to the
-    // right of the first can only ever wrap. An extra pane takes about a
-    // third of the window instead, which fits three across and is still wide
-    // enough for eighty columns.
-    width: paneName ? 'min(34rem, 46vw)' : 'min(52rem, 94vw)',
-    height: paneName ? '20rem' : '24rem',
+    width: 'min(52rem, 94vw)', height: '24rem',
     onOpen: async () => {
       screen.focus();
       // A beat, so the panel's first-open default size has actually been laid
@@ -2773,54 +2766,23 @@ function openTerminal() {
 
   const pane = makeTerminalPane(root, id);
   extraPanes.push(pane);
-  pane.open();
-  // TO THE RIGHT OF THE LAST ONE MADE, at the same height -- so a row of
-  // terminals reads as a row, and the newest is always the rightmost rather
-  // than somewhere in a diagonal pile.
+  // SHUT, like every other panel starts. A new terminal is a tab you can
+  // open, not a window that takes the screen the moment you ask for one --
+  // and a row of tabs is what makes several of them findable at all.
   //
-  // PLACED AFTER OPENING, in the frame after that. `place` clamps against
-  // the panel's own width so a drag cannot throw it off the screen, and a
-  // panel that has not been laid out has no width to clamp against:
-  // measured too early, every pane landed at the clamp's floor instead of
-  // where it was sent. The same reason the config's own first placement
-  // waits a frame.
-  // AFTER THE PANEL HAS ITS SIZE. `onOpen` waits 50ms for exactly that
-  // reason -- a panel measured in the tick it opens in reads half its
-  // width -- and placing before that read a width of zero, sent the pane to
-  // a wrong left, and let the later layout settle it somewhere else again.
-  // A timer rather than rAF for the same reason onOpen uses one: rAF never
-  // fires in a hidden tab, and a pane opened there would never be placed.
-  setTimeout(() => {
-    const gap = 10;
-    // THE PANE BEFORE THIS ONE, measured rather than accumulated -- so
-    // dragging one somewhere puts the next beside where it actually IS.
-    // The harness is not an anchor: it is usually shut, and a 28px tab says
-    // nothing about where a 832px terminal should go.
-    const before = extraPanes.length > 1
-      ? extraPanes[extraPanes.length - 2].root
-      : null;
-    const configBar = panel.querySelector('.bar');
-    const startLeft = inset + configBar.offsetWidth + 8;
-    let left = startLeft;
-    let top = inset;
-    if (before) {
-      const b = before.getBoundingClientRect();
-      left = b.right + gap;
-      top = b.top;
-      // ENOUGH ROOM FOR THIS ONE, or the row is over. Without the check
-      // `place` clamps the newest against the right edge and every later
-      // pane lands in that same spot, stacked.
-      //
-      // Measured off the pane's own width, which it has: it was opened
-      // before this frame, so it has been laid out.
-      const width = pane.root.offsetWidth;
-      if (left + width > innerWidth - inset) {
-        left = startLeft;
-        top = b.bottom + gap;
-      }
-    }
-    pane.place(left, top);
-  }, 60);
+  // TO THE RIGHT OF THE TAB BEFORE IT, which is what a row of tabs means:
+  // beside the last one's bar, not beside whatever window that pane opens
+  // into. Measured off that bar rather than accumulated, so dragging a tab
+  // somewhere puts the next one beside where it actually IS.
+  const gap = 6;
+  const previous = extraPanes.length > 1
+    ? extraPanes[extraPanes.length - 2].root
+    : document.getElementById('harness');
+  const b = previous.getBoundingClientRect();
+  // The BAR's right edge, not the panel's: an open panel is as wide as its
+  // body, and the next tab belongs beside the tab.
+  const bar = previous.querySelector('.bar').getBoundingClientRect();
+  pane.place(bar.right + gap, b.top);
   return pane;
 }
 
