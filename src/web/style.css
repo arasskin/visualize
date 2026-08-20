@@ -44,6 +44,9 @@
   --pick: #2f7d4f;
   --pick-wash: #2f7d4f1c;
 
+  /* The tab rail's guides. Orange, which nothing else here is. */
+  --rail: #d2811e;
+
   /* The colour a hovered dependency lights up in. */
   --lit: #c04040;
 
@@ -105,6 +108,8 @@
     /* Lifted to read against the dark ground, like every other colour here. */
     --pick: #6bbf8a;
     --pick-wash: #6bbf8a24;
+
+    --rail: #e8a545;
 
     /* Lightened to read against the dark ground -- the mirror image of the
        light palette's problem: stock black and dim colours vanish here. */
@@ -281,6 +286,35 @@ button:disabled { opacity: .5; cursor: progress; }
   margin-bottom: -1px; position: relative; z-index: 1;
 }
 .panel.shut .bar { border-bottom: 1px solid var(--line-strong); margin-bottom: 0; }
+
+/* THE RAILS. Two lines marking where the tab row sits, drawn ONLY while a
+   tab is being dragged near them -- the bar has no body and nothing to see,
+   and a strip of furniture across the top of the drawing would cost the page
+   its whole point for a thing you need only while aiming.
+
+   Orange because nothing else on the page is: green means selected and red
+   means found or wrong, and a guide that borrows either would be read as
+   saying something about the tab rather than about where it can go.
+
+   pointer-events:none throughout -- these appear under a hand that is in the
+   middle of a drag, and catching that pointer would end it. */
+#rail-marks {
+  position: fixed; left: 0; right: 0; z-index: 4;
+  pointer-events: none;
+  opacity: 0;
+  /* IN AND OUT IN EQUAL TIME, like the node flash: a guide that snaps is a
+     flicker when a drag crosses the line, and one that lingers is in the way
+     after the drop. */
+  transition: opacity .16s ease-in-out;
+}
+#rail-marks.near { opacity: 1; }
+#rail-marks i {
+  position: absolute; left: 0; right: 0; height: 0;
+  border-top: 1.5px dashed var(--rail);
+}
+/* The two edges of the row: one at the top of a tab, one at its bottom. */
+#rail-marks i:first-child { top: 0; }
+#rail-marks i:last-child { bottom: 0; }
 
 /* THE SELECTED TAB, in the same green as the selected config line -- the two
    mark the same idea, so they are one colour from one token.

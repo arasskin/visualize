@@ -674,7 +674,7 @@ function makePanel(root, options = {}) {
   // Dragging the bar moves the panel; dragging the grip resizes it. Both are
   // the same gesture with a different thing on the end, so they share one
   // pointer-capture path.
-  function grab(handle, onMove) {
+  function grab(handle, onMove, onDrop) {
     handle.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
       e.preventDefault();
@@ -699,6 +699,7 @@ function makePanel(root, options = {}) {
         handle.removeEventListener('pointerup', drop);
         handle.removeEventListener('pointercancel', drop);
         handle.dragged = moved;
+        if (onDrop) onDrop(moved);
       };
       handle.addEventListener('pointermove', move);
       handle.addEventListener('pointerup', drop);
@@ -714,7 +715,14 @@ function makePanel(root, options = {}) {
     root.style.top = Math.min(Math.max(top, 0), innerHeight - edge) + 'px';
   }
 
-  grab(bar, (dx, dy, from) => place(from.left + dx, from.top + dy));
+  // EVERY PANEL IS A TAB, so every panel answers to the rail -- there is no
+  // option for it and no call site that could forget to pass one.
+  grab(bar,
+       (dx, dy, from) => {
+         place(from.left + dx, from.top + dy);
+         railDrag(panel);
+       },
+       (moved) => { if (moved) railDrop(panel); });
   grab(grip, (dx, dy, from) => {
     const w = Math.max(options.minWidth || 240, from.w + dx);
     const h = Math.max(options.minHeight || 120, from.h + dy);
@@ -770,14 +778,9 @@ const configPanel = makePanel(panel, {
   },
 });
 
-// Top-left, inset the SAME on both sides. One number for the gap above and
-// the gap to the left, so the panel sits in a corner rather than at two
-// unrelated distances from it.
-//
-// After a frame, because the collapsed bar has no real width to clamp
-// against until layout has run.
+// One number for the gap above and the gap to the left, so the row starts in
+// a corner rather than at two unrelated distances from it.
 const inset = 12;
-requestAnimationFrame(() => configPanel.place(inset, inset));
 
 // ESCAPE PUTS THE PANEL AWAY when you are working in it. "In it" is where the
 // focus is, not merely whether it is open: the panel can sit open while you
@@ -2716,6 +2719,161 @@ const extraPanes = [];
 // A CLASS ON THE PANEL rather than a variable the stylesheet cannot see, and
 // exactly one at a time: the mark answers "which one", and two of them
 // answers nothing.
+/* -- the tab bar -------------------------------------------------------------
+
+   A RAIL WITH NO BODY. There is no element for it: it is a y coordinate and
+   a height, and what it does is decide where a dropped tab lands. Drawing it
+   would put a strip of furniture across the top of a drawing that is the
+   point of the page -- so it is invisible until a tab is dragged near it,
+   and then two orange lines fade in to say where it is.
+
+   TABS ON IT ARE PACKED, left to right in order, each one against the last.
+   A panel that grows -- a title changing from `terminal 3` to `zsh 3`, a new
+   tab appearing -- pushes the ones after it along, and one that shrinks pulls
+   them back. That is why the row is a list here rather than a set of
+   remembered positions: positions go stale the moment a width changes, and
+   an order does not.
+
+   PULLED OUT BY DRAGGING AWAY. A tab dropped off the rail leaves the list
+   and keeps whatever position the drag gave it; dropped back on, it rejoins
+   at the slot it was over. */
+
+const RAIL_TOP = 12;          // where the row sits
+const RAIL_GRAB = 56;         // how near a drag has to come to count as "on"
+const TAB_GAP = 6;
+
+// The tabs on the rail, in the order they sit. Panels not in here are the
+// ones that have been pulled off.
+const rail = [];
+
+function onRail(panel) { return rail.includes(panel); }
+
+// Lay the row out: every tab against the one before it, starting where the
+// config's tab starts. Called whenever the list changes or a width does.
+function packRail() {
+  let x = inset;
+  railWidths = rail.map(p => p.root.querySelector('.bar').offsetWidth).join(',');
+  for (const p of rail) {
+    // Skip the one being dragged: it is under the pointer, not in the row,
+    // and moving it would fight the hand.
+    if (p.root === railDragging) {
+      x += p.root.querySelector('.bar').offsetWidth + TAB_GAP;
+      continue;
+    }
+    p.place(x, RAIL_TOP);
+    x += p.root.querySelector('.bar').offsetWidth + TAB_GAP;
+  }
+}
+
+// WIDTHS CHANGE WITHOUT ANYONE DRAGGING ANYTHING -- a pane retitles itself
+// when its session reports what it is running, and the tab grows or shrinks
+// by however much that word differs.
+//
+// CHECKED ON A TICK rather than watched. A ResizeObserver on each bar is the
+// obvious answer and was the first one; it does not fire for a bar whose own
+// box never changes (the packing moves panels by `left`, which the observer
+// has nothing to say about), and it is another thing that goes quiet in a
+// hidden tab. Comparing the widths we last laid out against the widths that
+// are there costs one offsetWidth per tab and cannot miss.
+let railWidths = '';
+function railChanged() {
+  const now = rail.map(p => p.root.querySelector('.bar').offsetWidth).join(',');
+  if (now === railWidths) return false;
+  railWidths = now;
+  return true;
+}
+setInterval(() => { if (!railDragging && railChanged()) packRail(); }, 250);
+
+function addToRail(panel, at) {
+  if (onRail(panel)) return;
+  rail.splice(at === undefined ? rail.length : at, 0, panel);
+  packRail();
+}
+
+function removeFromRail(panel) {
+  const at = rail.indexOf(panel);
+  if (at < 0) return;
+  rail.splice(at, 1);
+  packRail();
+}
+
+// Which panel is under the hand right now, or null. Held so the packing can
+// leave it alone and the rails know to show themselves.
+let railDragging = null;
+
+// THE RAILS, drawn only while a tab is near them. Two lines rather than a
+// box: the row has a top and a bottom and no ends, since it runs as far as
+// there are tabs.
+const railMarks = document.createElement('div');
+railMarks.id = 'rail-marks';
+railMarks.innerHTML = '<i></i><i></i>';
+document.body.appendChild(railMarks);
+
+function railHeight() {
+  const anyBar = document.querySelector('.panel .bar');
+  return anyBar ? anyBar.offsetHeight : 28;
+}
+
+function showRails(near) {
+  railMarks.style.top = RAIL_TOP + 'px';
+  railMarks.style.height = railHeight() + 'px';
+  railMarks.classList.toggle('near', !!near);
+}
+
+// Is this panel's tab close enough to the rail to land on it?
+function overRail(panel) {
+  const bar = panel.root.querySelector('.bar').getBoundingClientRect();
+  return Math.abs(bar.top - RAIL_TOP) <= RAIL_GRAB;
+}
+
+// WHERE IN THE ROW a dragged tab would land: before the first tab whose
+// middle the pointer is past, which is the same rule the config rows use for
+// dragging a line.
+function slotFor(panel) {
+  const bar = panel.root.querySelector('.bar').getBoundingClientRect();
+  const mid = bar.left + bar.width / 2;
+  const others = rail.filter(p => p !== panel);
+  let at = others.length;
+  for (let i = 0; i < others.length; i++) {
+    const b = others[i].root.querySelector('.bar').getBoundingClientRect();
+    if (mid < b.left + b.width / 2) { at = i; break; }
+  }
+  return at;
+}
+
+function railDrag(panel) {
+  railDragging = panel.root;
+  const near = overRail(panel);
+  showRails(near);
+  if (!near) return;
+  // REORDER AS YOU GO, so the row shows where the tab will land rather than
+  // making you drop it to find out. The dragged tab is skipped by the
+  // packing, so this moves the others around it.
+  const at = slotFor(panel);
+  const was = rail.indexOf(panel);
+  if (was >= 0 && was !== at) {
+    rail.splice(was, 1);
+    rail.splice(at, 0, panel);
+    packRail();
+  } else if (was < 0) {
+    rail.splice(at, 0, panel);
+    packRail();
+  }
+}
+
+function railDrop(panel) {
+  railDragging = null;
+  railMarks.classList.remove('near');
+  if (overRail(panel)) {
+    if (!onRail(panel)) addToRail(panel, slotFor(panel));
+    packRail();
+  } else {
+    // PULLED OUT. It keeps where the drag left it -- that is what pulling a
+    // tab out is for.
+    removeFromRail(panel);
+  }
+}
+
 // EVERY PANEL IS A TAB, the config among them. It is one of the things in
 // the row, it is one of the things alt can open, and leaving it out made it
 // a special case in both places for no reason a person looking at the row
@@ -2763,22 +2921,11 @@ function openTerminal() {
   extraPanes.push(pane);
   selectPane(root);
   // SHUT, like every other panel starts. A new terminal is a tab you can
-  // open, not a window that takes the screen the moment you ask for one --
-  // and a row of tabs is what makes several of them findable at all.
+  // open, not a window that takes the screen the moment you ask for one.
   //
-  // TO THE RIGHT OF THE TAB BEFORE IT, which is what a row of tabs means:
-  // beside the last one's bar, not beside whatever window that pane opens
-  // into. Measured off that bar rather than accumulated, so dragging a tab
-  // somewhere puts the next one beside where it actually IS.
-  const gap = 6;
-  const previous = extraPanes.length > 1
-    ? extraPanes[extraPanes.length - 2].root
-    : document.getElementById('harness');
-  const b = previous.getBoundingClientRect();
-  // The BAR's right edge, not the panel's: an open panel is as wide as its
-  // body, and the next tab belongs beside the tab.
-  const bar = previous.querySelector('.bar').getBoundingClientRect();
-  pane.place(bar.right + gap, b.top);
+  // ON THE RAIL, at the end of the row -- the packing puts it against the
+  // last tab and keeps it there however the ones before it change width.
+  addToRail(pane);
   return pane;
 }
 
@@ -2813,11 +2960,10 @@ document.addEventListener('keydown', (e) => {
 //
 // After a frame, and after the config's own placement, for the same reason
 // that one waits: a collapsed bar has no width to measure until layout runs.
-requestAnimationFrame(() => {
-  const configBar = panel.querySelector('.bar');
-  const gap = 8;
-  harnessPane.place(inset + configBar.offsetWidth + gap, inset);
-});
+// THE ROW, in the order it reads. Everything else about where these sit is
+// the rail's business from here.
+addToRail(configPanel);
+addToRail(harnessPane);
 
 // SOMETHING IS ALWAYS SELECTED, because an unmarked row raises "which one is
 // it then?" -- the question the mark exists to answer. The CONFIG to start
