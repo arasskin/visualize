@@ -1432,7 +1432,15 @@ function altChord(e) {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Alt') {
     // Any other key during the hold makes it a chord, not a tap.
-    if (altDown) { altUsed = true; altChord(e); }
+    if (altDown) {
+      altUsed = true;
+      // A CLAIMED CHORD GOES NO FURTHER. preventDefault stops the browser
+      // acting on the key; it does not stop the key REACHING anyone else,
+      // and the terminal's own handler sends alt+letter to the pty as an
+      // ESC-prefixed byte -- so walking the tabs from a focused terminal
+      // typed an escape code into the shell on every step.
+      if (altChord(e)) e.stopPropagation();
+    }
     return;
   }
   // Auto-repeat while held: the press has already been handled.
