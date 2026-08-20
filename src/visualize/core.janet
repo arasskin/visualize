@@ -143,6 +143,12 @@
   # this file); here they just must not be mistaken for the directory.
   (def args (filter |(not (index-of $ ["--dev" "--no-dev"])) args))
   (def root (os/realpath (or (get args 1) (os/cwd))))
+  # THE PROJECT BEING LOOKED AT, which is not this tool. The last component
+  # of the scanned path is what a person calls the thing on screen, and with
+  # several visualize tabs open it is the only thing telling them apart.
+  (def project
+    (let [parts (filter |(not (empty? $)) (string/split "/" root))]
+      (if (empty? parts) "/" (last parts))))
   # The REPO root, two levels up: this file lives in visualize/, and bin/,
   # web/ and the parsers are siblings of that directory, not of this file.
   (def here (os/realpath (string (dyn :current-file) "/../..")))
@@ -224,6 +230,47 @@
       # proves the pane works before anything is pointed at it.
       [(or (os/getenv "SHELL") "/bin/sh") "-i"]))
 
+  # A DIRECTORY NAME IS NOT MARKUP. Both the title and the favicon carry the
+  # project's name into the page's head, and a directory may be called
+  # anything at all -- `<script>` is a legal name on every filesystem here.
+  # Escaped once, in one place, so the two holes cannot disagree about it.
+  (defn escaped [text]
+    (->> text
+         (string/replace-all "&" "&amp;")
+         (string/replace-all "<" "&lt;")
+         (string/replace-all ">" "&gt;")
+         (string/replace-all "\"" "&quot;")
+         (string/replace-all "'" "&#39;")))
+
+  # THE TAB'S PICTURE: the project's first letter, drawn rather than fetched.
+  #
+  # A data URI because everything else the page loads is served from web/ and
+  # this is not a file -- it depends on which directory the server was pointed
+  # at, so there is nothing to put on disk. SVG because a letter at 16px has
+  # to be drawn at whatever size the browser asks for, and a bitmap picked one.
+  #
+  # The colour is the graph's own ink, so the tab matches the drawing.
+  (def favicon
+    (let [safe (escaped (string/ascii-upper (string/slice project 0 1)))]
+      (string
+        "data:image/svg+xml,"
+        # Percent-encoded by hand: only the characters a data URI actually
+        # cannot carry. Leaving the rest legible keeps this readable in a
+        # view-source, which is where anyone will meet it.
+        (string/replace-all
+          "\"" "%22"
+          (string/replace-all
+            "#" "%23"
+            (string/replace-all
+              "\n" ""
+              (string
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\">"
+                "<rect width=\"32\" height=\"32\" rx=\"7\" fill=\"#8b1a2b\"/>"
+                "<text x=\"16\" y=\"22\" text-anchor=\"middle\""
+                " font-family=\"Comic Sans MS, cursive\" font-size=\"20\""
+                " fill=\"#fdfdfb\">" safe "</text>"
+                "</svg>")))))))
+
   (defn permitted?
     ``May this request drive the terminal?
 
@@ -266,7 +313,8 @@
     # it first quietly produced a page that was the replacement value alone.
     (def template (slurp (string web-dir "/index.html")))
     (var out (->> template
-                  (string/replace "{{TITLE}}" title)
+                  (string/replace "{{TITLE}}" (escaped title))
+                  (string/replace "{{FAVICON}}" favicon)
                   (string/replace "{{CONFIG_NAME}}" config/config-title)
                   # The pane's bar says what it runs, so a glance tells you
                   # which harness this run would start.
@@ -377,7 +425,10 @@
       (do
         (def [lines problems ok result] (draw))
         ["200 OK" "text/html; charset=utf-8"
-         (page "visualize"
+         # The PROJECT names the tab, not the tool. Someone with three of
+         # these open is telling apart the things being looked at, and every
+         # one of them is visualize.
+         (page project
                lines problems
                (if ok result (string "<p>could not render: " result "</p>"))
                # What only the core knows, handed over rather than reached
