@@ -1626,12 +1626,17 @@ function drawArrow(hit) {
   // machinery than three points need.
   const head = document.createElementNS(ARROW_NS, 'polygon');
   const size = 20;
-  const back = aim.angle + Math.PI;
+  // THE FLARE GOES BACK UP THE SHAFT, which is `aim.angle` -- the angle
+  // points from the node OUT to the tail, so the two base corners are along
+  // it and the apex is the tip. Adding pi here (the reading of "back" that
+  // looks right until you check which end the angle starts from) put the
+  // flare on the node side and the point on the tail side, drawing the head
+  // reversed: an arrow aimed away from the thing it had found.
   const spread = 0.38;
   const points = [
     [tip.x, tip.y],
-    [tip.x + Math.cos(back - spread) * size, tip.y + Math.sin(back - spread) * size],
-    [tip.x + Math.cos(back + spread) * size, tip.y + Math.sin(back + spread) * size]
+    [tip.x + Math.cos(aim.angle - spread) * size, tip.y + Math.sin(aim.angle - spread) * size],
+    [tip.x + Math.cos(aim.angle + spread) * size, tip.y + Math.sin(aim.angle + spread) * size]
   ];
   head.setAttribute('points', points.map(p => p.join(',')).join(' '));
   head.setAttribute('class', 'find-head');
