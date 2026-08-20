@@ -324,6 +324,56 @@ button:disabled { opacity: .5; cursor: progress; }
 #rail-marks i:first-child { top: 0; }
 #rail-marks i:last-child { bottom: 0; }
 
+/* THE BIN, bottom-left, and only while something is being dragged. Nothing
+   to throw away the rest of the time, and a bin sitting on the drawing would
+   be furniture rather than a tool.
+
+   It comes up from below rather than fading: a thing that arrives from
+   off-screen reads as having been fetched, where a fade reads as having been
+   there all along and only now noticed. */
+#bin {
+  position: fixed; left: 1.25rem; bottom: 1.25rem; z-index: 7;
+  width: 76px; height: 82px;
+  pointer-events: none;          /* the drag owns the pointer */
+  opacity: 0; transform: translateY(30px);
+  transition: opacity .18s ease-out, transform .18s ease-out;
+}
+#bin.up { opacity: 1; transform: translateY(0); }
+
+#bin svg { width: 100%; height: 100%; overflow: visible; }
+#bin .can { fill: var(--field); stroke: var(--ink); stroke-width: 2; }
+#bin .lid { fill: var(--field); stroke: var(--ink); stroke-width: 2; }
+#bin .lid rect { fill: var(--field); stroke: var(--ink); stroke-width: 2; }
+#bin .ribs line { stroke: var(--ink); stroke-width: 1.5; opacity: .35; }
+
+/* THE LID COMES OFF when a pane is held over it -- hinged at the left
+   corner, so it lifts and tilts the way a lid does rather than sliding
+   away. This is the whole promise of the gesture: what will happen, before
+   it happens. */
+#bin .lid {
+  transform-origin: 8px 11px;
+  transition: transform .16s cubic-bezier(.34,1.4,.64,1);
+}
+#bin.open .lid { transform: translate(-7px, -13px) rotate(-22deg); }
+/* And the can opens its mouth a little, so the hole reads as a hole. */
+#bin.open .can { fill: var(--wash-strong); }
+
+/* SWALLOWED. The lid slams back down past its rest and settles -- the
+   overshoot is what makes it read as a clap rather than a close. */
+#bin.fed .lid { animation: bin-clap .42s ease-out; }
+#bin.fed .can { animation: bin-gulp .42s ease-out; }
+@keyframes bin-clap {
+  0%   { transform: translate(-7px, -13px) rotate(-22deg); }
+  45%  { transform: translate(0, 2px) rotate(3deg); }
+  70%  { transform: translate(0, -1px) rotate(-1deg); }
+  100% { transform: none; }
+}
+@keyframes bin-gulp {
+  0%   { transform: none; }
+  40%  { transform: scaleY(.92) translateY(3px); }
+  100% { transform: none; }
+}
+
 /* THE SELECTED TAB, in the same green as the selected config line -- the two
    mark the same idea, so they are one colour from one token.
 
@@ -344,23 +394,22 @@ button:disabled { opacity: .5; cursor: progress; }
 .bar:active { cursor: grabbing; }
 /* A panel's own status, right of its name: how many config lines failed.
    Quiet enough to ignore. */
-.bar .state { opacity: .55; font-size: 11px; margin-left: auto; }
-
-/* THE CLOSE CROSS, on every terminal and always shown. Quiet enough that the
-   row still reads as names -- a tab says what it is first and what you can
-   do to it second -- but present, so there is nothing to discover by
-   hovering and nothing that appears under a pointer already on its way
-   somewhere. */
-.bar .close {
-  flex: none; margin-left: .1rem;
-  border: 0; background: none; padding: 0 .1rem;
-  font: inherit; line-height: 1; color: var(--ink);
-  cursor: pointer;
-  opacity: .4;
-  transition: opacity .12s ease-out, color .12s ease-out;
+/* THE TITLE SITS IN THE MIDDLE of the tab. The bar is a flex row, so the
+   name takes the free space and centres inside it rather than being pushed
+   about by whatever else the bar carries -- the state note on a terminal,
+   nothing at all on a shut one. */
+.bar .name { flex: 1 1 auto; text-align: center; }
+/* OUT OF THE FLOW, so it cannot push the title off centre. The state note is
+   a word that comes and goes -- `starting...`, `exited`, nothing at all --
+   and a title that shifts when a session changes its mind is a title that
+   never looks still. Absolute, hung off the right edge, where it reads as a
+   note ON the tab rather than as another thing in it. */
+.bar .state {
+  opacity: .55; font-size: 11px;
+  position: absolute; right: .4rem; top: 50%; transform: translateY(-50%);
+  pointer-events: none;
 }
-.bar:hover .close, .close:focus-visible { opacity: .65; }
-.bar .close:hover { opacity: 1; color: var(--bad); background: none; }
+
 
 /* The scrolling part. flex:1 so it takes whatever the resize left it. */
 .panel-body {

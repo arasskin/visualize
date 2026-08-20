@@ -2110,30 +2110,6 @@ function makeTerminalPane(root, prefix) {
   const nameLabel = root.querySelector('.name');
   const screen = root.querySelector('.screen');
 
-  // A CROSS ON EVERY TERMINAL. The first one used to be exempt, on the
-  // grounds that an empty row is a worse place to arrive than a row with one
-  // terminal -- but a tab you cannot close is a tab you have to work around,
-  // and the `+` makes a new one whenever the row is empty. visualize is
-  // still not closable: it is the page, not a thing on it.
-  {
-    const close = document.createElement('button');
-    close.className = 'close';
-    close.type = 'button';
-    close.textContent = '\u2715';
-    close.title = 'close this terminal';
-    close.setAttribute('aria-label', 'close this terminal');
-    // On pointerdown rather than click, and stopped there: the bar's own
-    // pointerdown starts a drag and its click toggles the panel, and a
-    // cross that opened the thing it was closing would be a strange
-    // button.
-    close.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      closeTerminal(termPanel);
-    });
-    close.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
-    root.querySelector('.bar').appendChild(close);
-  }
 
   // Follow the output the way a terminal does -- but only while the view is at
   // the bottom. The flag comes from the user's own scrolling, so scrolling up
@@ -2990,6 +2966,62 @@ function removeFromRail(panel) {
   packRail();
 }
 
+/* -- the bin ---------------------------------------------------------------
+
+   WHERE A PANE GOES TO DIE. It appears in the bottom-left corner only while
+   a tab is being dragged -- there is nothing to throw away the rest of the
+   time, and a bin sitting on the drawing would be furniture. Held over, the
+   lid comes off; let go, it eats what you were holding.
+
+   The old-computer gesture, which is worth the pixels: dropping a thing into
+   a bin says what will happen before it happens, where a button says it
+   afterwards. */
+
+const bin = document.createElement('div');
+bin.id = 'bin';
+bin.innerHTML =
+  '<svg viewBox="0 0 48 52" aria-hidden="true">' +
+  // The lid, hinged so it lifts off rather than fading.
+  '<g class="lid"><rect x="6" y="8" width="36" height="6" rx="2"/>' +
+  '<rect x="19" y="3" width="10" height="5" rx="2"/></g>' +
+  // The can, with three ribs.
+  '<path class="can" d="M9 17 h30 l-3 31 a3 3 0 0 1 -3 3 h-18 a3 3 0 0 1 -3 -3 z"/>' +
+  '<g class="ribs"><line x1="18" y1="24" x2="17" y2="44"/>' +
+  '<line x1="24" y1="24" x2="24" y2="44"/>' +
+  '<line x1="30" y1="24" x2="31" y2="44"/></g>' +
+  '</svg>';
+document.body.appendChild(bin);
+
+// Is the dragged panel's tab over the bin? THE BAR, not the panel: the bar
+// is what the hand is holding, and a panel opened to half the screen would
+// otherwise overlap the bin while being dragged nowhere near it.
+function overBin(panel) {
+  if (!bin.classList.contains('up')) return false;
+  const b = panel.root.querySelector('.bar').getBoundingClientRect();
+  const t = bin.getBoundingClientRect();
+  return b.left < t.right && b.right > t.left && b.top < t.bottom && b.bottom > t.top;
+}
+
+// EATEN. The pane is destroyed the way the cross used to do it -- off the
+// rail, out of the row, its session shut down -- with the lid clapping shut
+// over it.
+function binEat(panel) {
+  // THE LID CLAPS SHUT ON WHAT IT ATE, which needs the bin to still be
+  // there -- the drop takes it down, so this puts it back for as long as
+  // the swallow lasts.
+  bin.classList.add('up', 'fed');
+  setTimeout(() => bin.classList.remove('up', 'fed'), 420);
+  removeFromRail(panel);
+  const at = extraPanes.indexOf(panel);
+  if (at >= 0) extraPanes.splice(at, 1);
+  // SELECTION CANNOT POINT AT SOMETHING IN THE BIN: alt would have nothing
+  // to open and the row would show nothing marked.
+  if (panel.root.classList.contains('picked')) selectPane(configPanel.root);
+  packRail();
+  if (panel.stop) panel.stop();
+  panel.root.remove();
+}
+
 // Which panel is under the hand right now, or null. Held so the packing can
 // leave it alone and the rails know to show themselves.
 let railDragging = null;
@@ -3036,6 +3068,12 @@ function slotFor(panel) {
 
 function railDrag(panel) {
   railDragging = panel.root;
+  // THE BIN COMES UP FOR ANYTHING THAT CAN GO IN IT. visualize cannot: it is
+  // the page rather than a thing on it, and offering to throw the page away
+  // is not an offer worth making. A pane knows it can be destroyed by having
+  // a session to stop.
+  bin.classList.toggle('up', !!panel.stop);
+  bin.classList.toggle('open', overBin(panel));
   const near = overRail(panel);
   showRails(near);
   if (!near) return;
@@ -3057,6 +3095,14 @@ function railDrag(panel) {
 function railDrop(panel) {
   railDragging = null;
   railMarks.classList.remove('near');
+
+  // DROPPED ON THE BIN is the way a pane is destroyed -- see overBin. Asked
+  // BEFORE the bin is put away, since being over it is the thing being
+  // asked about.
+  const eaten = overBin(panel);
+  bin.classList.remove('up', 'open');
+  if (eaten) { binEat(panel); return; }
+
   if (overRail(panel)) {
     if (!onRail(panel)) addToRail(panel, slotFor(panel));
     packRail();
@@ -3110,11 +3156,9 @@ document.addEventListener('pointerdown', (e) => {
 // terminals left would have nothing to copy.
 const paneTemplate = (() => {
   const copy = document.getElementById('harness').cloneNode(true);
-  // WITHOUT WHATEVER THE LIVE ONE HAS GROWN. This is taken after the first
-  // pane was wired, so the copy arrives carrying that pane's close button --
-  // and every clone then got a second one appended, two crosses to a tab.
-  // The template is the markup, not the state.
-  for (const extra of copy.querySelectorAll('.close')) extra.remove();
+  // WITHOUT WHATEVER THE LIVE ONE HAS GROWN: this is taken after the first
+  // pane was wired and has been painting, and a template is the markup
+  // rather than the state.
   copy.querySelector('.screen').textContent = '';
   copy.querySelector('.state').textContent = '';
   copy.classList.remove('picked');
@@ -3155,31 +3199,6 @@ function openTerminal() {
 // away first. Cmd is the modifier to spend on it because the emulator
 // already refuses it outright (see keyToBytes), so nothing is taken from
 // the program that it ever had.
-// CLOSING ONE MEANS CLOSING IT. The pane leaves the row and the page, and
-// the session behind it is shut down -- a terminal whose tab is gone is a
-// pty nobody can reach, and leaving it running would leak a process and its
-// supervisor for every tab anyone ever opened.
-//
-// The panel is asked to stop first and removed after: `stop` is a request
-// over the wire, and a pane whose element has already gone has nothing to
-// report a failure on.
-function closeTerminal(pane) {
-  // The list is only of the ones `+` made; the first terminal is not in it
-  // and is closed just the same. Guarding on membership would have made it
-  // quietly unclosable again.
-  const at = extraPanes.indexOf(pane);
-  if (at >= 0) extraPanes.splice(at, 1);
-  removeFromRail(pane);
-  if (pane.stop) pane.stop();
-  // SELECTION CANNOT POINT AT A PANE THAT IS GONE. Alt would have nothing to
-  // open and the row would show nothing marked; the config is where a
-  // selection goes when the thing it was on leaves.
-  const wasPicked = pane.root.classList.contains('picked');
-  pane.root.remove();
-  if (wasPicked) selectPane(panel);
-  packRail();
-}
-
 document.getElementById('term-new')
   .addEventListener('click', () => { openTerminal(); });
 
