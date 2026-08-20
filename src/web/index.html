@@ -39,6 +39,10 @@
       placeholder="find a node" aria-label="find a node">
     <span id="find-count" aria-live="polite"></span>
   </div>
+  <!-- Completions, BELOW this bar: it sits at the top of the screen, so the
+       list drops away from the field rather than off the edge -- the mirror
+       of the compose bar's, which opens upward from the bottom. -->
+  <ul id="find-list" role="listbox" aria-label="node names"></ul>
 </div>
 
 <!-- The help panel. Empty here: its content is the verb table from

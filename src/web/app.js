@@ -1726,20 +1726,128 @@ function openFind() {
   // Re-run rather than clear: reopening with the last query still in the
   // field should show what it found, not an empty bar you have to retype.
   if (findInput.value.trim()) runFind();
+  renderFindList();
 }
 
 function shutFind() {
   find.classList.add('shut');
   find.classList.remove('empty');
   clearArrow();
+  shutFindList();
   hits = [];
   findInput.blur();
 }
 
-findInput.addEventListener('input', runFind);
+/* -- completing in the find bar -------------------------------------------
+   THE SAME POOL THE COMPOSE BAR OFFERS: every node name, every dotted prefix
+   of one, and every bound alias -- `prefixCandidates` already builds exactly
+   that, so what you can search for and what you can write in the config stay
+   the same list. Ranked by the same rule, too: a match at the start beats one
+   in the middle, and shorter beats longer, since a shorter prefix is the
+   broader thing and usually what was meant.
+
+   The bar's own keys come first, though. Enter already means "next hit" here,
+   so TAB is what accepts a completion -- and because taking one is choosing
+   what to look for, it searches rather than just filling the field. */
+
+const findList = document.getElementById('find-list');
+let findItems = [];
+let findAt = -1;
+
+function renderFindRows() {
+  findList.replaceChildren();
+  if (!findItems.length) {
+    find.classList.remove('listing');
+    findAt = -1;
+    return;
+  }
+  find.classList.add('listing');
+  findItems.forEach((text, i) => {
+    const li = document.createElement('li');
+    li.textContent = text;
+    li.setAttribute('role', 'option');
+    li.setAttribute('aria-selected', String(i === findAt));
+    if (i === findAt) li.className = 'at';
+    li.addEventListener('mousedown', (e) => {
+      e.preventDefault();          // keep the caret in the field
+      takeFind(i);
+    });
+    findList.appendChild(li);
+  });
+  if (findAt >= 0) findList.children[findAt]?.scrollIntoView({ block: 'nearest' });
+}
+
+function renderFindList() {
+  const typed = findInput.value.trim();
+  // NOTHING TYPED OFFERS EVERYTHING, so opening the bar shows what there is
+  // to look for rather than an empty box you have to guess at.
+  findItems = finding() ? rank(prefixCandidates(), typed) : [];
+  findAt = -1;
+  renderFindRows();
+}
+
+// Taking a candidate SEARCHES for it. In the compose bar a completion is
+// text you are still writing; here the text is the whole question, so
+// filling it in and not answering would leave the arrow pointing at whatever
+// the previous query found.
+function takeFind(i) {
+  const text = findItems[i];
+  if (text === undefined) return;
+  findInput.value = text;
+  findAt = i;
+  runFind();
+  renderFindRows();
+}
+
+function moveFindList(step) {
+  if (!findItems.length) return;
+  // Wraps, and from nothing selected down takes the first row and up the
+  // last -- the same arithmetic as the completion list.
+  if (findAt < 0) findAt = step > 0 ? 0 : findItems.length - 1;
+  else findAt = ((findAt + step) % findItems.length + findItems.length) % findItems.length;
+  takeFind(findAt);
+}
+
+function shutFindList() {
+  findItems = [];
+  findAt = -1;
+  findList.replaceChildren();
+  find.classList.remove('listing');
+}
+
+findInput.addEventListener('input', () => {
+  runFind();
+  // Typing rebuilds the list; moving only moves in it -- so the rows cannot
+  // reorder under the cursor mid-walk.
+  renderFindList();
+});
+
+// The pointer only highlights while it is actually in use; see the compose
+// list for why a hidden cursor must stop lighting rows.
+findList.addEventListener('mousemove', () => find.classList.add('mousing'));
+findInput.addEventListener('keydown', () => find.classList.remove('mousing'));
 
 findInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { e.preventDefault(); shutFind(); return; }
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    // THE LIST GOES FIRST. Escape means "put away the thing in my way", and
+    // with a list open that is the list -- closing the whole bar would throw
+    // away the query too, on the one keystroke most likely to be a reflex.
+    if (findItems.length) shutFindList(); else shutFind();
+    return;
+  }
+  // TAB ACCEPTS, because Enter is already spoken for here: it steps through
+  // the hits, which is the bar's real work.
+  if (e.key === 'Tab' && findItems.length) {
+    e.preventDefault();
+    takeFind(findAt < 0 ? 0 : findAt);
+    return;
+  }
+  if (e.ctrlKey && (e.key === 'n' || e.key === 'p') && findItems.length) {
+    e.preventDefault();
+    moveFindList(e.key === 'n' ? 1 : -1);
+    return;
+  }
   if (e.key === 'Enter') {
     e.preventDefault();
     // Shift-Enter goes back, the one convention the native find does have
@@ -1747,8 +1855,17 @@ findInput.addEventListener('keydown', (e) => {
     stepHit(e.shiftKey ? -1 : 1);
     return;
   }
-  if (e.key === 'ArrowDown') { e.preventDefault(); stepHit(1); }
-  if (e.key === 'ArrowUp') { e.preventDefault(); stepHit(-1); }
+  // ARROWS WALK THE LIST WHILE IT IS OPEN, and step the hits once it is not.
+  // The list is the nearer thing when it is up, and stepping hits behind an
+  // open list moves an arrow you cannot see past the rows covering it.
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (findItems.length) moveFindList(1); else stepHit(1);
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (findItems.length) moveFindList(-1); else stepHit(-1);
+  }
 });
 
 // TAKING CMD-F. On the capture phase and before the compose bar's own

@@ -686,3 +686,33 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   stroke: #e5484d;
   stroke-width: 2.5;
 }
+
+/* The find bar's completions. The MIRROR of the compose list: that one opens
+   upward from a bar at the bottom, this one drops from a bar at the top, so
+   in both cases the list grows away from the edge it is against and the field
+   keeps its place. */
+#find-list {
+  margin: 0; padding: 0; list-style: none;
+  max-height: calc(5 * (1.9em + .2rem) + 1px);
+  overflow-y: auto;
+  background: var(--field);
+  /* Flush to the field, sharing the one border where they meet -- the top
+     edge here, since the list hangs below. */
+  border: 1px solid var(--line-strong);
+  border-top: 0;
+  font: inherit;
+}
+#find-list:empty { display: none; }
+
+#find-list li {
+  flex: none;
+  padding: .1rem .7rem;
+  line-height: 1.9em;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+/* Hover only while the mouse is in use; a cursor hidden by typing must stop
+   lighting rows. Same reason as the compose list. */
+#find.mousing #find-list li:hover { background: var(--wash); }
+#find-list li.at { background: var(--wash-strong); }
