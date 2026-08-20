@@ -232,6 +232,19 @@
   # number, so pane 2 always finds pane 2's host across a server restart --
   # which is the property the whole split exists for.
   (def panes @{})
+  # Where each pane's socket is, by id, so the file can be rewritten from
+  # what is open right now rather than from what was opened once.
+  (def pane-sockets @{})
+
+  (defn- remember-panes []
+    # IN THE ORDER THEY WERE OPENED, which is the order the ids sort in for
+    # the numbered ones and puts `harness` first because it is made first.
+    # A stable order means the file does not churn on every pane.
+    (def pairs (seq [id :in (sorted (keys pane-sockets))]
+                 [id (get pane-sockets id)]))
+    (def lines (config/read-config config-path))
+    (config/write-config config-path (config/remember-terminals lines pairs)))
+
   (defn pane-for [id]
     (or (get panes id)
         (let [socket (socket-for root (string "." id ".sock"))
@@ -241,9 +254,47 @@
                         (string repo "/src/visualize/core.janet")
                         "--supervise" socket])]
           (put panes id client)
+          (put pane-sockets id socket)
+          # WRITTEN DOWN AS SOON AS IT EXISTS. A pane recorded only once it
+          # is running is a pane lost by a crash during the start.
+          (remember-panes)
           client)))
-  # The pane Control opens. Numbered like the rest so nothing special-cases
-  # it, and made eagerly because the page's markup names it at load.
+
+  (defn- forget-pane [id]
+    (put panes id nil)
+    (put pane-sockets id nil)
+    (remember-panes))
+  # WHAT THE LAST RUN LEFT BEHIND. Each of these was a pane; its supervisor
+  # may still be alive with a session in it, or it may be a name in a file
+  # and a socket nobody is listening on.
+  #
+  # ASKED, NOT ASSUMED. A unix connect to a socket with no listener is
+  # REFUSED instantly -- there is no timeout to wait out -- so this costs
+  # nothing and answers exactly the question: is anyone there.
+  (defn- answers? [socket]
+    (and (os/stat socket :mode)
+         (if-let [probe (try (net/connect :unix socket) ([_] nil))]
+           (do (try (:close probe) ([_] nil)) true)
+           false)))
+
+  (def recovered @[])
+  (each [id socket] (config/terminals (config/read-config config-path))
+    (if (answers? socket)
+      (do
+        # Rebuilt through `pane-for`, so it is an ordinary pane from here on
+        # -- there is no such thing as a recovered pane after this line.
+        (pane-for id)
+        (array/push recovered id))
+      # A CORPSE. The supervisor is gone and the file is a name for nothing;
+      # the socket file goes with it, since leaving it would make the next
+      # `answers?` do the same work to reach the same conclusion.
+      (try (os/rm socket) ([_] nil))))
+  # Written back either way: the ones that answered are still open, and the
+  # ones that did not are now out of the file.
+  (remember-panes)
+
+  # The pane the page opens by default. Numbered like the rest so nothing
+  # special-cases it, and made eagerly because the page's markup names it.
   (def pane-client (pane-for "harness"))
 
   # WHAT THE TERMINAL RUNS. An environment variable rather than a config verb
@@ -333,7 +384,23 @@
     (def lines (config/read-config config-path))
     (def [state problems] (config/run lines))
     (def [ok result] (graph/render-svg (scanned) state))
-    [lines problems ok result])
+    # THE EDITOR IS SHOWN THE CONFIG, not visualize's notes about itself.
+    # They are not lines anyone wrote and there is nothing to do to one; the
+    # edit endpoint puts them back afterwards, so leaving them out here is
+    # the whole of hiding them.
+    #
+    # The problems are keyed by line NUMBER, so they are renumbered against
+    # the shorter list -- a complaint about line four pointing at line three
+    # is worse than no complaint at all.
+    (var shown 0)
+    (def visible @[])
+    (def moved @{})
+    (eachp [i line] lines
+      (unless (config/note? line)
+        (array/push visible line)
+        (when-let [why (get problems i)] (put moved shown why))
+        (++ shown)))
+    [visible moved ok result])
 
   # THE PAGE, built here rather than in graph. Slurping a template and
   # substituting holes is serving, not drawing -- and it needed `json` to
@@ -361,7 +428,13 @@
                   # own verb table -- so the list cannot describe a verb the
                   # parser does not have, or miss one it does.
                   (string/replace "{{CONFIG_DOCS}}" (json/encode (config/docs)))
-                  (string/replace "{{CONFIG_COLOURS}}" (json/encode (config/colours)))))
+                  (string/replace "{{CONFIG_COLOURS}}" (json/encode (config/colours)))
+                  # THE PANES THAT SURVIVED, so the page can put their tabs
+                  # back. Everything else about a pane the page works out for
+                  # itself; this is the one thing only the server knows,
+                  # because only the server read the file.
+                  (string/replace "{{OPEN_TERMINALS}}"
+                                  (json/encode (filter |(not= $ "harness") recovered)))))
     (eachp [key value] fill
       (set out (string/replace (string "{{" key "}}") value out)))
     # The SVG goes in last, and with a function rather than a literal:
@@ -381,7 +454,15 @@
     (def sent (json/decode body))
     (def action (string (get sent "action" "")))
     (def index (math/floor (or (get sent "index") -1)))
-    (def lines (config/edit (map string (get sent "lines" [])) action index))
+    # THE PAGE NEVER SEES VISUALIZE'S OWN NOTES and so cannot send them back.
+    # It sends the lines it is showing, which is what makes an in-place typo
+    # and the button that acts on it arrive together -- and it would also
+    # make the first edit after a restart write a file with the notes gone.
+    # They are taken from the file as it is on disk and put back after the
+    # edit, so an edit is an edit to the config and nothing else.
+    (def kept (config/terminals (config/read-config config-path)))
+    (def edited (config/edit (map string (get sent "lines" [])) action index))
+    (def lines (config/remember-terminals edited kept))
     # `check` ASKS WITHOUT TELLING. It runs the lines and answers with what
     # was wrong, and writes nothing -- the compose bar uses it to find out
     # whether what you typed parses before that text reaches the file. Every
@@ -560,7 +641,7 @@
             # pane again and a supervisor per closed tab is a process leak.
             "shutdown"
             (do (:shutdown client)
-                (put panes id nil)
+                (forget-pane id)
                 ["200 OK" "application/json" (json/encode {"ok" true})])
 
             # `at` turns this into "type, and tell me what came back" -- one

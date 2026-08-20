@@ -100,5 +100,8 @@ window.CONFIG_COLOURS = {{CONFIG_COLOURS}};
 // The secret the write endpoints require. Here rather than in a cookie so
 // it dies with the tab and is never sent to another origin.
 window.TOKEN = {{TOKEN}};
+// The terminals a previous run left open, which this page puts tabs back
+// for -- see the note on recovery in core.janet.
+window.OPEN_TERMINALS = {{OPEN_TERMINALS}};
 </script>
 <script type="module" src="/app.js"></script>

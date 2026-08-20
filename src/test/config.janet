@@ -380,3 +380,47 @@
          "the first line of an empty file"))
 
 (os/rm scratch)
+
+(t/test "visualize keeps its own notes in the config file"
+  # A LINE THAT BEGINS `@visualize` IS THE PROGRAM'S, not yours: it records
+  # what the last run had open so a crash does not strand a live session
+  # behind a socket nobody remembers.
+  (t/ok (config/note? "@visualize terminal 3 socket /tmp/a.sock"))
+  (t/ok (config/note? "   @visualize terminal 3 socket /tmp/a.sock")
+        "leading space is still a note")
+  (t/ok (not (config/note? "(hide src)")))
+  (t/ok (not (config/note? "# @visualize in a comment is a comment")))
+
+  (def lines ["(lines)" "@visualize terminal 3 socket /tmp/a.sock" "(box src)"])
+  (t/is= [["3" "/tmp/a.sock"]] (config/terminals lines))
+
+  # A NOTE IS NOT A CONFIG LINE, so the parser passes over it in silence --
+  # complaining that one is not a call would be complaining about a line
+  # nobody typed.
+  (def [_ problems] (config/run lines))
+  (t/is= @{} problems "a note draws no complaint"))
+
+(t/test "notes are rewritten whole, never appended to"
+  # They are a record of what is open NOW: a pane that has gone has to leave
+  # the file, so the set is replaced rather than added to.
+  (def lines ["(lines)" "@visualize terminal 3 socket /tmp/old.sock"])
+  (def after (config/remember-terminals lines [["4" "/tmp/new.sock"]]))
+  (t/is= [["4" "/tmp/new.sock"]] (config/terminals after))
+  (t/ok (not (find |(string/find "old.sock" $) after))
+        "the pane that went is gone from the file")
+
+  # THE CONFIG IS UNTOUCHED, in its order -- the blank between it and the
+  # notes is the separator, which belongs to them.
+  (t/is= ["(lines)"]
+         (filter |(and (not (config/note? $)) (not (empty? (string/trim $)))) after))
+
+  # NOTHING OPEN, NOTHING WRITTEN -- and the separator goes with them, or
+  # opening and closing panes would leave a blank line behind every round.
+  (t/is= ["(lines)"] (config/remember-terminals lines []))
+  (t/is= ["(lines)"] (config/remember-terminals after [])
+         "including the blank it added on the way in")
+
+  # Round trip: what is written is what is read back.
+  (def pairs [["harness" "/tmp/h.sock"] ["2" "/tmp/2.sock"]])
+  (t/is= pairs (config/terminals (config/remember-terminals [] pairs))))
+

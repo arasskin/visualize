@@ -446,6 +446,16 @@
 
     (string "not a config form -- try " (string/join verbs ", "))))
 
+# THE MARK ON VISUALIZE'S OWN LINES, defined here because the parser is the
+# first thing that has to recognise one and skip it. What the notes are for,
+# and the rest of the vocabulary, is at the bottom of this file.
+(def marker "@visualize")
+
+(defn note?
+  "Is this line one of visualize's own notes rather than config?"
+  [line]
+  (string/has-prefix? marker (string/trim (or line ""))))
+
 (defn eval-line
   ``Run one line against `state`. Returns nil, or a complaint about the line.
 
@@ -467,6 +477,10 @@
   (cond
     (empty? text) nil
     (string/has-prefix? "#" text) nil
+    # VISUALIZE'S OWN NOTES ARE NOT CONFIG. They are written by the program
+    # for the program -- see `marker` -- and complaining that one is not a
+    # call would be complaining about a line nobody typed.
+    (note? text) nil
     (if-let [forms (peg/match grammar text)]
       (do
         (var wrong nil)
@@ -551,6 +565,76 @@
 # where it ends. Written as-is, the last line has nothing after it and the
 # next edit through the page appends to it -- so the file is normalised on the
 # way to disk exactly as `write-config` does it.
+
+# -- what visualize writes to itself ----------------------------------------
+#
+# A LINE THAT BEGINS `@visualize` IS THE PROGRAM'S OWN NOTE, not yours. It is
+# not a call, the parser above never sees it, the editor does not show it,
+# and the graph does not know it exists. It is here because the config file
+# is the one thing that outlives a crash and belongs to this project: a state
+# directory somewhere else would be a second place to look and a second thing
+# to keep in step with the tree it describes.
+#
+# WHAT IT IS FOR. Each terminal pane runs behind its own supervisor process,
+# reachable only through a socket named after the pane. The page holds those
+# ids in memory, so a server that goes down takes the list with it -- and a
+# supervisor that survives is then a live session nothing can reach, costing
+# a process and a pty with no way back to it. Written down, the next server
+# reads them, greets the ones that answer, and clears out the ones that do
+# not.
+#
+# THE SHAPE IS THE VERBS' SHAPE, a name and its arguments, so a person who
+# opens the file recognises it even though nothing asked them to read it:
+#
+#     @visualize terminal 3 socket /tmp/visualize-2f330cb2.3.sock
+#
+(defn notes
+  "Every note in `lines`, each as its words after the marker."
+  [lines]
+  (seq [line :in lines :when (note? line)]
+    (filter |(not (empty? $))
+            (string/split " " (string/trim (string/slice (string/trim line)
+                                                         (length marker)))))))
+
+(defn terminals
+  ``The panes the last run left behind, as [id socket] pairs.
+
+  Order is the file's order, which is the order they were opened.``
+  [lines]
+  (seq [words :in (notes lines)
+        :when (and (= "terminal" (get words 0))
+                   (= "socket" (get words 2))
+                   (get words 1) (get words 3))]
+    [(get words 1) (get words 3)]))
+
+(defn remember-terminals
+  ``The lines, with their terminal notes replaced by `pairs`.
+
+  REWRITTEN WHOLE rather than appended to, because the notes are a record of
+  what is open right now: a pane that has gone has to leave the file, and
+  editing in place would mean finding it first. Everything that is not a
+  note is untouched and keeps its order -- the notes go at the end, out of
+  the way of a file someone is reading.``
+  [lines pairs]
+  (def kept (array ;(filter |(not (note? $)) lines)))
+  # THE SEPARATOR GOES WITH THEM. A blank line is put before the notes so
+  # they read as a footnote rather than as the next thing you wrote -- and
+  # it has to come off again when they go, or opening and closing panes
+  # leaves a blank line behind on every round and the file grows a tail of
+  # them.
+  #
+  # Only a trailing blank, and only one: a blank line someone typed in the
+  # middle of their config is theirs.
+  (while (and (> (length kept) 1) (empty? (string/trim (last kept))))
+    (array/pop kept))
+  (def written (seq [[id socket] :in pairs]
+                 (string marker " terminal " id " socket " socket)))
+  (if (empty? written)
+    kept
+    (array ;kept ;(if (or (empty? kept) (empty? (string/trim (last kept))))
+                    []
+                    [""])
+           ;written)))
 
 (defn read-config
   "The config file as a list of lines, creating it if it is not there."

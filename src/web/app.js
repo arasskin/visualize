@@ -3012,7 +3012,15 @@ function makeTerminalPane(root, prefix) {
       // A session that is already running is one to leave alone -- this is
       // the reload case, and shooting it is exactly what the open path
       // learned not to do.
-      if (now.running) { generation = now.generation; return; }
+      // A session that is already running is one to leave alone, but its tab
+      // still has to say what it is: a recovered pane arrives called
+      // `terminal 3` and the session behind it has been running zsh for an
+      // hour.
+      if (now.running) {
+        generation = now.generation;
+        setProgram(now.program);
+        return;
+      }
       if (now.reachable === false && !now.absent) return;
       const out = await post('start', { rows: 24, cols: 80 });
       generation = out.generation;
@@ -3430,8 +3438,21 @@ const paneTemplate = (() => {
   return copy;
 })();
 
-function openTerminal() {
-  const id = String(++paneCount);
+// A PANE FOR AN ID THAT ALREADY HAS A SESSION. Everything openTerminal does
+// except choosing the number and booting: the session is already running, so
+// starting one would shoot it.
+function reopenTerminal(id) {
+  const pane = buildTerminal(id);
+  addToRail(pane);
+  // Not to start one -- there is one -- but to attach to it and read off
+  // what it is running, which is what the tab says.
+  pane.boot();
+  return pane;
+}
+
+// THE PANEL AND ITS DRIVER, for an id. What happens to it afterwards is the
+// caller's: a new pane starts a session, a recovered one already has one.
+function buildTerminal(id) {
   const root = paneTemplate.cloneNode(true);
   root.id = 'pane-' + id;
   root.classList.add('shut');
@@ -3445,7 +3466,13 @@ function openTerminal() {
 
   const pane = makeTerminalPane(root, id);
   extraPanes.push(pane);
-  selectPane(root);
+  return pane;
+}
+
+function openTerminal() {
+  const id = String(++paneCount);
+  const pane = buildTerminal(id);
+  selectPane(pane.root);
   // SHUT, like every other panel starts. A new terminal is a tab you can
   // open, not a window that takes the screen the moment you ask for one.
   //
@@ -3493,6 +3520,21 @@ document.addEventListener('keydown', (e) => {
 addToRail(configPanel);
 addToRail(harnessPane);
 harnessPane.boot();
+
+// TABS FOR THE SESSIONS THAT SURVIVED. A pane's id is the whole address --
+// the route the page posts to and the socket the server keys a host by -- so
+// putting the tab back is enough to be talking to the same terminal again.
+// The server has already checked that each one answers; see the recovery in
+// core.janet.
+//
+// Shut, like any other tab: a page reloading is not a request to open four
+// windows. The numbering carries on past the highest one restored, so a new
+// pane cannot collide with a recovered one.
+for (const id of (window.OPEN_TERMINALS || [])) {
+  const n = Number(id);
+  if (Number.isFinite(n) && n > paneCount) paneCount = n;
+  reopenTerminal(String(id));
+}
 
 // SOMETHING IS ALWAYS SELECTED, because an unmarked row raises "which one is
 // it then?" -- the question the mark exists to answer. The CONFIG to start
