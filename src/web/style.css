@@ -563,11 +563,7 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    under your hands. */
 #compose-list {
   position: absolute; bottom: 100%; left: 0; right: 0;
-  /* FLUSH to the field, and its border shared with the box's rather than
-     doubled: the list is the field's own overflow, not a separate panel
-     floating near it. */
   margin: 0; padding: 0; list-style: none;
-  border-bottom: 0;
   /* BEST MATCH AT THE BOTTOM, nearest the text it is completing. The rows
      are written in rank order and the column is reversed, so the first
      candidate sits against the field and the list grows upward away from
@@ -581,11 +577,19 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
      the list becoming the page. */
   /* Five WHOLE rows: a row is its line-height plus its padding, and the
      border sits outside both -- leaving either out clips the fifth row
-     rather than showing it. */
-  max-height: calc(5 * (1.9em + .2rem) + 2px);
+     rather than showing it. ONE border, not two: the bottom edge is the
+     field's, so budgeting for both leaves a sliver of a sixth row showing
+     under the cap. */
+  max-height: calc(5 * (1.9em + .2rem) + 1px);
   overflow-y: auto;
   background: var(--field);
+  /* FLUSH to the field, and ONE LINE where they meet rather than two: the
+     list's bottom edge and the box's top edge are the same 1px, so the
+     seam does not read thicker than the border around either of them. The
+     zero comes AFTER the shorthand -- written before it, the shorthand
+     puts the bottom border back and the pair stack into a 2px line. */
   border: 1px solid var(--line-strong);
+  border-bottom: 0;
   font: inherit;
 }
 #compose-list:empty { display: none; }
