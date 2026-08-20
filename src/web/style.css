@@ -449,6 +449,30 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 }
 #help-open:hover, #help-open:focus-visible { background: none; opacity: 1; }
 
+/* NEW TERMINAL, left of the help mark. Every rule above is inherited by
+   sharing the selector rather than restating it -- the two are the same
+   piece of furniture with a different glyph, and a second copy of the
+   inset arithmetic is a second thing to keep in step.
+   
+   The offset is the help button's own width plus a gap, so the two never
+   overlap however wide the glyph is. */
+#term-new {
+  --inset: 12px;
+  --pad-y: .35rem;
+  --pad-x: .5rem;
+  position: fixed; z-index: 6;
+  top: calc(var(--inset) - var(--pad-y));
+  right: calc(var(--inset) - var(--pad-x) + 1.6rem);
+  border: 0; background: none;
+  padding: var(--pad-y) var(--pad-x);
+  /* A shade lighter than the question mark's 700: a plus is all strokes and
+     reads heavier than a glyph with a bowl at the same weight. */
+  font: 500 21px/1 var(--font-config);
+  color: var(--ink); opacity: .5;
+  cursor: pointer;
+}
+#term-new:hover, #term-new:focus-visible { background: none; opacity: 1; }
+
 /* The dim, and the page itself. There is no card: the verbs sit directly on
    the darkened graph, so opening the help does not put a document on top of
    your work -- it just turns the screen down and writes on it.
