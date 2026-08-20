@@ -1462,6 +1462,67 @@ window.addEventListener('blur', () => {
 });
 
 
+// -- control, for the terminal -----------------------------------------------
+//
+// WHAT ALT IS TO THE CONFIG, CONTROL IS TO THE TERMINAL: tap to toggle, hold
+// to peek. The same two gestures on the same two rules -- a hold puts away
+// only what it itself put up, and a tap over an open panel closes it.
+//
+// A MODIFIER, WHICH IS WHY THIS IS SHORT. Control means nothing pressed on
+// its own, so claiming a lone press costs nobody a key they were using; the
+// moment another key joins it the press is a chord -- ctrl-c, ctrl-n in the
+// completion list, ctrl-anything the shell wants -- and this gets out of the
+// way, exactly as alt does for the config.
+let ctrlDown = false;
+let ctrlOpened = false;
+let ctrlUsed = false;
+let ctrlAt = 0;
+const CTRL_HOLD_MS = ALT_HOLD_MS;
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Control') {
+    // Any other key during the press makes it a chord, and a chord belongs
+    // to whatever it was aimed at -- not to us.
+    if (ctrlDown) ctrlUsed = true;
+    return;
+  }
+  // Auto-repeat while held: the press has already been handled.
+  if (ctrlDown) return;
+  ctrlDown = true;
+  ctrlUsed = false;
+  ctrlAt = performance.now();
+  ctrlOpened = harnessPane.shut;
+  // Opening on the way DOWN, so a hold shows the terminal for as long as it
+  // is held. A tap over an open one closes it instead -- see the keyup,
+  // which is where a tap is finally told from a hold.
+  if (ctrlOpened) harnessPane.open();
+}, true);
+
+document.addEventListener('keyup', (e) => {
+  if (e.key !== 'Control' || !ctrlDown) return;
+  ctrlDown = false;
+  // A chord counts as a hold however brief it was: ctrl-c was never a
+  // request to leave the terminal up.
+  const held = ctrlUsed || performance.now() - ctrlAt >= CTRL_HOLD_MS;
+  if (held) {
+    // A HOLD IS A PEEK: it puts away what it put up, and leaves alone what
+    // was already there.
+    if (ctrlOpened) harnessPane.toggle();
+    return;
+  }
+  // A TAP IS A TOGGLE. Pressing down already opened a shut panel, so that
+  // half is done; tapping over one that was open is what closes it.
+  if (!ctrlOpened) harnessPane.toggle();
+});
+
+// A peek that loses the window never gets its keyup, and would otherwise
+// leave the terminal up and `ctrlDown` stuck true.
+window.addEventListener('blur', () => {
+  if (ctrlDown && ctrlOpened) harnessPane.toggle();
+  ctrlDown = false;
+});
+
+
 /* -- find ------------------------------------------------------------------
    THE BROWSER'S OWN FIND CANNOT DO THIS. Cmd-F matches text in the document,
    and a node's name in a graphviz SVG is scattered across sibling <text>
