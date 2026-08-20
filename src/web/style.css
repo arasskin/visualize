@@ -305,6 +305,22 @@ button:disabled { opacity: .5; cursor: progress; }
    that is -- it reorders -- so the class is set in app.js. */
 .panel.tab-joined > .bar { margin-left: -1px; }
 
+/* THE CORNER. Firefox rounds the window's own corners, so a square tab
+   pressed into one has its top-left poking past the curve -- a small wedge
+   of tab where the window has already stopped. Rounding that one corner to
+   match tucks it back inside.
+   
+   ONLY WHILE IT IS IN THE CORNER. The class is set by the packing, which
+   knows both which tab is leftmost and whether the row is scrolled home --
+   drag another tab into first place and the rounding goes with it; scroll
+   the row along and nothing is rounded, because whatever is under the corner
+   is passing through rather than sitting in it.
+   
+   8px is Firefox's radius on macOS. Being a pixel or two out shows as a
+   hairline of background inside the curve, which is what a square corner
+   there looks like anyway -- so erring large is the safer way to be wrong. */
+.panel.tab-corner > .bar { border-top-left-radius: 8px; }
+
 /* THE RAILS. Two lines marking where the tab row sits, drawn ONLY while a
    tab is being dragged near them -- the bar has no body and nothing to see,
    and a strip of furniture across the top of the drawing would cost the page

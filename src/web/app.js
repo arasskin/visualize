@@ -3096,7 +3096,10 @@ let railScroll = 0;
 // whether scrolling means anything.
 let railEnd = 0;
 
-const RAIL_TOP = 12;          // where the row sits
+// AGAINST THE TOP OF THE WINDOW. The row is furniture fixed to the edge of
+// the page rather than something floating on the drawing, and an inset here
+// left a band of graph above it that read as a gap it had fallen short of.
+const RAIL_TOP = 0;
 const RAIL_GRAB = 56;         // how near a drag has to come to count as "on"
 // TABS TOUCH. No gap between them and none before the first: a row of tabs
 // is one strip of them, and a tab's own border is the line between it and
@@ -3154,7 +3157,14 @@ function packRail() {
   // WHICH TABS HAVE A NEIGHBOUR to their left, and so share a border with
   // it. Set here because this is what knows the order, and the order
   // changes whenever a tab is dragged.
-  rail.forEach((p, i) => p.root.classList.toggle('tab-joined', i > 0));
+  rail.forEach((p, i) => {
+    p.root.classList.toggle('tab-joined', i > 0);
+    // THE TAB IN THE CORNER, which is the leftmost one and only while the
+    // row is scrolled home: scrolled along, the first tab is off the left
+    // edge and whatever is under the corner is passing through rather than
+    // sitting in it. See the rounding in style.css.
+    p.root.classList.toggle('tab-corner', i === 0 && railScroll === 0);
+  });
   for (const p of rail) {
     // Skip the one being dragged: it is under the pointer, not in the row,
     // and moving it would fight the hand.
