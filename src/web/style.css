@@ -662,12 +662,16 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 .find-shaft {
   stroke: #e5484d;
   stroke-width: 6;
-  stroke-linecap: round;
-  /* THE BROWSER KEEPS THE WIDTH. The arrow sits under a counter-scale so it
-     holds its size through a zoom, and that would thin the stroke by the same
-     factor -- this exempts it, which is the whole reason the width is not
-     arithmetic in app.js any more. */
-  vector-effect: non-scaling-stroke;
+  /* SQUARE ENDS. A butt cap stops exactly on the coordinate it is given,
+     which is what the geometry in app.js is written against -- the shaft is
+     cut to meet the head's base, and a cap that runs past that pushes stroke
+     up inside the triangle. */
+  stroke-linecap: butt;
+  /* NO `vector-effect` HERE. It exempts a stroke from the transform, and the
+     arrow's whole size comes from a counter-scale -- so the filled head
+     shrank with the zoom while the exempt shaft did not, and the two drifted
+     apart in opposite directions. Scaled like everything else, they hold
+     their proportions and the counter-scale keeps them constant on screen. */
 }
 .find-head { fill: #e5484d; }
 

@@ -618,6 +618,7 @@ async function send(action, index, keepView) {
         // The arrow was drawn into the svg that just went. Re-find against
         // the new one, so a hit survives a redraw rather than leaving the
         // bar claiming a match that is no longer marked.
+        unitCache = 0;
         redrawFind();
         // A different set of files is a different shape, so start it framed
         // rather than under the previous view's pan -- EXCEPT when the
@@ -1653,8 +1654,8 @@ function drawArrow(hit) {
   shaft.setAttribute('class', 'find-shaft');
   shaft.setAttribute('x1', L);
   shaft.setAttribute('y1', 0);
-  // Stops at the head's base, not the tip: run to the point and the round
-  // cap carries the stroke out through it.
+  // Stops exactly at the head's base. With a butt cap there is nothing to
+  // subtract for: the stroke ends on the coordinate, so the two meet flush.
   shaft.setAttribute('x2', meet);
   shaft.setAttribute('y2', 0);
 
@@ -1685,9 +1686,30 @@ function drawArrow(hit) {
 function placeArrow() {
   const g = pane.querySelector('#find-arrow');
   if (!g) return;
-  const k = 1 / (scale || 1);
+  const k = 1 / ((scale || 1) * unitPx());
   g.setAttribute('transform',
     `translate(${g.dataset.x} ${g.dataset.y}) rotate(${g.dataset.deg}) scale(${k})`);
+}
+
+// HOW BIG ONE USER UNIT IS ON SCREEN, over and above our own zoom. Graphviz
+// declares the svg in POINTS -- width="1057pt" over a 1057-unit viewBox --
+// so the browser adds a 96/72 conversion that `scale` knows nothing about.
+// Counter-scaling by 1/scale alone left the arrow 4/3 too big.
+//
+// Measured once per drawing rather than per frame: it is a property of the
+// svg, and reading a CTM forces layout. Cleared whenever the svg is replaced.
+let unitCache = 0;
+function unitPx() {
+  if (unitCache) return unitCache;
+  const svg = pane.querySelector('svg');
+  if (!svg) return 1;
+  const w = parseFloat(svg.getAttribute('width'));
+  const box = (svg.getAttribute('viewBox') || '').split(/[\s,]+/);
+  const vw = parseFloat(box[2]);
+  // pt -> px when the width carries units, 1 when it is already px.
+  const factor = /pt\s*$/.test(svg.getAttribute('width') || '') ? 96 / 72 : 1;
+  unitCache = (w && vw) ? (w / vw) * factor : factor;
+  return unitCache;
 }
 
 // BRING IT INTO VIEW, but only when it is not already there: a hit you can
