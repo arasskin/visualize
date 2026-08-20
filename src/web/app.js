@@ -1313,9 +1313,21 @@ async function commitCompose() {
   if (term) {
     const typed = composeInput.value;
     if (!typed) { shutCompose(); return; }
-    // Newline-terminated, so it runs rather than sitting on the prompt --
-    // pressing enter here is pressing enter there.
-    if (term.type) term.type(typed.endsWith('\n') ? typed : typed + '\n');
+    // CARRIAGE RETURN, WHICH IS WHAT THE ENTER KEY IS. A shell in cooked
+    // mode cannot tell \r from \n -- the line discipline translates one to
+    // the other on input -- so sending \n worked and looked correct. A
+    // full-screen program reading keys in RAW MODE gets no such translation
+    // and the two are different keys: \r is Enter, \n is ctrl-J, which a
+    // readline-style box takes as "put a line break in what I am writing".
+    // That is why typing into Claude Code here grew the message instead of
+    // sending it.
+    //
+    // Interior newlines get the same treatment, since a multi-line paste is
+    // several Enters as far as the program is concerned.
+    if (term.type) {
+      const keys = typed.replace(/\r\n|\n/g, '\r');
+      term.type(keys.endsWith('\r') ? keys : keys + '\r');
+    }
     shutCompose();
     return;
   }
