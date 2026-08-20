@@ -36,6 +36,14 @@
   --bad-line: #b3403a55;
   --bad-wash: #b3403a14;
 
+  /* WHAT IS SELECTED. One colour for both of them, because they are one
+     idea: the tab the keyboard is aimed at, and the config line it is aimed
+     at, are answers to the same question and should not be two greens.
+     Distinct from --bad and from --lit, so nothing on this page reads as an
+     error or a hover by accident. */
+  --pick: #2f7d4f;
+  --pick-wash: #2f7d4f1c;
+
   /* The colour a hovered dependency lights up in. */
   --lit: #c04040;
 
@@ -93,6 +101,10 @@
     --bad: #ff8a7a;
     --bad-line: #ff8a7a55;
     --bad-wash: #ff8a7a14;
+
+    /* Lifted to read against the dark ground, like every other colour here. */
+    --pick: #6bbf8a;
+    --pick-wash: #6bbf8a24;
 
     /* Lightened to read against the dark ground -- the mirror image of the
        light palette's problem: stock black and dim colours vanish here. */
@@ -348,9 +360,17 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 .row.picked { position: relative; }
 .row.picked::before {
   content: ''; position: absolute; left: -.45rem; top: 0; bottom: 0;
-  width: 2px; background: var(--ink); opacity: .55;
+  /* GREEN, and the same green the selected tab wears -- the two mark the
+     same idea and used to be told apart only by which panel you were
+     looking at. Fully opaque now: at .55 the bar read as a grey with a
+     tint rather than as a colour meaning something. */
+  width: 2px; background: var(--pick);
 }
-.row.picked input { background: var(--wash-strong); }
+.row.picked input {
+  background: var(--pick-wash);
+  outline: 1px solid var(--pick);
+  outline-offset: -1px;
+}
 /* A commented line is still there, just not doing anything -- so the whole
    row recedes together rather than the text fading while its buttons stay
    bright. The hash itself keeps a little more weight than the rest, since it
@@ -845,6 +865,23 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    base rule puts the full border back -- a tab with nothing under it needs
    its own bottom edge. */
 .term .bar { border-bottom-color: var(--term); }
+
+/* THE SELECTED TAB, in the same green as the selected config line -- the two
+   mark the same idea, so they are the same colour.
+   
+   ON THE BAR, because the bar IS the tab: a shut panel is nothing else, and
+   an outline round the whole panel would jump from a tab-sized mark to a
+   window-sized one on opening.
+   
+   `border-color` rather than an `outline`, so the green replaces the edge
+   the tab already has instead of drawing a second line outside it -- which
+   at this size reads as a thicker border, not a coloured one. The bottom
+   edge is left to the rule above: an OPEN tab merges into its window, and a
+   green line across that seam would put back the very rule that one
+   removes. */
+.term.picked > .bar { border-color: var(--pick); }
+.term.picked.shut > .bar { border-bottom-color: var(--pick); }
+.term.picked > .panel-body { border-color: var(--pick); }
 .term .panel-body { padding: .35rem .5rem; }
 
 .screen {

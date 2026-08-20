@@ -2748,6 +2748,28 @@ const harnessPane = makeTerminalPane(document.getElementById('harness'), 'harnes
 let paneCount = 1;
 const extraPanes = [];
 
+// THE SELECTED TAB: the last one you chose, marked so the row says which
+// terminal you are working in. Clicking a tab selects it, and so does making
+// one -- a terminal you just asked for is the one you meant.
+//
+// A CLASS ON THE PANEL rather than a variable the stylesheet cannot see, and
+// exactly one at a time: the mark answers "which one", and two of them
+// answers nothing.
+function selectPane(root) {
+  for (const p of document.querySelectorAll('.panel.term.picked')) {
+    p.classList.remove('picked');
+  }
+  if (root) root.classList.add('picked');
+}
+
+// Clicking anywhere in a terminal -- its tab, its screen -- is choosing it.
+// On the panel rather than on the bar, so clicking into the screen to type
+// counts as picking the thing you are typing in.
+document.addEventListener('pointerdown', (e) => {
+  const term = e.target.closest && e.target.closest('.panel.term');
+  if (term) selectPane(term);
+}, true);
+
 function openTerminal() {
   const id = String(++paneCount);
   const root = document.getElementById('harness').cloneNode(true);
@@ -2766,6 +2788,7 @@ function openTerminal() {
 
   const pane = makeTerminalPane(root, id);
   extraPanes.push(pane);
+  selectPane(root);
   // SHUT, like every other panel starts. A new terminal is a tab you can
   // open, not a window that takes the screen the moment you ask for one --
   // and a row of tabs is what makes several of them findable at all.
@@ -2821,4 +2844,7 @@ requestAnimationFrame(() => {
   const configBar = panel.querySelector('.bar');
   const gap = 8;
   harnessPane.place(inset + configBar.offsetWidth + gap, inset);
+  // Something is always selected: an unmarked row raises "which one is it
+  // then?", which is the question the mark exists to answer.
+  selectPane(document.getElementById('harness'));
 });
