@@ -981,6 +981,13 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 }
 /* The terminal's ground, on the parts that ARE the terminal. */
 .term > .bar, .term > .panel-body { background: var(--term); }
+/* THE TAB IS A TAB, whatever is under it. `--gutter: 0` above is for the
+   BODY -- a screen of characters should meet its edges rather than sit
+   inset -- and it took the bar's padding with it, so a terminal's title
+   pressed against both sides while visualize's had room. The body sets its
+   own padding just below; this gives the bar back the one every other tab
+   has. */
+.term > .bar { padding-left: .5rem; padding-right: .5rem; }
 /* NO LINE WHERE THE TAB MEETS ITS WINDOW, the same way the base rule does
    it: the bar's bottom edge painted in the body's own colour, so the tab
    merges into the folder rather than sitting on it. This wanted
