@@ -315,9 +315,41 @@ button:disabled { opacity: .5; cursor: progress; }
    edge in the first place; what was missing was that the bar has to be
    OPAQUE there and drawn after, which it is: a bar carries a z-index within
    its panel and its background is the same ground as the body's. */
-.panel > .bar { border-bottom: 0; }
-.panel:not(.shut) > .bar { margin-bottom: -1px; }
-.panel.shut > .bar { border-bottom: 1px solid var(--line-strong); margin-bottom: 0; }
+/* -- TWO SHAPES ------------------------------------------------------------
+
+   A SHUT TAB AND AN OPEN ONE ARE DIFFERENT FIGURES, and every attempt to
+   draw them as one thing with an adjustment went wrong somewhere else: the
+   seam under the tab, the window's top past the tab, the two pixels an open
+   window rose alongside its neighbour. Each fix moved a pixel from one place
+   to another.
+
+   SHUT is a rectangle. The bar draws all four sides and there is nothing
+   else to it.
+
+   OPEN is a tab with a window hanging off it, drawn as two boxes that stack
+   without either moving into the other:
+
+     - the bar draws its top, left and right, and NO bottom -- but keeps the
+       bottom's WIDTH, painted in the ground below, so an open tab is exactly
+       as tall as a shut one and the row stays level;
+     - the body draws its left, right and bottom, and a top that is only
+       visible where the bar is not standing on it.
+
+   Nothing is pulled anywhere. The window begins where the tab row ends,
+   which is what makes it meet the tab beside it at a corner and nowhere
+   else. */
+.panel > .bar { border-bottom: 1px solid var(--line-strong); }
+/* THE OPEN TAB'S FOOT IS THE WINDOW'S TOP EDGE. Both boxes want to draw a
+   line in the same place: the bar's bottom border and the body's top border
+   are one pixel of the same figure. So only one of them draws it -- the
+   BODY, along its whole width -- and the bar paints its own in the ground it
+   stands on. That keeps the bar exactly as tall as a shut one, which is what
+   holds the row level, and leaves no pixel of overlap to pull anywhere.
+   
+   What is left is one line under the tab that should not be there, and it is
+   covered by the bar's background: opaque, and painted after the body since
+   the bar carries a z-index within the panel. */
+.panel:not(.shut) > .bar { border-bottom-color: transparent; }
 
 .bar {
   display: flex; align-items: center; gap: .3rem; flex: none;
@@ -1152,8 +1184,10 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    own padding just below; this gives the bar back the one every other tab
    has. */
 .term > .bar { padding-left: .5rem; padding-right: .5rem; }
-/* No seam rule here either: an open tab draws no bottom edge at all, so
-   there is nothing to paint out. See "one shape, one outline". */
+/* The open bar's bottom border is painted in the ground it stands on, and a
+   terminal's ground is not the canvas -- see "one shape, one outline" for
+   why it is painted rather than removed. */
+.term:not(.shut) > .bar { border-bottom-color: var(--term); }
 
 /* THE SELECTED TAB, in the same green as the selected config line -- the two
    mark the same idea, so they are the same colour.
