@@ -1,6 +1,6 @@
 # Walking the tree and reading every file, on all the cores there are.
 #
-# THE LANGUAGES ARE NAMED HERE, and nowhere above. This file imports the six
+# THE LANGUAGES ARE NAMED HERE, and nowhere above. This file imports the
 # specs, finds the files they claim, hands each one to a worker thread and
 # turns the answers into a graph -- so a caller asks for a graph and gets one
 # without ever holding a parser. src/visualize/graph.janet cannot name a
@@ -19,6 +19,7 @@
 # string work on one core and is not worth splitting.
 
 (import ./parser)
+(import ./parsers/arduino :as arduino)
 (import ./parsers/visualize-bash :as bash)
 (import ./parsers/css :as css)
 (import ./parsers/go :as go)
@@ -38,8 +39,8 @@
   that ship in this repo and change when someone edits this line anyway.
   Adding a language is now an import and an entry here, which is the same
   amount of editing the loader was avoiding, minus the machinery.``
-  [bash/spec css/spec go/spec html/spec janet-lang/spec javascript/spec
-   python/spec swift/spec])
+  [arduino/spec bash/spec css/spec go/spec html/spec janet-lang/spec
+   javascript/spec python/spec swift/spec])
 
 (defn languages
   "Their names, for the startup banner."

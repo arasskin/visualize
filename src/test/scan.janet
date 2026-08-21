@@ -9,6 +9,7 @@
 (import ../visualize/parsers/swift)
 (import ../visualize/parsers/python)
 (import ../visualize/parsers/go)
+(import ../visualize/parsers/arduino)
 (import ../visualize/parsers/html :as html)
 (import ../visualize/parsers/css :as css)
 (import ../visualize/parsers/javascript :as js)
@@ -97,6 +98,60 @@ import (
 // import "commented-out"
 `` "a.go"))
   (t/is= ["fmt" "github.com/lib/pq" "math" "os"] (sorted (got :imports)))
+
+(t/test "arduino reads every include and no commented or quoted one"
+  (def got (parser/run arduino/spec ``
+#include <Servo.h>
+#  include "pins.h"
+// #include <Commented.h>
+/* #include <Blocked.h> */
+const char *note = "#include <InAString.h>";
+`` "sketch.ino"))
+  (t/is= ["Servo.h" "pins.h"] (sorted (got :imports))))
+
+(t/test "arduino declares the names another tab can call"
+  # A sketch's tabs are concatenated before compiling, so a second tab's
+  # function is callable from the first with no include anywhere -- these
+  # names are the only thing those edges can be drawn from.
+  (def got (parser/run arduino/spec ``
+struct Reading { int raw; };
+class Motor { public: void spin(); };
+enum Mode { IDLE, RUN };
+typedef struct Packet { int id; } Packet;
+namespace nav { }
+int readSensor() { return analogRead(A0); }
+static void calibrate() { }
+unsigned long lastAt() { return millis(); }
+unsigned int count() { }
+String label() { return "x"; }
+`` "tab.ino"))
+  (t/is= ["Mode" "Motor" "Packet" "Reading" "calibrate" "count" "label"
+          "lastAt" "nav" "readSensor"]
+         (sorted (got :declares))))
+
+(t/test "arduino declares neither setup, loop, nor a control-flow keyword"
+  # setup and loop are called by the runtime rather than by another tab, so
+  # owning them would make every tab depend on whichever one defined them.
+  # The rest are the false declarations a looser pattern invents: `if (x)`
+  # reads exactly like a call, and `for (int i = 0; ...)` like a definition.
+  (def got (parser/run arduino/spec ``
+void setup() { }
+void loop() { }
+if (ready) { }
+while (running) { }
+for (int i = 0; i < n; i++) { }
+digitalWrite(LED, HIGH);
+`` "sketch.ino"))
+  (t/is= [] (sorted (got :declares))))
+
+(t/test "arduino claims sketches and leaves C and C++ alone"
+  # .h and .cpp belong to every project in the world, not to Arduino --
+  # claiming them would scan this repo's own janet.c as a sketch.
+  (t/ok (parser/claims? arduino/spec "blink/blink.ino"))
+  (t/ok (parser/claims? arduino/spec "old/sketch.pde"))
+  (t/ok (not (parser/claims? arduino/spec "external-src/janet/janet.c")))
+  (t/ok (not (parser/claims? arduino/spec "lib/thing.h")))
+  (t/ok (not (parser/claims? arduino/spec "lib/thing.cpp"))))
   (t/ok (not (index-of "commented-out" (got :imports)))
         "a commented import is still not an import"))
 
