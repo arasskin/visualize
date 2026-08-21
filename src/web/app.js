@@ -3132,11 +3132,16 @@ function onRail(panel) { return rail.includes(panel); }
 // every tab after it -- so the one thing you could not do was open two
 // neighbours and see both.
 function railSpan(p) {
-  const bar = p.root.querySelector('.bar').offsetWidth;
+  // MEASURED IN FRACTIONS, not whole pixels. `offsetWidth` rounds, and a tab
+  // is 43.63px wide -- so laying the row out on rounded widths left a third
+  // of a pixel of background showing between one tab and the next, wherever
+  // the rounding fell badly. getBoundingClientRect keeps the fraction and
+  // the tabs meet exactly.
+  const bar = p.root.querySelector('.bar').getBoundingClientRect().width;
   if (p.shut) return bar;
   // The body can be narrower than the bar on a short window; the row has to
   // clear whichever reaches further.
-  return Math.max(bar, p.root.offsetWidth);
+  return Math.max(bar, p.root.getBoundingClientRect().width);
 }
 
 // What the row measures, as a string, so a tick can tell whether anything
@@ -3171,13 +3176,7 @@ function packRail() {
     // makes picking it up feel like picking it up.
     const held = p.root === railDragging;
     p.root.classList.toggle('tab-joined', i > 0 && !held);
-    // AFTER AN OPEN TAB, a tab has a window to its left rather than another
-    // tab, and a window draws its own right edge -- so there is no line to
-    // share and the pixel of overlap would be a collision. See the rule in
-    // style.css.
-    const previous = i > 0 ? rail[i - 1] : null;
-    p.root.classList.toggle('tab-after-open',
-                            !!previous && !previous.shut && !held);
+
     // THE TAB IN THE CORNER, which is the leftmost one and only while the
     // row is scrolled home: scrolled along, the first tab is off the left
     // edge and whatever is under the corner is passing through rather than

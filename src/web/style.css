@@ -400,14 +400,15 @@ button:disabled { opacity: .5; cursor: progress; }
    with the thing it opened -- the one alignment a tab has to keep. Moving
    the panel takes the body with it and the tabs still overlap by the pixel
    that collapses their shared border. */
-.panel.tab-joined { margin-left: -1px; }
-/* EXCEPT AFTER AN OPEN ONE. The pull exists so two tabs share the line
-   between them -- but an open tab's neighbour is not sharing a line with a
-   tab, it is standing next to a WINDOW, whose own right edge is already
-   drawn there. Pulling onto that is an overlap rather than a merge, so the
-   tab after an open one keeps its distance. The rail says which those are,
-   since it is what knows the order. */
-.panel.tab-after-open { margin-left: 0; }
+/* A TAB DRAWS NO LEFT EDGE; ITS NEIGHBOUR'S RIGHT EDGE IS THE LINE BETWEEN
+   THEM. That is what "sharing a border" means, and it needs no overlap to
+   arrange -- which matters because the tabs are 43.63px wide, so pulling one
+   a whole pixel onto the next left a 0.37px slit of background showing
+   through wherever the arithmetic landed badly.
+   
+   The first tab in the row draws its own left edge, having nothing to its
+   left to borrow one from. The rail marks it, being what knows the order. */
+.panel.tab-joined > .bar { border-left: 0; }
 
 /* THE CORNER. Firefox rounds the window's own corners, so a square tab
    pressed into one has its top-left poking past the curve -- a small wedge
