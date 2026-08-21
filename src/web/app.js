@@ -3158,12 +3158,18 @@ function packRail() {
   // it. Set here because this is what knows the order, and the order
   // changes whenever a tab is dragged.
   rail.forEach((p, i) => {
-    p.root.classList.toggle('tab-joined', i > 0);
+    // A TAB IN HAND IS NOT IN THE ROW. It is under the pointer, going
+    // somewhere, and the row has already closed up behind it -- so it wears
+    // neither the corner's rounding nor the pixel of overlap a neighbour
+    // costs. Squaring on the first move rather than on the drop is what
+    // makes picking it up feel like picking it up.
+    const held = p.root === railDragging;
+    p.root.classList.toggle('tab-joined', i > 0 && !held);
     // THE TAB IN THE CORNER, which is the leftmost one and only while the
     // row is scrolled home: scrolled along, the first tab is off the left
     // edge and whatever is under the corner is passing through rather than
     // sitting in it. See the rounding in style.css.
-    p.root.classList.toggle('tab-corner', i === 0 && railScroll === 0);
+    p.root.classList.toggle('tab-corner', i === 0 && railScroll === 0 && !held);
   });
   for (const p of rail) {
     // Skip the one being dragged: it is under the pointer, not in the row,
@@ -3361,6 +3367,11 @@ function slotFor(panel) {
 
 function railDrag(panel) {
   railDragging = panel.root;
+  // OFF THE MOMENT IT IS PICKED UP. `packRail` clears these for the held tab
+  // too, but it only runs when the drag is near the rail and changes slot --
+  // a tab pulled straight down would keep its rounded corner all the way to
+  // the drop. Cleared here, where every move passes.
+  panel.root.classList.remove('tab-corner', 'tab-joined');
   // THE BIN COMES UP FOR ANYTHING THAT CAN GO IN IT. visualize cannot: it is
   // the page rather than a thing on it, and offering to throw the page away
   // is not an offer worth making. A pane knows it can be destroyed by having
