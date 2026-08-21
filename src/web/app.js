@@ -728,13 +728,32 @@ function makePanel(root, options = {}) {
          railDrag(panel);
        },
        (moved) => { if (moved) railDrop(panel); });
-  grab(grip, (dx, dy, from) => {
-    const w = Math.max(options.minWidth || 240, from.w + dx);
-    const h = Math.max(options.minHeight || 120, from.h + dy);
-    root.style.width = w + 'px';
-    root.style.height = h + 'px';
-    if (options.onResize) options.onResize(w, h);
-  });
+  grab(grip,
+       (dx, dy, from) => {
+         const w = Math.max(options.minWidth || 240, from.w + dx);
+         const h = Math.max(options.minHeight || 120, from.h + dy);
+         root.style.width = w + 'px';
+         root.style.height = h + 'px';
+         if (options.onResize) options.onResize(w, h);
+         // THE FLOOR OFFERS ITSELF while you are dragging near it. Shown from
+         // the edge the grip is actually approaching, so the guide answers the
+         // question the hand is asking.
+         showFloor(nearFloor(root));
+       },
+       () => {
+         // SNAPPED ON RELEASE, not while dragging. A window that jumped to
+         // full height the moment you crossed the line would fight the hand
+         // for the rest of the drag -- and there would be no way to stop just
+         // short of the floor on purpose. Landing it on the drop makes the
+         // guide a promise rather than a rule.
+         if (nearFloor(root)) {
+           const top = root.getBoundingClientRect().top;
+           const h = Math.max(options.minHeight || 120, innerHeight - top);
+           root.style.height = h + 'px';
+           if (options.onResize) options.onResize(root.getBoundingClientRect().width, h);
+         }
+         showFloor(false);
+       });
 
   const panel = {
     root, bar, body, grip,
@@ -3491,6 +3510,44 @@ let railDragging = null;
 const cornerMark = document.createElement('div');
 cornerMark.className = 'notch';
 document.body.appendChild(cornerMark);
+
+/* -- THE FLOOR -------------------------------------------------------------
+
+   A RAIL AT THE BOTTOM OF THE PAGE, offered while a window is being resized
+   near it, that takes the window down to the full height when the grip is
+   let go.
+
+   THE SAME BARGAIN THE TAB RAIL MAKES, and it looks the same on purpose: a
+   dashed orange line that appears while you are aiming and leaves once you
+   have landed. One guide vocabulary rather than two -- if it is a dashed
+   orange line, dropping there snaps.
+
+   OFFERED, NOT IMPOSED. The window is not resized until the drop, so the
+   guide is a promise rather than a rule: crossing the line and coming back
+   leaves the window exactly where the hand put it. Snapping live would fight
+   the drag and make "nearly full height" impossible to ask for. */
+const FLOOR_GRAB = 48;      // how near the bottom edge has to come to count
+
+const floorMark = document.createElement('div');
+floorMark.id = 'floor-mark';
+floorMark.innerHTML = '<i></i>';
+document.body.appendChild(floorMark);
+
+// Is this panel's bottom edge close enough to the floor to land on it?
+//
+// MEASURED FROM THE BOTTOM EDGE, which is the one the grip moves and the one
+// that would end up on the floor. Anything above the floor counts, including
+// a window already dragged past it -- overshooting is how most people aim at
+// an edge, and refusing the snap for it would make the target harder to hit
+// the harder you tried.
+function nearFloor(root) {
+  const box = root.getBoundingClientRect();
+  return box.bottom >= innerHeight - FLOOR_GRAB;
+}
+
+function showFloor(near) {
+  floorMark.classList.toggle('near', !!near);
+}
 
 // THE RAILS, drawn only while a tab is near them. Two lines rather than a
 // box: the row has a top and a bottom and no ends, since it runs as far as

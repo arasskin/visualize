@@ -598,6 +598,28 @@ button:disabled { opacity: .5; cursor: progress; }
 #rail-marks i:first-child { top: 0; }
 #rail-marks i:last-child { bottom: 0; }
 
+/* THE FLOOR. A rail across the bottom of the page, shown while a window is
+   being resized near it, that takes the window to full height on the drop.
+
+   DRESSED EXACTLY LIKE THE TAB RAIL, because it is the same offer: dashed,
+   orange, appearing while you aim and leaving once you land. Two guides that
+   behave alike should look alike -- a reader learns "dashed orange means drop
+   here and it snaps" once, rather than once per edge.
+
+   pointer-events:none, like the rails: it appears under a hand in the middle
+   of a drag, and catching that pointer would end it. */
+#floor-mark {
+  position: fixed; left: 0; right: 0; bottom: 0; height: 0; z-index: 4;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .16s ease-in-out;
+}
+#floor-mark.near { opacity: 1; }
+#floor-mark i {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 0;
+  border-top: 1.5px dashed var(--rail);
+}
+
 /* THE BIN, bottom-left, and only while something is being dragged. Nothing
    to throw away the rest of the time, and a bin sitting on the drawing would
    be furniture rather than a tool.
