@@ -358,6 +358,39 @@ button:disabled { opacity: .5; cursor: progress; }
    the overlap puts two of them in the same pixel. */
 .panel:not(.shut) > .panel-body { margin-top: -1px; }
 
+/* NO LINE BETWEEN A TAB AND ITS OWN WINDOW. The tab draws a bottom and the
+   window draws a top, in the same pixel, and that line is right everywhere
+   ALONG THE ROW -- it is what the shut tabs beside it end on -- but wrong
+   under the open tab itself, where it cuts the title off from the thing it
+   opened. The two should read as one shape.
+
+   PAINTED OVER RATHER THAN REMOVED. Every attempt to stop that pixel being
+   drawn moved the geometry: taking the tab's bottom away staggered the row,
+   giving it back as padding staggered it the other way, and each fix cost a
+   pixel somewhere else. So the line is still drawn, by both boxes, and the
+   row is still level -- a strip of the panel's own background is simply laid
+   on top of the stretch that should not show.
+
+   EXACTLY THE BOX, edge to edge. Both ways of missing show: inset by a
+   pixel it leaves a stub of the old line where the side borders turn, and
+   spread a pixel wider it eats a pixel out of those borders, so the tab's
+   sides no longer run into the window's. `left: 0; right: 0` on an
+   absolutely positioned child spans the bar's padding box, which is the
+   stretch between the two side borders -- the whole line and nothing else.
+
+   The offsets are 0 and stay written down, because "no offset" is the
+   answer here rather than the absence of one. */
+.panel:not(.shut) > .bar::after {
+  content: '';
+  position: absolute; left: 0; right: 0; bottom: -1px;
+  height: 1px;
+  /* INHERITED, so it is whatever ground this particular tab stands on: a
+     config tab paints --canvas and a terminal paints --term, and a strip
+     hard-coded to either shows as a dash of the wrong colour on the other. */
+  background: inherit;
+  pointer-events: none;
+}
+
 .bar {
   display: flex; align-items: center; gap: .3rem; flex: none;
   padding: .4rem var(--gutter); cursor: grab; user-select: none;
@@ -484,11 +517,11 @@ button:disabled { opacity: .5; cursor: progress; }
    The outline left behind when a tab is pushed along by a window opening,
    and the arrow from where it is back to where it was. See showShift.
 
-   DASHED, AND THE COLOUR OF THE RAILS. This is the same kind of thing the
-   rails are -- furniture that appears to answer a question about where tabs
-   go and leaves once it is answered -- so it says so by looking like them
-   rather than like a tab. A solid outline would read as another tab, which
-   is the one thing it must not be mistaken for.
+   THE COLOUR OF AN ORDINARY TAB, and DASHED. It is a picture of a tab, so
+   it is drawn in a tab's own grey; what says it is a picture rather than the
+   thing is that its lines are broken. That is difference enough, and it
+   costs nothing: a second colour here would have been a third meaning to
+   learn, next to green for selected and orange for the rails.
 
    pointer-events:none: it is a picture of a tab, not a tab. Clicks belong to
    whatever is underneath, and to the real tab it is a picture OF. */
@@ -498,9 +531,9 @@ button:disabled { opacity: .5; cursor: progress; }
   position: fixed; z-index: 3;
   box-sizing: border-box;
   display: flex; align-items: center; justify-content: center;
-  border: 1px dashed var(--rail);
+  border: 1px dashed var(--line-strong);
   border-radius: 2px;
-  color: var(--rail);
+  color: var(--ink);
   font-size: 12px; white-space: nowrap; overflow: hidden;
   opacity: .8;
 }
@@ -512,7 +545,7 @@ button:disabled { opacity: .5; cursor: progress; }
 .tab-ghost-arrow {
   position: fixed; z-index: 3;
   height: 0;
-  border-top: 1.5px dashed var(--rail);
+  border-top: 1.5px dashed var(--line-strong);
   opacity: .8;
 }
 /* The head, at the LEFT end -- the end nearest the ghost, since the arrow
@@ -524,7 +557,7 @@ button:disabled { opacity: .5; cursor: progress; }
   transform: translate(0, -50%);
   border-top: 5px solid transparent;
   border-bottom: 5px solid transparent;
-  border-right: 8px solid var(--rail);
+  border-right: 8px solid var(--line-strong);
 }
 
 /* THE RAILS. Two lines marking where the tab row sits, drawn ONLY while a
