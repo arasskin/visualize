@@ -671,13 +671,6 @@ function makePanel(root, options = {}) {
   const body = root.querySelector('.panel-body');
   const grip = root.querySelector('.grip');
 
-  // THE BITE IN THE CORNER, on every panel because any of them can be
-  // dragged into first place. The stylesheet shows it only on whichever tab
-  // is actually in the corner -- see `tab-corner`.
-  const notch = document.createElement('div');
-  notch.className = 'notch';
-  root.appendChild(notch);
-
   // Dragging the bar moves the panel; dragging the grip resizes it. Both are
   // the same gesture with a different thing on the end, so they share one
   // pointer-capture path.
@@ -3474,6 +3467,15 @@ function binEat(panel) {
 // Which panel is under the hand right now, or null. Held so the packing can
 // leave it alone and the rails know to show themselves.
 let railDragging = null;
+
+// THE MARK IN THE CORNER, which belongs to the PAGE and not to any tab.
+// It was a child of whichever tab was leftmost, which meant it came and went
+// with that tab -- drag the last one off the rail and the corner emptied.
+// The corner of the window does not stop existing because nothing is sitting
+// in it, so the disc is part of the page and is always there.
+const cornerMark = document.createElement('div');
+cornerMark.className = 'notch';
+document.body.appendChild(cornerMark);
 
 // THE RAILS, drawn only while a tab is near them. Two lines rather than a
 // box: the row has a top and a bottom and no ends, since it runs as far as

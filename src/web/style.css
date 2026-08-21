@@ -55,6 +55,11 @@
   /* The tab rail's guides. Orange, which nothing else here is. */
   --rail: #d2811e;
 
+  /* The radius of the disc in the page's corner. On the ROOT rather than on
+     a panel: the disc belongs to the page, and the tab that cuts itself
+     around it has to measure by the same number. */
+  --notch: 9px;
+
   /* THE CORNER'S DISC, the same maroon the favicon is drawn on. The page's
      top-left corner is where the site's own mark sits in the browser tab
      above it, so the shape in the corner of the page wears the same colour
@@ -281,7 +286,6 @@ button:disabled { opacity: .5; cursor: progress; }
   touch-action: none;  /* dragging the bar must not also pan the graph */
   --gutter: .5rem;     /* one gutter for the bar and the rows below it, so a
                           panel's title and its contents share a left edge */
-  --notch: 9px;        /* the radius of the bite in the corner tab */
 }
 .panel.shut { width: auto !important; height: auto !important; }
 .panel.shut .panel-body, .panel.shut .grip { display: none; }
@@ -388,40 +392,18 @@ button:disabled { opacity: .5; cursor: progress; }
    large leaves a hairline of background inside it, and square leaves the
    wedge every time the window is round.
 
-   So the tab stops trying to match anything and puts a SHAPE there instead:
-   a disc in the site's own colour, which is a thing the page meant to draw.
+   So the page stops trying to match anything and puts a SHAPE there instead:
+   a disc in the site's own maroon, the colour the favicon is drawn on.
    Against a rounded window it tucks inside the curve; against a square one
    it is simply the mark in the corner. Either way it looks intended, which
    is the one thing a guess can never be.
 
-   ONLY WHILE IT IS IN THE CORNER. The class is set by the packing, which
-   knows both which tab is leftmost and whether the row is scrolled home --
-   drag another tab into first place and the disc goes with it; scroll the
-   row along and no tab is marked, because whatever is under the corner is
-   passing through rather than sitting in it. */
-/* THE DISC. A solid circle in the page's top-left corner, in the site's own
-   maroon, with the tab's border running AROUND it rather than under it.
-
-   The bar is cut by a mask -- the circle removed -- so the tab's straight
-   top and left edges stop where the circle begins instead of crossing it.
-   The disc is then laid in the gap, and an arc drawn along the seam carries
-   the outline round: down the left edge, round the circle, along the top,
-   one continuous line.
-
-   FIXED TO THE PAGE'S CORNER at 0,0, whichever tab is sitting there and
-   whatever that tab is doing -- the circle marks the corner of the window,
-   not a feature of any tab. */
-.panel.tab-corner > .bar {
-  -webkit-mask-image: radial-gradient(circle var(--notch) at 0 0,
-                                      transparent 0 var(--notch), #000 var(--notch));
-  mask-image: radial-gradient(circle var(--notch) at 0 0,
-                              transparent 0 var(--notch), #000 var(--notch));
-}
-
-.panel.tab-corner > .notch {
-  /* FIXED TO THE PAGE, not to the panel. The disc marks the window's corner,
-     so it belongs at the viewport's 0,0 -- and a panel dragged loose, or
-     nudged by a layout, would otherwise carry the mark off with it. */
+   THE DISC BELONGS TO THE PAGE, not to a tab. It used to be a child of
+   whichever tab was leftmost, so dragging that tab away emptied the corner
+   -- but the corner of the window does not stop existing because nothing is
+   sitting in it. It is drawn once, fixed to the viewport's 0,0, and is
+   always there. */
+.notch {
   position: fixed; left: 0; top: 0; z-index: 6;
   /* Centred on the corner: the box is twice the radius and three quarters of
      it hangs off the page, so exactly the quarter disc shows. */
@@ -430,17 +412,54 @@ button:disabled { opacity: .5; cursor: progress; }
   box-sizing: border-box;
   border-radius: 50%;
   background: var(--mark);
-  /* THE OUTLINE'S DETOUR. The border on the disc IS the tab's line where it
-     goes round -- same width and same colour as the edges it joins, so the
-     three read as one stroke rather than as a circle with a tab behind it. */
-  border: 1px solid var(--line-strong);
+  /* NO BORDER OF ITS OWN. The line around the disc is the TAB's border
+     taking a detour, drawn by the tab -- see the arc below. A circle that
+     drew its own edge would keep drawing it out over the graph when no tab
+     was there, which is a ring on the page rather than the outline of a
+     tab. */
   pointer-events: none;
 }
-/* The selected tab's line is green all the way round, the detour included. */
-.panel.tab-corner.picked > .notch { border-color: var(--pick); }
-/* Off unless this is the tab in the corner. The class is the packing's; the
-   element is on every tab, since which tab is leftmost changes. */
-.panel:not(.tab-corner) > .notch { display: none; }
+
+/* THE TAB UNDER IT GETS OUT OF THE WAY, and only the tab that is actually in
+   the corner -- the class is the packing's, which knows both which tab is
+   leftmost and whether the row is scrolled home. The bar is cut by the same
+   circle, so its straight top and left edges stop where the disc begins
+   rather than crossing it, and the disc's own border carries the outline
+   round: down the left side, round the circle, along the top, one stroke.
+
+   Scroll the row along and no tab is cut, because whatever is under the
+   corner is passing through rather than sitting in it -- the disc simply
+   sits on top, as it does over the graph when the row is empty. */
+.panel.tab-corner > .bar {
+  -webkit-mask-image: radial-gradient(circle var(--notch) at 0 0,
+                                      transparent 0 var(--notch), #000 var(--notch));
+  mask-image: radial-gradient(circle var(--notch) at 0 0,
+                              transparent 0 var(--notch), #000 var(--notch));
+}
+
+/* THE DETOUR ITSELF, drawn by the TAB because it is the tab's border. A box
+   sitting in the cut with its own top-left rounded by the full radius has
+   exactly the curve of the circle along its top and left edges; drawing
+   those two edges continues the outline round.
+
+   ON THE PANEL, NOT THE BAR. The bar's mask applies to its descendants too,
+   so an arc drawn inside the bar would be erased by the very cut it is
+   meant to line. The panel is the bar's parent and outside the mask.
+
+   z-index above the disc, since the line goes round the OUTSIDE of it. */
+.panel.tab-corner::before {
+  content: '';
+  position: fixed; left: 0; top: 0; z-index: 7;
+  width: var(--notch); height: var(--notch);
+  box-sizing: border-box;
+  border-top-left-radius: var(--notch);
+  border-top: 1px solid var(--line-strong);
+  border-left: 1px solid var(--line-strong);
+  pointer-events: none;
+}
+/* Green with the rest of a selected tab's outline. */
+.panel.tab-corner.picked::before { border-color: var(--pick); }
+
 
 /* -- WHERE A TAB WENT ------------------------------------------------------
 
