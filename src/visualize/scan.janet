@@ -390,13 +390,21 @@
   {:nodes nodes :edges edges :sizes sizes :stamps stamps :ours ours})
 
 (defn scan
-  "Find, read and graph everything under `root`. The whole pipeline."
+  ``Find, read and graph everything under `root`. The whole pipeline.
+
+  A ROOT WITH NOTHING IN IT IS NOT AN ERROR. It used to answer with one --
+  "no files matched any parser", and the list of them -- which put a
+  paragraph of text on the screen at the one moment there is nothing to say.
+  A directory this tool has no parser for is a blank drawing, the same as a
+  directory whose every node the config hid: the picture is what the picture
+  is, and an empty one draws empty.
+
+  `build` handles the empty file list on its own -- no nodes, no edges -- and
+  graphviz draws an empty graph without complaint, so nothing here has to
+  special-case it. What remains of :error is real render failures, which is
+  what that channel is for.``
   [root &opt workers]
-  (def jobs (find-files root))
-  (if (empty? jobs)
-    {:error (string "no files under " root
-                    " matched any parser (" (string/join (languages) ", ") ")")}
-    (build (read-all jobs workers))))
+  (build (read-all (find-files root) workers)))
 
 # -- watching ---------------------------------------------------------------
 #
