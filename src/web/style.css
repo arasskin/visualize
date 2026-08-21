@@ -415,6 +415,19 @@ button:disabled { opacity: .5; cursor: progress; }
    `border-color` rather than an `outline`, so the green replaces the edge
    the tab already has instead of drawing a second line outside it -- which
    at this size reads as a thicker border rather than a coloured one. */
+/* THE SELECTED PANEL SITS ABOVE ITS NEIGHBOURS. The tabs overlap by a pixel
+   so their shared border collapses into one line -- which means one of the
+   two paints over the other, and by default that is whichever comes later in
+   the document. So a grey tab to the right could eat the green edge of the
+   selected pane beside it, one pixel at a time, which is exactly the pixel
+   that says which pane is selected.
+   
+   A number rather than `raise`: that hands out ever-larger values as panels
+   are opened and dragged, and this has to beat all of them for as long as
+   the selection lasts. Under the compose bar and the search bar, which are
+   above everything. */
+.panel.picked { z-index: 12 !important; }
+
 .panel.picked > .bar { border-color: var(--pick); }
 .panel.picked.shut > .bar { border-bottom-color: var(--pick); }
 .panel.picked > .panel-body { border-color: var(--pick); }
