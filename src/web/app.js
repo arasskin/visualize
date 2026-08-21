@@ -4,146 +4,18 @@
 // other -- the viewport and the editor -- joined only by the panel furniture
 // they share.
 
-// -- the viewport ------------------------------------------------------------
-// One transform on the <svg> element does the whole job. Not an iframe: the
-// graph has to stay in this document for a redraw to swap it, and a same-origin
-// frame would only add a postMessage hop. The graph is SVG, so it stays
-// sharp at any scale.
-
 import { makeTerminal, keyToBytes } from './term.js';
+import {
+  pane, scale, wire as wireGraph,
+  paint, repaint, zoomAt, fit, fitSoon, panBy, isTouched,
+} from './graph.js';
 
-const pane = document.getElementById('graph');
-const zoomLabel = document.getElementById('zoom');
-let zoomFade = null;
-const MIN = 0.1, MAX = 10;
-// `touched` tracks whether the user has moved the view themselves; an automatic
-// refit must never discard a view they chose.
-let scale = 1, tx = 0, ty = 0, touched = false;
-
-// ONE WRITE PER FRAME. A trackpad fires wheel and pointermove faster than the
-// display refreshes, and every one of those used to write a transform and
-// force the work that follows it -- several repaints per frame, all but the
-// last thrown away.
-//
-// The state (tx, ty, scale) is updated eagerly, so a reader still sees the
-// latest values; only the DOM write waits for the frame that will show it.
-let painting = null;
-
-function paint() {
-  if (painting) return;
-  painting = requestAnimationFrame(() => {
-    painting = null;
-    repaint();
-  });
-}
-
-function repaint() {
-  const svg = pane.querySelector('svg');
-  if (!svg) return;
-  svg.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
-  // The arrow is built in screen pixels and un-scaled by the transform this
-  // line just wrote. One attribute, so a zoom frame costs nothing.
-  placeArrow();
-  zoomLabel.textContent = Math.round(scale * 100) + '%';
-  // Visible while it is changing, gone a moment later: the number matters
-  // during a zoom and is clutter once the view has settled.
-  zoomLabel.classList.add('active');
-  clearTimeout(zoomFade);
-  zoomFade = setTimeout(() => zoomLabel.classList.remove('active'), 900);
-}
-
-// Zoom about a fixed point: the graph coordinate under the cursor has to land
-// back under the cursor, so the translation absorbs the scale change.
-function zoomAt(factor, cx, cy) {
-  const next = Math.min(MAX, Math.max(MIN, scale * factor));
-  const applied = next / scale;
-  tx = cx - (cx - tx) * applied;
-  ty = cy - (cy - ty) * applied;
-  scale = next;
-  touched = true;
-  paint();
-  // A ZOOM CAN CARRY THE MARK OFF THE SCREEN, since everything not under the
-  // cursor swings away from it. Bring it back once the zooming stops.
-  keepHitInView();
-}
-
-function fit() {
-  const svg = pane.querySelector('svg');
-  if (!svg) return;
-  // Measure the element's own untransformed size, NOT getBBox(). This was
-  // written because graphviz sizes the root svg in POINTS (width="2276pt"),
-  // so the box it occupies is the pt->px conversion of that, ~4/3 larger than
-  // the user units getBBox reports -- centring against the bbox offsets the
-  // graph by that ratio. baseVal.value is the size the element OCCUPIES,
-  // which is what a fit is against, whatever the units in the attribute.
-  const w = svg.width.baseVal.value;
-  const h = svg.height.baseVal.value;
-  if (!w || !h) return;
-  const pad = 24;
-  scale = Math.min((pane.clientWidth - pad * 2) / w,
-                   (pane.clientHeight - pad * 2) / h);
-  scale = Math.min(MAX, Math.max(MIN, scale));
-  tx = (pane.clientWidth - w * scale) / 2;
-  ty = (pane.clientHeight - h * scale) / 2;
-  // Back to a view the page chose, so a resize may reframe again.
-  touched = false;
-  // Immediate, like the redraw path: a fit follows a fresh SVG or a resize,
-  // where a deferred frame is a visible jump rather than a smoother one.
-  repaint();
-}
-
-pane.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  const r = pane.getBoundingClientRect();
-  // ctrl+wheel is what a trackpad pinch arrives as; it wants a finer step than
-  // a mouse wheel notch.
-  const k = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.002));
-  zoomAt(k, e.clientX - r.left, e.clientY - r.top);
-}, { passive: false });
-
-let dragging = null;
-pane.addEventListener('pointerdown', (e) => {
-  if (e.button !== 0) return;
-  dragging = { x: e.clientX - tx, y: e.clientY - ty };
-  pane.setPointerCapture(e.pointerId);
-  pane.classList.add('panning');
-});
-pane.addEventListener('pointermove', (e) => {
-  if (!dragging) return;
-  tx = e.clientX - dragging.x;
-  ty = e.clientY - dragging.y;
-  touched = true;
-  paint();
-});
-for (const done of ['pointerup', 'pointercancel']) {
-  pane.addEventListener(done, () => {
-    dragging = null;
-    pane.classList.remove('panning');
-  });
-}
-
-// Drops the cached scan, so the next draw re-reads the sources. The one action
-// that is about the SOURCE changing rather than the config.
-
-// The view keys take a modifier now that a bare keystroke is TEXT. `0` used
-// to fit the graph, and it still does with the platform's modifier held --
-// but on its own it is the first character of a line, because typing
-// anywhere is the way the config is written.
-document.addEventListener('keydown', (e) => {
-  // The editor owns the keyboard while it has focus -- typing `(box ...)`
-  // must not also zoom the graph.
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-  if (!(e.metaKey || e.ctrlKey)) return;
-  const c = { x: pane.clientWidth / 2, y: pane.clientHeight / 2 };
-  if (e.key === '0') { e.preventDefault(); fit(); }
-  else if (e.key === '+' || e.key === '=') { e.preventDefault(); zoomAt(1.2, c.x, c.y); }
-  else if (e.key === '-') { e.preventDefault(); zoomAt(1 / 1.2, c.x, c.y); }
-});
-
-// Two frames: the pane is absolutely positioned, so its height is only real
-// after layout -- fitting any earlier measures against a collapsed box and
-// bottoms out at the minimum scale.
-function fitSoon() { requestAnimationFrame(() => requestAnimationFrame(fit)); }
+// THE TWO THINGS THE VIEWPORT CALLS BACK INTO. It repaints and it fits; the
+// find bar wants to know about both -- the arrow is drawn in screen pixels so
+// it has to be replaced after a zoom, and a mark can be carried off the edge
+// by one. Passed in rather than imported by `graph.js`, which would put the
+// two modules in a circle.
+wireGraph({ onRepaint: () => placeArrow(), onFit: () => keepHitInView() });
 
 // -- hovering a dependency ---------------------------------------------------
 // Which file does this line come from, and where does it go? The renderer
@@ -268,7 +140,7 @@ window.addEventListener('load', fitSoon);
 window.addEventListener('resize', () => {
   // THE EDGES MOVED, so anything held against one follows them.
   resnap();
-  if (!touched) fit();
+  if (!isTouched()) fit();
 });
 
 // -- the config editor -------------------------------------------------------
@@ -636,7 +508,7 @@ async function send(action, index, keepView) {
         // `repaint`, not `paint`: this runs on a freshly swapped-in SVG that
         // has no transform yet, and deferring it a frame would show the
         // graph unpositioned for that frame.
-        if (keepView && touched) repaint(); else fit();
+        if (keepView && isTouched()) repaint(); else fit();
       }
       const count = Object.keys(faults).length;
       const ms = Math.round(performance.now() - t0);
@@ -2138,13 +2010,8 @@ function revealHit(hit) {
   const aim = fits ? box : node;
   // Shift by the difference between the mark's centre and the pane's, in
   // screen pixels -- tx/ty are screen-space, so no unit conversion is needed.
-  tx += (view.left + view.width / 2) - (aim.left + aim.width / 2);
-  ty += (view.top + view.height / 2) - (aim.top + aim.height / 2);
-  touched = true;
-  // NOW, not next frame: a caller that measures straight after this -- the
-  // next hit in a walk, or the reveal for a second arrow -- would read the
-  // old transform and pan against a view that is already moving.
-  repaint();
+  panBy((view.left + view.width / 2) - (aim.left + aim.width / 2),
+        (view.top + view.height / 2) - (aim.top + aim.height / 2));
 }
 
 // Follow the current hit after the view moves under it. Guarded, because
