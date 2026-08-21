@@ -55,6 +55,12 @@
   /* The tab rail's guides. Orange, which nothing else here is. */
   --rail: #d2811e;
 
+  /* THE CORNER'S DISC, the same maroon the favicon is drawn on. The page's
+     top-left corner is where the site's own mark sits in the browser tab
+     above it, so the shape in the corner of the page wears the same colour
+     -- it reads as this site's, not as another piece of furniture. */
+  --mark: #8b1a2b;
+
   /* The colour a hovered dependency lights up in. */
   --lit: #c04040;
 
@@ -118,6 +124,10 @@
     --pick-wash: #6bbf8a24;
 
     --rail: #e8a545;
+
+    /* Lifted off the dark ground: the favicon's maroon is nearly black
+       against it, and a disc you cannot see is not a mark. */
+    --mark: #c2415a;
 
     /* Lightened to read against the dark ground -- the mirror image of the
        light palette's problem: stock black and dim colours vanish here. */
@@ -368,37 +378,39 @@ button:disabled { opacity: .5; cursor: progress; }
    or vanished where there was nothing to borrow from. A border that belongs
    to somebody else is a border that disappears when they change. */
 
-/* THE CORNER, CUT AS A PUZZLE PIECE. Some browser windows round their own
-   top-left corner and some do not -- it depends on the OS, the browser, and
-   whether the window is maximized -- and NOTHING ON THE PAGE CAN ASK. There
-   is no API for the shape of the chrome around you.
+/* THE CORNER, MARKED RATHER THAN MATCHED. Some browser windows round their
+   own top-left corner and some do not -- it depends on the OS, the browser,
+   and whether the window is maximized -- and NOTHING ON THE PAGE CAN ASK.
+   There is no API for the shape of the chrome around you.
 
    Matching a radius therefore means guessing, and a guess is wrong on half
    the machines: too small leaves a wedge of tab poking past the curve, too
    large leaves a hairline of background inside it, and square leaves the
    wedge every time the window is round.
 
-   So the tab does not try to match anything. It takes a BITE out of its own
-   corner -- a quarter circle centred exactly on the page's corner, drawn in
-   the rails' orange -- which reads as a deliberate cut rather than as a
-   misfitted edge. Against a rounded window the notch sits inside the curve;
-   against a square one it is a shape the tab clearly meant to have. Either
-   way it looks intended, which is the one thing a guess can never be.
+   So the tab stops trying to match anything and puts a SHAPE there instead:
+   a disc in the site's own colour, which is a thing the page meant to draw.
+   Against a rounded window it tucks inside the curve; against a square one
+   it is simply the mark in the corner. Either way it looks intended, which
+   is the one thing a guess can never be.
 
    ONLY WHILE IT IS IN THE CORNER. The class is set by the packing, which
    knows both which tab is leftmost and whether the row is scrolled home --
-   drag another tab into first place and the notch goes with it; scroll the
-   row along and no tab is notched, because whatever is under the corner is
+   drag another tab into first place and the disc goes with it; scroll the
+   row along and no tab is marked, because whatever is under the corner is
    passing through rather than sitting in it. */
-/* THE BITE IS A HOLE WITH A LINE AROUND IT, so the tab's own border does
-   not simply stop where the circle starts. The bar is cut by a mask -- a
-   circle centred on the corner, removed -- and an arc is stroked along the
-   cut in the tab's own border colour, which is how the outline stays
-   continuous: down the left edge, round the bite, along the top.
+/* THE DISC. A solid circle in the page's top-left corner, in the site's own
+   maroon, with the tab's border running AROUND it rather than under it.
 
-   FIXED TO THE PAGE'S CORNER, not to the tab. The circle marks where the
-   window's corner is, so it stays at 0,0 whichever tab happens to be
-   sitting there and whatever that tab is doing. */
+   The bar is cut by a mask -- the circle removed -- so the tab's straight
+   top and left edges stop where the circle begins instead of crossing it.
+   The disc is then laid in the gap, and an arc drawn along the seam carries
+   the outline round: down the left edge, round the circle, along the top,
+   one continuous line.
+
+   FIXED TO THE PAGE'S CORNER at 0,0, whichever tab is sitting there and
+   whatever that tab is doing -- the circle marks the corner of the window,
+   not a feature of any tab. */
 .panel.tab-corner > .bar {
   -webkit-mask-image: radial-gradient(circle var(--notch) at 0 0,
                                       transparent 0 var(--notch), #000 var(--notch));
@@ -406,24 +418,26 @@ button:disabled { opacity: .5; cursor: progress; }
                               transparent 0 var(--notch), #000 var(--notch));
 }
 
-/* THE ARC ALONG THE CUT. A square box pinned to the corner with one rounded
-   side and one border: the rounded quarter of it traces the circle exactly,
-   and the border draws it. Orange, as the rails are -- this is the same kind
-   of furniture, a mark about where things sit rather than part of a tab. */
 .panel.tab-corner > .notch {
-  position: absolute; left: 0; top: 0; z-index: 3;
-  /* THE ARC CURVES TOWARD THE CORNER, since that is the side the circle
-     took away. A box sitting in the cut with its OWN top-left rounded by the
-     full radius has exactly that curve along its top and left edges: it runs
-     from (0, r) round to (r, 0), hugging the hole. Rounding the far corner
-     instead bows the line the other way, into the tab. */
-  width: var(--notch); height: var(--notch);
+  /* FIXED TO THE PAGE, not to the panel. The disc marks the window's corner,
+     so it belongs at the viewport's 0,0 -- and a panel dragged loose, or
+     nudged by a layout, would otherwise carry the mark off with it. */
+  position: fixed; left: 0; top: 0; z-index: 6;
+  /* Centred on the corner: the box is twice the radius and three quarters of
+     it hangs off the page, so exactly the quarter disc shows. */
+  width: calc(var(--notch) * 2); height: calc(var(--notch) * 2);
+  transform: translate(-50%, -50%);
   box-sizing: border-box;
-  border-top-left-radius: var(--notch);
-  border-top: 1px solid var(--rail);
-  border-left: 1px solid var(--rail);
+  border-radius: 50%;
+  background: var(--mark);
+  /* THE OUTLINE'S DETOUR. The border on the disc IS the tab's line where it
+     goes round -- same width and same colour as the edges it joins, so the
+     three read as one stroke rather than as a circle with a tab behind it. */
+  border: 1px solid var(--line-strong);
   pointer-events: none;
 }
+/* The selected tab's line is green all the way round, the detour included. */
+.panel.tab-corner.picked > .notch { border-color: var(--pick); }
 /* Off unless this is the tab in the corner. The class is the packing's; the
    element is on every tab, since which tab is leftmost changes. */
 .panel:not(.tab-corner) > .notch { display: none; }
