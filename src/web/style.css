@@ -301,10 +301,23 @@ button:disabled { opacity: .5; cursor: progress; }
    figure however it is coloured.
 
    The bar keeps its bottom border only when SHUT, because a tab with no
-   window under it is a closed rectangle in its own right. */
-.panel > .bar { border-bottom: 0; margin-bottom: 0; }
-.panel.shut > .bar { border-bottom: 1px solid var(--line-strong); }
-.panel:not(.shut) > .panel-body { border-top: 0; }
+   window under it is a closed rectangle in its own right.
+
+   THE WINDOW'S TOP IS BOTH THINGS AT ONCE, which is the one edge that
+   cannot simply be given to one box or the other: a window is wider than
+   its tab, so that edge is INSIDE the figure where the tab sits on it and
+   OUTSIDE it the rest of the way. Removing it altogether left the top of
+   every open window undrawn; leaving it drew a line under the tab. So the
+   body keeps the border and the BAR COVERS THE PART OF IT THAT IS INSIDE --
+   one pixel of the bar's own background, pulled down over it.
+   
+   `margin-bottom: -1px` is that pixel. It is why the bar sat on the body's
+   edge in the first place; what was missing was that the bar has to be
+   OPAQUE there and drawn after, which it is: a bar carries a z-index within
+   its panel and its background is the same ground as the body's. */
+.panel > .bar { border-bottom: 0; }
+.panel:not(.shut) > .bar { margin-bottom: -1px; }
+.panel.shut > .bar { border-bottom: 1px solid var(--line-strong); margin-bottom: 0; }
 
 .bar {
   display: flex; align-items: center; gap: .3rem; flex: none;
