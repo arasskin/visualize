@@ -3251,6 +3251,12 @@ function removeFromRail(panel) {
   if (at < 0) return;
   rail.splice(at, 1);
   packRail();
+  // THE MARKS OF BEING IN A ROW COME OFF WITH IT, and AFTER the packing:
+  // `packRail` sets them on the tabs it lays out, and clearing them before
+  // it runs leaves whatever it decides. A tab pulled onto the graph kept
+  // the rounded corner it had while it was in the corner, and the pixel of
+  // overlap it had while it had a neighbour.
+  panel.root.classList.remove('tab-joined', 'tab-corner');
 }
 
 /* -- the bin ---------------------------------------------------------------

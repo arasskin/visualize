@@ -283,6 +283,18 @@ button:disabled { opacity: .5; cursor: progress; }
 }
 .panel > .panel-body, .panel > .grip { align-self: stretch; }  /* ...the body does not */
 
+/* NO TOP BORDER UNDER ITS OWN TAB. The body is as wide as the window and the
+   bar is only as wide as its name, so the body's top edge runs on past the
+   tab -- and the bar sits on that edge to merge with it. That works while
+   both are the same colour and shows the moment they are not: a selected
+   panel drew a green line along the top of its window, of which the part
+   under its own tab was hidden and the part beyond it was not, so the tab
+   read as a grey notch bitten out of the green.
+   
+   The bar draws that edge instead. It is the piece that knows whether it is
+   a tab or a window at that point. */
+.panel:not(.shut) > .panel-body { border-top-color: transparent; }
+
 .bar {
   display: flex; align-items: center; gap: .3rem; flex: none;
   padding: .4rem var(--gutter); cursor: grab; user-select: none;
@@ -426,11 +438,25 @@ button:disabled { opacity: .5; cursor: progress; }
    are opened and dragged, and this has to beat all of them for as long as
    the selection lasts. Under the compose bar and the search bar, which are
    above everything. */
+/* ABOVE ITS NEIGHBOURS, so the pixel where two tabs overlap is painted in
+   the selected one's colour rather than in whichever happens to come later
+   in the document. A fixed number rather than `raise`, which hands out
+   ever-larger values as panels are opened and dragged: this has to beat all
+   of them for as long as the selection lasts. Still under the compose bar
+   and the search bar, which are above everything. */
 .panel.picked { z-index: 12 !important; }
 
 .panel.picked > .bar { border-color: var(--pick); }
 .panel.picked.shut > .bar { border-bottom-color: var(--pick); }
-.panel.picked > .panel-body { border-color: var(--pick); }
+/* THE SIDES AND FOOT, not the top: the top edge of a window runs on past its
+   own tab, and a coloured line there reads as a notch bitten out of it where
+   the tab sits. The bar draws that edge, being the piece that knows whether
+   it is a tab or a window at any point along it. */
+.panel.picked > .panel-body {
+  border-left-color: var(--pick);
+  border-right-color: var(--pick);
+  border-bottom-color: var(--pick);
+}
 /* The seam stays the body's colour on an open tab, whichever panel it is:
    green across it would put back the line the merge removes. The terminal
    sets its own above; the config's body is the canvas. */
