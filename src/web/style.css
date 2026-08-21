@@ -283,29 +283,37 @@ button:disabled { opacity: .5; cursor: progress; }
 }
 .panel > .panel-body, .panel > .grip { align-self: stretch; }  /* ...the body does not */
 
-/* NO TOP BORDER UNDER ITS OWN TAB. The body is as wide as the window and the
-   bar is only as wide as its name, so the body's top edge runs on past the
-   tab -- and the bar sits on that edge to merge with it. That works while
-   both are the same colour and shows the moment they are not: a selected
-   panel drew a green line along the top of its window, of which the part
-   under its own tab was hidden and the part beyond it was not, so the tab
-   read as a grey notch bitten out of the green.
-   
-   The bar draws that edge instead. It is the piece that knows whether it is
-   a tab or a window at that point. */
-.panel:not(.shut) > .panel-body { border-top-color: transparent; }
+/* -- ONE SHAPE, ONE OUTLINE -------------------------------------------------
+
+   A TAB AND ITS WINDOW ARE A SINGLE FIGURE: a rectangle with a smaller
+   rectangle standing on it, sharing the edge where they meet. The obvious
+   way to draw that is to give both boxes a border and then hide the parts
+   that fall inside -- and that is what this did, for a while, with a rule
+   for each way the parts can be wrong: the seam under the tab, the top of
+   the body beyond the tab, the shut case, the selected case, the terminal
+   case. Every new colour needed another one, and the last of them
+   contradicted the first.
+
+   SO NEITHER BOX DRAWS AN OUTLINE. The bar draws three sides -- the ones on
+   the outside of the figure -- and the body draws three, and the edge they
+   share is drawn by nobody because it is not an edge of the shape. The two
+   pieces meet without a seam to erase, and one colour applies to the whole
+   figure however it is coloured.
+
+   The bar keeps its bottom border only when SHUT, because a tab with no
+   window under it is a closed rectangle in its own right. */
+.panel > .bar { border-bottom: 0; margin-bottom: 0; }
+.panel.shut > .bar { border-bottom: 1px solid var(--line-strong); }
+.panel:not(.shut) > .panel-body { border-top: 0; }
 
 .bar {
   display: flex; align-items: center; gap: .3rem; flex: none;
   padding: .4rem var(--gutter); cursor: grab; user-select: none;
   background: var(--canvas);
   border: 1px solid var(--line-strong);
-  /* Sits ON the body's top edge and erases the line between them, the way a
-     tab merges into its folder rather than being a box stacked on one. */
-  border-bottom-color: var(--canvas);
-  margin-bottom: -1px; position: relative; z-index: 1;
+  position: relative; z-index: 1;
 }
-.panel.shut .bar { border-bottom: 1px solid var(--line-strong); margin-bottom: 0; }
+
 
 /* TABS TOUCH, AND SHARE THE LINE BETWEEN THEM. Sitting flush, each tab's
    left border lands on its neighbour's right one and the pair read as a 2px
@@ -446,21 +454,11 @@ button:disabled { opacity: .5; cursor: progress; }
    and the search bar, which are above everything. */
 .panel.picked { z-index: 12 !important; }
 
+/* THE WHOLE FIGURE GOES GREEN, both pieces, every edge either draws. There
+   is no longer an edge that has to be told to stay a different colour. */
 .panel.picked > .bar { border-color: var(--pick); }
-.panel.picked.shut > .bar { border-bottom-color: var(--pick); }
-/* THE SIDES AND FOOT, not the top: the top edge of a window runs on past its
-   own tab, and a coloured line there reads as a notch bitten out of it where
-   the tab sits. The bar draws that edge, being the piece that knows whether
-   it is a tab or a window at any point along it. */
-.panel.picked > .panel-body {
-  border-left-color: var(--pick);
-  border-right-color: var(--pick);
-  border-bottom-color: var(--pick);
-}
-/* The seam stays the body's colour on an open tab, whichever panel it is:
-   green across it would put back the line the merge removes. The terminal
-   sets its own above; the config's body is the canvas. */
-.panel.picked:not(.shut):not(.term) > .bar { border-bottom-color: var(--canvas); }
+.panel.picked > .panel-body { border-color: var(--pick); }
+
 .bar:active { cursor: grabbing; }
 /* A panel's own status, right of its name: how many config lines failed.
    Quiet enough to ignore. */
@@ -1132,20 +1130,8 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    own padding just below; this gives the bar back the one every other tab
    has. */
 .term > .bar { padding-left: .5rem; padding-right: .5rem; }
-/* NO LINE WHERE THE TAB MEETS ITS WINDOW, the same way the base rule does
-   it: the bar's bottom edge painted in the body's own colour, so the tab
-   merges into the folder rather than sitting on it. This wanted
-   `transparent` while --term was translucent, since painting the seam in a
-   wash would have stacked two of them and read as a line again; with an
-   opaque ground the body's colour is simply the right answer. Shut, the
-   base rule puts the full border back -- a tab with nothing under it needs
-   its own bottom edge. */
-.term .bar { border-bottom-color: var(--term); }
-/* Selected AND open: the sides go green, the seam does not. `.panel.picked >
-   .bar` sets all four edges and outranks the rule above, so the seam has to
-   say so at a specificity that beats it -- otherwise a green line lands
-   exactly where the tab is supposed to merge into its window. */
-.term.picked:not(.shut) > .bar { border-bottom-color: var(--term); }
+/* No seam rule here either: an open tab draws no bottom edge at all, so
+   there is nothing to paint out. See "one shape, one outline". */
 
 /* THE SELECTED TAB, in the same green as the selected config line -- the two
    mark the same idea, so they are the same colour.
