@@ -859,7 +859,13 @@ function makePanel(root, options = {}) {
            // and it has to outlive the browser being resized, a neighbour
            // pushing it along, or anything else that moves the box out from
            // under it. See `resnap`.
-           root.dataset.snapped = landing.join(' ');
+           //
+           // NOT FOR A TAB STILL ON THE RAIL, whose position belongs to the
+           // row rather than to itself -- holding one against an edge fights
+           // the packing and runs away. It still snaps once, here, because
+           // that is what the drop was asking for; it simply is not held
+           // there afterwards. See the note in `resnap`.
+           if (!onRail(panel)) root.dataset.snapped = landing.join(' ');
            const now = root.getBoundingClientRect();
            if (options.onResize) options.onResize(now.width, now.height);
            // THE DRAWING TAKES THE ROOM THAT IS LEFT. A window snapped to an
@@ -3733,6 +3739,19 @@ function resnap() {
     if (!names.length) continue;
     // A shut panel has no size to hold; it takes its edge back when it opens.
     if (root.classList.contains('shut')) continue;
+    // A TAB ON THE RAIL CANNOT HOLD AN EDGE, because its position is not its
+    // own: the packing puts it where the row says, and stretching it to reach
+    // an edge from there makes the row longer, which moves it further along,
+    // which asks for more stretch. That loop diverges -- a window measured at
+    // 1400px wide walked out to 2239px and off the left of the screen in a
+    // few ticks, taking every tab after it with it.
+    //
+    // So the rail wins. A tab is part of a row; a snapped window is a piece
+    // of furniture. It can be either, and being on the rail is the one the
+    // hand chose most recently -- dropping it back on the row is how you say
+    // you want it in the row again.
+    const panel = panelsByRoot.get(root);
+    if (panel && onRail(panel)) { delete root.dataset.snapped; continue; }
     const box = root.getBoundingClientRect();
     const want = Object.assign({}, ...names.map((name) => EDGES[name] && EDGES[name].fill(box)));
     // Per panel, so one window being stretched does not tell every other
@@ -3757,7 +3776,6 @@ function resnap() {
     }
     if (stretched) {
       moved = true;
-      const panel = panelsByRoot.get(root);
       if (panel && panel.resized) panel.resized();
     }
   }
