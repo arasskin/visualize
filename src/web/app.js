@@ -1709,12 +1709,18 @@ function altWalk(by) {
   if (next.shut) {
     next.open();
     altPeeked = next;
+    // AFTER THE ROW HAS SETTLED. Opening a tab makes it claim its window's
+    // width and pushes everything after it along, so where the tab IS is
+    // not known until the packing has run -- revealing before that scrolls
+    // to where it used to be.
+    revealTab(next);
     // A tab opened by walking is not a tab the release should close as
     // though the press had opened it: the walk owns it, and the keyup asks
     // `altPeeked` rather than `altOpened`.
     altOpened = false;
   } else {
     altOpened = false;
+    revealTab(next);
   }
 }
 
@@ -3217,6 +3223,28 @@ function scrollRail(by) {
   railScroll = next;
   packRail();
   return true;
+}
+
+// BRING A TAB INTO VIEW, scrolling the row as little as it takes. Called
+// when the keyboard moves the selection: walking to a tab that is off the
+// side should show it, or the mark moves somewhere you cannot see and the
+// row looks unchanged.
+//
+// SCROLLED TO ITS NEAR EDGE, not to the middle: a tab just past the right
+// edge should come in from the right and stop, rather than the whole row
+// jumping to centre it. The stops are `scrollRail`'s, so this cannot slide
+// past either end.
+function revealTab(panel) {
+  if (!panel || !railOverflows()) return;
+  const bar = panel.root.querySelector('.bar').getBoundingClientRect();
+  // NO MARGIN ON THE LEFT. The row's own left stop is the window edge, so
+  // asking to sit a few pixels inside it is asking for something the scroll
+  // cannot give -- it goes as far as it can and leaves the tab that far
+  // short, which is exactly the case this is meant to fix. A margin on the
+  // right is fine: there is room to spare on that side.
+  const right = innerWidth - 8;
+  if (bar.left < RAIL_LEFT) scrollRail(RAIL_LEFT - bar.left);
+  else if (bar.right > right) scrollRail(right - bar.right);
 }
 
 // A WHEEL OVER THE ROW, either axis. A trackpad swipe sideways arrives as
