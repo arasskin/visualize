@@ -765,15 +765,7 @@ function makePanel(root, options = {}) {
     // that notices meant the neighbours visibly caught up afterwards --
     // the tick is for widths that change with nobody touching anything (a
     // pane retitling itself), not for the one case we are already in.
-    if (onRail(panel)) {
-      // WHERE THE NEIGHBOUR WAS, read before the packing moves it, so the
-      // ghost can be left behind at the spot the window pushed it off.
-      const after = opening ? rail[rail.indexOf(panel) + 1] : null;
-      const wasAt = after ? after.root.getBoundingClientRect().left : 0;
-      packRail();
-      if (after) showShift(after, wasAt);
-      else clearShift();
-    }
+    if (onRail(panel)) packRail();
   });
 
   return panel;
@@ -3209,6 +3201,11 @@ function packRail() {
     x += railSpan(p) + TAB_GAP;
   }
   railEnd = x - TAB_GAP - railScroll;   // where the row ends, unscrolled
+  // THE GHOSTS DESCRIBE THE ROW, so they are rebuilt whenever it is laid
+  // out -- opening, shutting, dragging, scrolling, a window resized. There
+  // is no state to keep in step because there is nothing remembered: the
+  // marks are derived from where the tabs are.
+  showShift();
 }
 
 /* -- WHERE A TAB WENT -------------------------------------------------------
@@ -3228,9 +3225,17 @@ function packRail() {
    the outline is a picture of where it used to be. Anything else would mean
    two things on the page claiming to be the same tab.
 
-   IT GOES AWAY ON THE NEXT MOVE. This is a note about the step just taken,
-   so anything that takes another step -- opening, shutting, dragging,
-   scrolling the row -- clears it. */
+   A STANDING RULE, NOT A NOTE ABOUT THE LAST CLICK. Every open tab that has
+   a tab to its right shows one, for as long as that is true -- so opening a
+   second pane leaves both marks up, and shutting one takes only its own
+   away. It used to be built by the click that opened a tab and cleared by
+   whatever happened next, which meant the mark vanished on a shut, a drag
+   or a scroll while the tab it described was still pushed aside.
+
+   NOTHING IS REMEMBERED. Where a neighbour would stand if the open tab were
+   shut is derivable from the row as it is -- hard against that tab's bar --
+   so the marks are rebuilt from the positions every time the row is laid
+   out, and no captured value can fall out of step with them. */
 let shiftGhost = null;
 
 function clearShift() {
@@ -3239,45 +3244,53 @@ function clearShift() {
   shiftGhost = null;
 }
 
-// Move the ghost along with the row it belongs to. See scrollRail.
-function slideShift(by) {
-  if (!shiftGhost || !by) return;
-  for (const el of shiftGhost.children) {
-    el.style.left = (parseFloat(el.style.left) + by) + 'px';
-  }
-}
-
-function showShift(panel, wasAt) {
+function showShift() {
   clearShift();
-  const now = panel.root.getBoundingClientRect();
-  // NOTHING TO SAY WHEN NOTHING MOVED. A tab that stayed put -- the window
-  // was narrower than the gap, or the row was already against its stop --
-  // gets no ghost, since an arrow of zero length is just a mark on the page.
-  const by = now.left - wasAt;
-  if (by < 1) return;
-
-  const bar = panel.root.querySelector('.bar').getBoundingClientRect();
-  const ghost = document.createElement('div');
-  ghost.className = 'tab-ghost';
-  ghost.style.left = wasAt + 'px';
-  ghost.style.top = RAIL_TOP + 'px';
-  ghost.style.width = bar.width + 'px';
-  ghost.style.height = bar.height + 'px';
-  ghost.textContent = panel.root.querySelector('.bar .name')?.textContent || '';
-
-  // THE ARROW POINTS BACK, from where the tab is now to where it was: the
-  // question the row raises is "where did that go", and the answer runs from
-  // the thing you are looking for to the place you last saw it.
-  const arrow = document.createElement('div');
-  arrow.className = 'tab-ghost-arrow';
-  arrow.style.left = (wasAt + bar.width) + 'px';
-  arrow.style.top = (RAIL_TOP + bar.height / 2) + 'px';
-  arrow.style.width = Math.max(0, by - bar.width) + 'px';
-
   const wrap = document.createElement('div');
   wrap.className = 'tab-shift';
-  wrap.appendChild(ghost);
-  wrap.appendChild(arrow);
+
+  // EVERY OPEN TAB THAT HAS A NEIGHBOUR, not just the one most recently
+  // opened. This is a standing description of the row rather than a note
+  // about the last click: open a second pane and BOTH windows are pushing
+  // somebody along, so both say where they pushed them from.
+  rail.forEach((p, i) => {
+    const after = rail[i + 1];
+    if (p.shut || !after) return;
+
+    const bar = p.root.querySelector('.bar').getBoundingClientRect();
+    const now = after.root.getBoundingClientRect();
+    // WHERE THE NEIGHBOUR WOULD BE IF THIS TAB WERE SHUT: hard against this
+    // tab's bar. Derived rather than remembered -- the position a tab was
+    // pushed from is a fact about the row as it stands, so it survives
+    // anything that rebuilds the row and needs nothing captured beforehand.
+    const wasAt = bar.right + TAB_GAP;
+    const by = now.left - wasAt;
+    // Nothing to say when nothing moved: a window narrower than the tab, or
+    // a row against its stop. An arrow of no length is a mark on the page.
+    if (by < 1) return;
+
+    const ghost = document.createElement('div');
+    ghost.className = 'tab-ghost';
+    ghost.style.left = wasAt + 'px';
+    ghost.style.top = RAIL_TOP + 'px';
+    ghost.style.width = bar.width + 'px';
+    ghost.style.height = bar.height + 'px';
+    ghost.textContent = after.root.querySelector('.bar .name')?.textContent || '';
+
+    // THE ARROW POINTS BACK, from where the tab is now to where it was: the
+    // question the row raises is "where did that go", and the answer runs
+    // from the thing you are looking for to the place you last saw it.
+    const arrow = document.createElement('div');
+    arrow.className = 'tab-ghost-arrow';
+    arrow.style.left = (wasAt + bar.width) + 'px';
+    arrow.style.top = (RAIL_TOP + bar.height / 2) + 'px';
+    arrow.style.width = Math.max(0, by - bar.width) + 'px';
+
+    wrap.appendChild(ghost);
+    wrap.appendChild(arrow);
+  });
+
+  if (!wrap.children.length) return;
   document.body.appendChild(wrap);
   shiftGhost = wrap;
 }
@@ -3305,13 +3318,9 @@ function scrollRail(by) {
   const most = Math.min(0, (innerWidth - RAIL_LEFT) - railEnd);
   const next = Math.max(most, Math.min(0, railScroll + by));
   if (next === railScroll) return false;
-  // THE GHOST TRAVELS WITH THE ROW. It marks a place among the tabs, not a
-  // place on the screen, so it slides exactly as far as they do -- otherwise
-  // scrolling to bring the opened window into view (which is what happens on
-  // the very next line of a walk) would leave the outline pointing at
-  // whatever slid into its spot.
-  slideShift(next - railScroll);
   railScroll = next;
+  // The ghosts are redrawn by the packing from the row's new positions, so
+  // there is nothing here to keep in step.
   packRail();
   return true;
 }
@@ -3519,8 +3528,6 @@ function slotFor(panel) {
 
 function railDrag(panel) {
   railDragging = panel.root;
-  // A HAND ON THE ROW ends the note about the last step.
-  clearShift();
   // OFF THE MOMENT IT IS PICKED UP. `packRail` clears these for the held tab
   // too, but it only runs when the drag is near the rail and changes slot --
   // a tab pulled straight down would keep its rounded corner all the way to

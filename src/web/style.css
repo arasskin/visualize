@@ -58,7 +58,7 @@
   /* The radius of the disc in the page's corner. On the ROOT rather than on
      a panel: the disc belongs to the page, and the tab that cuts itself
      around it has to measure by the same number. */
-  --notch: 9px;
+  --notch: 12px;
 
   /* THE CORNER'S DISC, the same maroon the favicon is drawn on. The page's
      top-left corner is where the site's own mark sits in the browser tab
