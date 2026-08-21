@@ -58,7 +58,7 @@
   /* The radius of the disc in the page's corner. On the ROOT rather than on
      a panel: the disc belongs to the page, and the tab that cuts itself
      around it has to measure by the same number. */
-  --notch: 12px;
+  --notch: 15px;
 
   /* THE CORNER'S DISC, the same maroon the favicon is drawn on. The page's
      top-left corner is where the site's own mark sits in the browser tab
@@ -404,7 +404,10 @@ button:disabled { opacity: .5; cursor: progress; }
    sitting in it. It is drawn once, fixed to the viewport's 0,0, and is
    always there. */
 .notch {
-  position: fixed; left: 0; top: 0; z-index: 6;
+  /* UNDER EVERY TAB. A panel's own z-index starts at 5 and `raise` only ever
+     hands out larger ones, so 4 keeps the disc below the tab whose border
+     curves around it -- from the first paint, before anything is clicked. */
+  position: fixed; left: 0; top: 0; z-index: 4;
   /* Centred on the corner: the box is twice the radius and three quarters of
      it hangs off the page, so exactly the quarter disc shows. */
   width: calc(var(--notch) * 2); height: calc(var(--notch) * 2);
@@ -454,10 +457,18 @@ button:disabled { opacity: .5; cursor: progress; }
    ON THE PANEL, NOT THE BAR: the bar's mask applies to its descendants, so
    an arc inside the bar would be erased by the very cut it lines.
 
-   Above the disc, since the line goes round the OUTSIDE of it. */
+   THE Z-INDEX IS THE PANEL'S, NOT ITS OWN. A panel carries a z-index, which
+   makes it a stacking context -- so a number on this pseudo-element only
+   orders it WITHIN the tab, and cannot lift it over the disc, which is a
+   child of the page rather than of the tab. The line was there from the
+   first paint and the disc was simply on top of it; it appeared on the
+   first click because that raises the panel above the disc.
+
+   The panel itself has to outrank the disc, so the arc travels up with it.
+   See `--disc-z` on the disc: one below the floor a panel ever sits at. */
 .panel.tab-corner::before {
   content: '';
-  position: fixed; left: 0; top: 0; z-index: 7;
+  position: fixed; left: 0; top: 0; z-index: 1;
   width: var(--notch); height: var(--notch);
   box-sizing: border-box;
   border-bottom-right-radius: var(--notch);
