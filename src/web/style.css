@@ -38,19 +38,24 @@
 
   /* WHAT IS SELECTED. One colour for both of them, because they are one
      idea: the tab the keyboard is aimed at, and the config line it is aimed
-     at, are answers to the same question and should not be two greens.
+     at, are answers to the same question and should not be two colours.
      Distinct from --bad and from --lit, so nothing on this page reads as an
      error or a hover by accident.
 
-     DARKER THAN IT LOOKS IT SHOULD BE, because most of what this colour
-     draws is a ONE PIXEL LINE. A hairline needs far more contrast than text
-     to read as a deliberate colour rather than as a slightly-off edge, and
-     the first green here managed 4.87 against the canvas where the dark
-     theme's managed 8.12 -- so the same mark that carried in one theme was
-     nearly invisible in the other. This is 8.06, which puts the two within
-     a hair of each other. */
-  --pick: #0f5a2a;
-  --pick-wash: #0f5a2a1c;
+     THE SITE'S OWN MAROON -- the same value as `--mark` below, which is the
+     favicon's, which is the disc in the corner. Selection used to be green,
+     and green made a third unrelated hue on a page that already had maroon
+     for the mark and orange for the rails; it also shouted loudest of the
+     three. Selection and the corner mark are now literally one colour, which
+     leaves the rails as the only other, and orange against maroon is a
+     distinction nobody has to be told about.
+
+     KEPT IN STEP WITH `--mark` BY HAND, not by pointing one at the other. A
+     var here would say the two are the same thing, and they are not: one is
+     what the site is, the other is what selection means, and the day either
+     moves it should move alone. */
+  --pick: #8b1a2b;
+  --pick-wash: #8b1a2b1c;
 
   /* The tab rail's guides. Orange, which nothing else here is. */
   --rail: #d2811e;
@@ -124,9 +129,13 @@
     --bad-line: #ff8a7a55;
     --bad-wash: #ff8a7a14;
 
-    /* Lifted to read against the dark ground, like every other colour here. */
-    --pick: #6bbf8a;
-    --pick-wash: #6bbf8a24;
+    /* Lifted to read against the dark ground, like every other colour here,
+       and to the same value `--mark` is lifted to. Where the light theme's
+       maroon reads 8.89 against its canvas, this reads 3.59 against the dark
+       one -- softer than the green it replaces, which is the point, and the
+       softer of the two themes. */
+    --pick: #c2415a;
+    --pick-wash: #c2415a24;
 
     --rail: #e8a545;
 
@@ -403,7 +412,7 @@ button:disabled { opacity: .5; cursor: progress; }
 /* TABS TOUCH, AND EVERY TAB DRAWS ALL FOUR OF ITS OWN EDGES. Sitting flush,
    two neighbours put two lines in the same pixel, and the one on top wins --
    which is what the stacking is for: the selected tab is above the rest, so
-   where it meets a neighbour the line is ITS colour, green.
+   where it meets a neighbour the line is ITS colour, the maroon.
 
    Not borrowed, and not overlapped. Both were tried. Pulling each tab a
    pixel onto the next collapsed the pair of lines into one, but the tabs are
@@ -521,7 +530,7 @@ button:disabled { opacity: .5; cursor: progress; }
    it is drawn in a tab's own grey; what says it is a picture rather than the
    thing is that its lines are broken. That is difference enough, and it
    costs nothing: a second colour here would have been a third meaning to
-   learn, next to green for selected and orange for the rails.
+   learn, next to maroon for selected and orange for the rails.
 
    pointer-events:none: it is a picture of a tab, not a tab. Clicks belong to
    whatever is underneath, and to the real tab it is a picture OF. */
@@ -565,7 +574,7 @@ button:disabled { opacity: .5; cursor: progress; }
    and a strip of furniture across the top of the drawing would cost the page
    its whole point for a thing you need only while aiming.
 
-   Orange because nothing else on the page is: green means selected and red
+   Orange because nothing else on the page is: maroon means selected and red
    means found or wrong, and a guide that borrows either would be read as
    saying something about the tab rather than about where it can go.
 
@@ -639,20 +648,20 @@ button:disabled { opacity: .5; cursor: progress; }
   100% { transform: none; }
 }
 
-/* THE SELECTED TAB, in the same green as the selected config line -- the two
+/* THE SELECTED TAB, in the same maroon as the selected config line -- the two
    mark the same idea, so they are one colour from one token.
 
    ON THE BAR, because the bar IS the tab: a shut panel is nothing else, and
    an outline round the whole panel would jump from a tab-sized mark to a
    window-sized one on opening.
 
-   `border-color` rather than an `outline`, so the green replaces the edge
+   `border-color` rather than an `outline`, so the maroon replaces the edge
    the tab already has instead of drawing a second line outside it -- which
    at this size reads as a thicker border rather than a coloured one. */
 /* THE SELECTED PANEL SITS ABOVE ITS NEIGHBOURS. The tabs overlap by a pixel
    so their shared border collapses into one line -- which means one of the
    two paints over the other, and by default that is whichever comes later in
-   the document. So a grey tab to the right could eat the green edge of the
+   the document. So a grey tab to the right could eat the maroon edge of the
    selected pane beside it, one pixel at a time, which is exactly the pixel
    that says which pane is selected.
    
@@ -678,7 +687,7 @@ button:disabled { opacity: .5; cursor: progress; }
 .panel.picked { z-index: 12; }
 
 /* THE WHOLE FIGURE GOES GREEN, both pieces, all four edges of each. Every
-   edge a selected panel draws is its own, so every one of them is green --
+   edge a selected panel draws is its own, so every one of them is maroon --
    including the foot the tab shares with its window, which is drawn once,
    by the tab, and is the line the window hangs from. */
 .panel.picked > .bar { border-color: var(--pick); }
@@ -783,10 +792,10 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 .row.picked { position: relative; }
 .row.picked::before {
   content: ''; position: absolute; left: -.45rem; top: 0; bottom: 0;
-  /* GREEN, and the same green the selected tab wears -- the two mark the
-     same idea and used to be told apart only by which panel you were
-     looking at. Fully opaque now: at .55 the bar read as a grey with a
-     tint rather than as a colour meaning something. */
+  /* THE SAME MAROON THE SELECTED TAB WEARS -- the two mark the same idea and
+     used to be told apart only by which panel you were looking at. Fully
+     opaque: at .55 the bar read as a grey with a tint rather than as a
+     colour meaning something. */
   width: 2px; background: var(--pick);
 }
 .row.picked input {
@@ -1359,18 +1368,18 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    whatever ground it stands on. See the note beside
    `.panel:not(.shut) > .bar`. */
 
-/* THE SELECTED TAB, in the same green as the selected config line -- the two
+/* THE SELECTED TAB, in the same maroon as the selected config line -- the two
    mark the same idea, so they are the same colour.
    
    ON THE BAR, because the bar IS the tab: a shut panel is nothing else, and
    an outline round the whole panel would jump from a tab-sized mark to a
    window-sized one on opening.
    
-   `border-color` rather than an `outline`, so the green replaces the edge
+   `border-color` rather than an `outline`, so the maroon replaces the edge
    the tab already has instead of drawing a second line outside it -- which
    at this size reads as a thicker border, not a coloured one. The bottom
    edge is left to the rule above: an OPEN tab merges into its window, and a
-   green line across that seam would put back the very rule that one
+   maroon line across that seam would put back the very rule that one
    removes. */
 .term .panel-body { padding: .35rem .5rem; }
 

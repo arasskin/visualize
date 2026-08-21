@@ -3119,7 +3119,7 @@ const RAIL_GRAB = 56;         // how near a drag has to come to count as "on"
 // comes out is settled by the stacking, the selected tab being above the
 // rest. Advancing by the full width instead left the two edges side by side:
 // a 2px rule between neighbours, twice the weight of every other line, and
-// visibly two lines wherever one of them was green.
+// visibly two lines wherever one of them was the selected colour.
 const TAB_GAP = -1;
 // WHERE THE ROW STARTS: hard against the left edge, for the same reason. The
 // corner marks keep their own inset -- they are single glyphs floating on
