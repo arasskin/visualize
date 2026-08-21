@@ -3258,6 +3258,12 @@ function showShift() {
     if (p.shut || !after) return;
 
     const bar = p.root.querySelector('.bar').getBoundingClientRect();
+    // THE GHOST IS A PICTURE OF THE TAB THAT MOVED, so it is measured from
+    // THAT tab -- its own bar, not the bar of the one that pushed it. Sized
+    // from the pusher, a ghost of `zsh` shoved along by `visualize` came out
+    // visualize-wide, and a narrow tab pushed by a wide one came out too
+    // small for its own name to fit.
+    const mine = after.root.querySelector('.bar').getBoundingClientRect();
     const now = after.root.getBoundingClientRect();
     // WHERE THE NEIGHBOUR WOULD BE IF THIS TAB WERE SHUT: hard against this
     // tab's bar. Derived rather than remembered -- the position a tab was
@@ -3273,8 +3279,8 @@ function showShift() {
     ghost.className = 'tab-ghost';
     ghost.style.left = wasAt + 'px';
     ghost.style.top = RAIL_TOP + 'px';
-    ghost.style.width = bar.width + 'px';
-    ghost.style.height = bar.height + 'px';
+    ghost.style.width = mine.width + 'px';
+    ghost.style.height = mine.height + 'px';
     ghost.textContent = after.root.querySelector('.bar .name')?.textContent || '';
 
     // THE ARROW POINTS BACK, from where the tab is now to where it was: the
@@ -3282,9 +3288,9 @@ function showShift() {
     // from the thing you are looking for to the place you last saw it.
     const arrow = document.createElement('div');
     arrow.className = 'tab-ghost-arrow';
-    arrow.style.left = (wasAt + bar.width) + 'px';
-    arrow.style.top = (RAIL_TOP + bar.height / 2) + 'px';
-    arrow.style.width = Math.max(0, by - bar.width) + 'px';
+    arrow.style.left = (wasAt + mine.width) + 'px';
+    arrow.style.top = (RAIL_TOP + mine.height / 2) + 'px';
+    arrow.style.width = Math.max(0, by - mine.width) + 'px';
 
     wrap.appendChild(ghost);
     wrap.appendChild(arrow);
