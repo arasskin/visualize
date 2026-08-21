@@ -352,7 +352,13 @@ wireEdges();
 window.addEventListener('load', fitSoon);
 // Refit on resize only while untouched, so a resize never throws away a view
 // the user panned to deliberately.
-window.addEventListener('resize', () => { if (!touched) fit(); });
+window.addEventListener('resize', () => {
+  // THE EDGES MOVED, so anything held against one follows them. Before the
+  // fit, since where the windows end up is what the drawing has to fit
+  // around -- see `resnap` and `freeArea`.
+  resnap();
+  if (!touched) fit();
+});
 
 // -- the config editor -------------------------------------------------------
 // Not a text editor -- a list of lines with buttons. Every button is an edit to
@@ -847,6 +853,13 @@ function makePanel(root, options = {}) {
            if (want.width !== undefined) {
              root.style.width = Math.max(options.minWidth || 240, want.width) + 'px';
            }
+           // WRITTEN DOWN, because staying snapped is an INTENT and not a
+           // measurement. Which edges a window reaches is a fact about right
+           // now; that it was PUT there is a fact about what was asked for,
+           // and it has to outlive the browser being resized, a neighbour
+           // pushing it along, or anything else that moves the box out from
+           // under it. See `resnap`.
+           root.dataset.snapped = landing.join(' ');
            const now = root.getBoundingClientRect();
            if (options.onResize) options.onResize(now.width, now.height);
            // THE DRAWING TAKES THE ROOM THAT IS LEFT. A window snapped to an
@@ -858,6 +871,11 @@ function makePanel(root, options = {}) {
            // that view was chosen against has just changed shape, and leaving
            // it alone means leaving it half behind a panel.
            fit();
+         } else {
+           // DRAGGED OFF THE EDGE IS UNSNAPPING. The hand that put it there
+           // is the hand taking it away, and a window that no longer reaches
+           // the rail should not spring back to it on the next resize.
+           delete root.dataset.snapped;
          }
          showEdges([]);
        });
@@ -868,6 +886,13 @@ function makePanel(root, options = {}) {
     get shut() { return root.classList.contains('shut'); },
     open() { if (panel.shut) bar.click(); },
     toggle() { bar.click(); },
+    // TELL THE INSIDE THE OUTSIDE MOVED. A terminal has to hear about a new
+    // size so it can reflow the pty; `resnap` changes a window's size without
+    // any grip being touched, so it needs the same call the grip makes.
+    resized() {
+      const box = root.getBoundingClientRect();
+      if (options.onResize) options.onResize(box.width, box.height);
+    },
   };
   panelsByRoot.set(root, panel);
 
@@ -3531,6 +3556,11 @@ function railChanged() {
 setInterval(() => {
   if (railDragging) return;
   if (railChanged()) packRail();
+  // HELD AGAINST THEIR EDGES. A window pushed along by a neighbour being
+  // resized, or by the row repacking, has drifted off the edge it was put
+  // on; this puts it back. Watched here for the same reason the room is:
+  // there is no one event that means "something moved a panel".
+  resnap();
   // THE DRAWING TAKES BACK WHAT IT IS GIVEN. A snapped window shut, moved or
   // pulled off its edge leaves room the graph should spread into, the same
   // way it gave room up when the window arrived. Watched here rather than
@@ -3671,6 +3701,67 @@ for (const name of Object.keys(EDGES)) {
   mark.innerHTML = '<i></i>';
   document.body.appendChild(mark);
   edgeMarks[name] = mark;
+}
+
+/* HOLD EVERY SNAPPED WINDOW AGAINST ITS EDGE.
+
+   A snap is not over when the grip is let go. The window was put against an
+   edge, and it should still be against that edge after the browser is made
+   smaller, after a neighbour is resized and shoves it along, after anything
+   moves the box out from under it -- otherwise "snapped" lasts exactly as
+   long as nothing happens.
+
+   RE-APPLIED FROM THE SAME `fill` THE DROP USED, so there is one definition
+   of what each edge means and no second copy to drift. A window that has
+   drifted off its edge is simply stretched back to it.
+
+   WHEN THE ROOM RUNS OUT, THE WINDOW SLIDES rather than overhanging. A
+   viewport narrowed until `innerWidth - left` is under the minimum width
+   cannot be answered by stretching -- the window would have to shrink below
+   what it is allowed to be. So it keeps its minimum and MOVES: the edge it
+   was snapped to is the promise, and the far corner is what gives. Without
+   this a window snapped to the right hangs off the side the moment the
+   browser is made narrow, which is the bug this exists to stop.
+
+   A window too small to use is still worse than one too big to fit, so the
+   minimums are never crossed -- past the point where even a slid window
+   cannot fit, it overhangs on the far side rather than the snapped one. */
+function resnap() {
+  let moved = false;
+  for (const root of document.querySelectorAll('.panel[data-snapped]')) {
+    const names = root.dataset.snapped.split(' ').filter(Boolean);
+    if (!names.length) continue;
+    // A shut panel has no size to hold; it takes its edge back when it opens.
+    if (root.classList.contains('shut')) continue;
+    const box = root.getBoundingClientRect();
+    const want = Object.assign({}, ...names.map((name) => EDGES[name] && EDGES[name].fill(box)));
+    // Per panel, so one window being stretched does not tell every other
+    // window that it moved.
+    let stretched = false;
+    if (want.height !== undefined) {
+      const h = Math.max(120, want.height);
+      if (Math.abs(box.height - h) > 0.5) { root.style.height = h + 'px'; stretched = true; }
+      // Slid up when the room below the top is less than the window may be.
+      if (h > innerHeight - box.top) {
+        const top = Math.max(0, innerHeight - h);
+        if (Math.abs(box.top - top) > 0.5) { root.style.top = top + 'px'; stretched = true; }
+      }
+    }
+    if (want.width !== undefined) {
+      const w = Math.max(240, want.width);
+      if (Math.abs(box.width - w) > 0.5) { root.style.width = w + 'px'; stretched = true; }
+      if (w > innerWidth - box.left) {
+        const left = Math.max(0, innerWidth - w);
+        if (Math.abs(box.left - left) > 0.5) { root.style.left = left + 'px'; stretched = true; }
+      }
+    }
+    if (stretched) {
+      moved = true;
+      const panel = panelsByRoot.get(root);
+      if (panel && panel.resized) panel.resized();
+    }
+  }
+  return moved;
 }
 
 // Which edges this panel is close enough to land on -- none, one, or both.
