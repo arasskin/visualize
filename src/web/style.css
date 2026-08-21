@@ -40,9 +40,17 @@
      idea: the tab the keyboard is aimed at, and the config line it is aimed
      at, are answers to the same question and should not be two greens.
      Distinct from --bad and from --lit, so nothing on this page reads as an
-     error or a hover by accident. */
-  --pick: #2f7d4f;
-  --pick-wash: #2f7d4f1c;
+     error or a hover by accident.
+
+     DARKER THAN IT LOOKS IT SHOULD BE, because most of what this colour
+     draws is a ONE PIXEL LINE. A hairline needs far more contrast than text
+     to read as a deliberate colour rather than as a slightly-off edge, and
+     the first green here managed 4.87 against the canvas where the dark
+     theme's managed 8.12 -- so the same mark that carried in one theme was
+     nearly invisible in the other. This is 8.06, which puts the two within
+     a hair of each other. */
+  --pick: #0f5a2a;
+  --pick-wash: #0f5a2a1c;
 
   /* The tab rail's guides. Orange, which nothing else here is. */
   --rail: #d2811e;
@@ -349,7 +357,26 @@ button:disabled { opacity: .5; cursor: progress; }
    What is left is one line under the tab that should not be there, and it is
    covered by the bar's background: opaque, and painted after the body since
    the bar carries a z-index within the panel. */
-.panel:not(.shut) > .bar { border-bottom-color: transparent; }
+/* NO FOOT, AND THE WINDOW RISES A PIXEL TO TAKE ITS PLACE.
+   
+   A border that is merely transparent is still a border, and where the tab's
+   sides meet it the browser MITRES the corner at 45 degrees -- cutting a
+   diagonal out of the line exactly where the tab should run straight down
+   into its window. So the tab draws no bottom edge at all, and there is
+   nothing to mitre into.
+   
+   THE WINDOW'S TOP BORDER IS THEN THE ROW'S BOTTOM LINE. Pulled up by one
+   pixel, it lands exactly where the tab's foot would have been: the line is
+   drawn once, by the window, and runs the full width of it -- under the tab
+   as the edge the tab stands on, and past the tab as the top of the window.
+   One line doing one job, where before there were two boxes each drawing
+   half of it and a corner where they met. */
+.panel:not(.shut) > .bar {
+  border-bottom: 0;
+  /* The pixel the border was occupying, given back -- so an open tab is the
+     same height as a shut one and the row stays level. */
+  padding-bottom: calc(.4rem + 1px);
+}
 
 .bar {
   display: flex; align-items: center; gap: .3rem; flex: none;
@@ -1200,10 +1227,9 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    own padding just below; this gives the bar back the one every other tab
    has. */
 .term > .bar { padding-left: .5rem; padding-right: .5rem; }
-/* The open bar's bottom border is painted in the ground it stands on, and a
-   terminal's ground is not the canvas -- see "one shape, one outline" for
-   why it is painted rather than removed. */
-.term:not(.shut) > .bar { border-bottom-color: var(--term); }
+/* No foot rule here either: an open tab has no bottom border at all,
+   whatever ground it stands on. See the note beside
+   `.panel:not(.shut) > .bar`. */
 
 /* THE SELECTED TAB, in the same green as the selected config line -- the two
    mark the same idea, so they are the same colour.
