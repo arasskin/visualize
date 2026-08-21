@@ -3165,6 +3165,13 @@ function packRail() {
     // makes picking it up feel like picking it up.
     const held = p.root === railDragging;
     p.root.classList.toggle('tab-joined', i > 0 && !held);
+    // AFTER AN OPEN TAB, a tab has a window to its left rather than another
+    // tab, and a window draws its own right edge -- so there is no line to
+    // share and the pixel of overlap would be a collision. See the rule in
+    // style.css.
+    const previous = i > 0 ? rail[i - 1] : null;
+    p.root.classList.toggle('tab-after-open',
+                            !!previous && !previous.shut && !held);
     // THE TAB IN THE CORNER, which is the leftmost one and only while the
     // row is scrolled home: scrolled along, the first tab is off the left
     // edge and whatever is under the corner is passing through rather than

@@ -374,6 +374,13 @@ button:disabled { opacity: .5; cursor: progress; }
    the panel takes the body with it and the tabs still overlap by the pixel
    that collapses their shared border. */
 .panel.tab-joined { margin-left: -1px; }
+/* EXCEPT AFTER AN OPEN ONE. The pull exists so two tabs share the line
+   between them -- but an open tab's neighbour is not sharing a line with a
+   tab, it is standing next to a WINDOW, whose own right edge is already
+   drawn there. Pulling onto that is an overlap rather than a merge, so the
+   tab after an open one keeps its distance. The rail says which those are,
+   since it is what knows the order. */
+.panel.tab-after-open { margin-left: 0; }
 
 /* THE CORNER. Firefox rounds the window's own corners, so a square tab
    pressed into one has its top-left poking past the curve -- a small wedge
@@ -510,7 +517,16 @@ button:disabled { opacity: .5; cursor: progress; }
 
 /* THE WHOLE FIGURE GOES GREEN, both pieces, every edge either draws. There
    is no longer an edge that has to be told to stay a different colour. */
-.panel.picked > .bar { border-color: var(--pick); }
+/* THE SIDES AND THE TOP, never the foot: whether the foot draws at all is
+   the SHAPE's business -- a shut tab has one, an open tab does not -- and a
+   `border-color` shorthand here was repainting it, so an open selected tab
+   drew a green line between itself and its own window. */
+.panel.picked > .bar {
+  border-top-color: var(--pick);
+  border-left-color: var(--pick);
+  border-right-color: var(--pick);
+}
+.panel.picked.shut > .bar { border-bottom-color: var(--pick); }
 .panel.picked > .panel-body { border-color: var(--pick); }
 
 .bar:active { cursor: grabbing; }
