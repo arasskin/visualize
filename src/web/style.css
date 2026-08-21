@@ -323,60 +323,25 @@ button:disabled { opacity: .5; cursor: progress; }
    edge in the first place; what was missing was that the bar has to be
    OPAQUE there and drawn after, which it is: a bar carries a z-index within
    its panel and its background is the same ground as the body's. */
-/* -- TWO SHAPES ------------------------------------------------------------
+/* -- ONE SHAPE, PLUS A WINDOW -----------------------------------------------
 
-   A SHUT TAB AND AN OPEN ONE ARE DIFFERENT FIGURES, and every attempt to
-   draw them as one thing with an adjustment went wrong somewhere else: the
-   seam under the tab, the window's top past the tab, the two pixels an open
-   window rose alongside its neighbour. Each fix moved a pixel from one place
-   to another.
+   EVERY TAB IS A RECTANGLE. The bar draws all four of its sides, shut or
+   open, and its bottom edge is the rail's bottom line -- which is the whole
+   of what makes the row read as a row: every tab in it, in either state,
+   ends on the same line.
 
-   SHUT is a rectangle. The bar draws all four sides and there is nothing
-   else to it.
+   AN OPEN TAB HANGS A WINDOW OFF THAT LINE. The body is a second rectangle
+   starting where the tab ended, sharing the one edge between them: the body
+   pulls up by a pixel so its top border lands on the tab's bottom border
+   rather than a pixel under it, and the two lines become one.
 
-   OPEN is a tab with a window hanging off it, drawn as two boxes that stack
-   without either moving into the other:
-
-     - the bar draws its top, left and right, and NO bottom -- but keeps the
-       bottom's WIDTH, painted in the ground below, so an open tab is exactly
-       as tall as a shut one and the row stays level;
-     - the body draws its left, right and bottom, and a top that is only
-       visible where the bar is not standing on it.
-
-   Nothing is pulled anywhere. The window begins where the tab row ends,
-   which is what makes it meet the tab beside it at a corner and nowhere
-   else. */
-.panel > .bar { border-bottom: 1px solid var(--line-strong); }
-/* THE OPEN TAB'S FOOT IS THE WINDOW'S TOP EDGE. Both boxes want to draw a
-   line in the same place: the bar's bottom border and the body's top border
-   are one pixel of the same figure. So only one of them draws it -- the
-   BODY, along its whole width -- and the bar paints its own in the ground it
-   stands on. That keeps the bar exactly as tall as a shut one, which is what
-   holds the row level, and leaves no pixel of overlap to pull anywhere.
-   
-   What is left is one line under the tab that should not be there, and it is
-   covered by the bar's background: opaque, and painted after the body since
-   the bar carries a z-index within the panel. */
-/* NO FOOT, AND THE WINDOW RISES A PIXEL TO TAKE ITS PLACE.
-   
-   A border that is merely transparent is still a border, and where the tab's
-   sides meet it the browser MITRES the corner at 45 degrees -- cutting a
-   diagonal out of the line exactly where the tab should run straight down
-   into its window. So the tab draws no bottom edge at all, and there is
-   nothing to mitre into.
-   
-   THE WINDOW'S TOP BORDER IS THEN THE ROW'S BOTTOM LINE. Pulled up by one
-   pixel, it lands exactly where the tab's foot would have been: the line is
-   drawn once, by the window, and runs the full width of it -- under the tab
-   as the edge the tab stands on, and past the tab as the top of the window.
-   One line doing one job, where before there were two boxes each drawing
-   half of it and a corner where they met. */
-.panel:not(.shut) > .bar {
-  border-bottom: 0;
-  /* The pixel the border was occupying, given back -- so an open tab is the
-     same height as a shut one and the row stays level. */
-  padding-bottom: calc(.4rem + 1px);
-}
+   That is the whole figure. Earlier versions had the tab give its bottom
+   border back as padding so the window could draw the line instead, which
+   left the open tab's foot a pixel below the shut tabs beside it -- the
+   lines staggered where they should have run straight through. Nothing is
+   borrowed and nothing is given back now; each box draws its own edges and
+   the overlap puts two of them in the same pixel. */
+.panel:not(.shut) > .panel-body { margin-top: -1px; }
 
 .bar {
   display: flex; align-items: center; gap: .3rem; flex: none;
