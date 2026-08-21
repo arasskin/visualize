@@ -3107,12 +3107,14 @@ let railEnd = 0;
 // left a band of graph above it that read as a gap it had fallen short of.
 const RAIL_TOP = 0;
 const RAIL_GRAB = 56;         // how near a drag has to come to count as "on"
-// TABS TOUCH. No gap between them and none before the first: a row of tabs
-// is one strip of them, and a tab's own border is the line between it and
-// its neighbour. Spacing them turned that one line into two with a stripe of
-// graph showing through, which reads as several small windows rather than as
-// a row.
-const TAB_GAP = 0;
+// TABS OVERLAP BY THEIR SHARED BORDER. A tab starts on the very pixel the
+// one before it drew its right edge in, so the two lines land on top of each
+// other and read as the single line between the pair -- and which colour it
+// comes out is settled by the stacking, the selected tab being above the
+// rest. Advancing by the full width instead left the two edges side by side:
+// a 2px rule between neighbours, twice the weight of every other line, and
+// visibly two lines wherever one of them was green.
+const TAB_GAP = -1;
 // WHERE THE ROW STARTS: hard against the left edge, for the same reason. The
 // corner marks keep their own inset -- they are single glyphs floating on
 // the drawing, where this is a strip anchored to the top of it.

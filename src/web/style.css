@@ -500,18 +500,11 @@ button:disabled { opacity: .5; cursor: progress; }
    still sits above the unselected ones. */
 .panel.picked { z-index: 12; }
 
-/* THE WHOLE FIGURE GOES GREEN, both pieces, every edge either draws. There
-   is no longer an edge that has to be told to stay a different colour. */
-/* THE SIDES AND THE TOP, never the foot: whether the foot draws at all is
-   the SHAPE's business -- a shut tab has one, an open tab does not -- and a
-   `border-color` shorthand here was repainting it, so an open selected tab
-   drew a green line between itself and its own window. */
-.panel.picked > .bar {
-  border-top-color: var(--pick);
-  border-left-color: var(--pick);
-  border-right-color: var(--pick);
-}
-.panel.picked.shut > .bar { border-bottom-color: var(--pick); }
+/* THE WHOLE FIGURE GOES GREEN, both pieces, all four edges of each. Every
+   edge a selected panel draws is its own, so every one of them is green --
+   including the foot the tab shares with its window, which is drawn once,
+   by the tab, and is the line the window hangs from. */
+.panel.picked > .bar { border-color: var(--pick); }
 .panel.picked > .panel-body { border-color: var(--pick); }
 
 .bar:active { cursor: grabbing; }
