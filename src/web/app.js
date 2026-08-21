@@ -671,6 +671,13 @@ function makePanel(root, options = {}) {
   const body = root.querySelector('.panel-body');
   const grip = root.querySelector('.grip');
 
+  // THE BITE IN THE CORNER, on every panel because any of them can be
+  // dragged into first place. The stylesheet shows it only on whichever tab
+  // is actually in the corner -- see `tab-corner`.
+  const notch = document.createElement('div');
+  notch.className = 'notch';
+  root.appendChild(notch);
+
   // Dragging the bar moves the panel; dragging the grip resizes it. Both are
   // the same gesture with a different thing on the end, so they share one
   // pointer-capture path.

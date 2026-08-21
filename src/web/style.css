@@ -271,6 +271,7 @@ button:disabled { opacity: .5; cursor: progress; }
   touch-action: none;  /* dragging the bar must not also pan the graph */
   --gutter: .5rem;     /* one gutter for the bar and the rows below it, so a
                           panel's title and its contents share a left edge */
+  --notch: 9px;        /* the radius of the bite in the corner tab */
 }
 .panel.shut { width: auto !important; height: auto !important; }
 .panel.shut .panel-body, .panel.shut .grip { display: none; }
@@ -367,21 +368,49 @@ button:disabled { opacity: .5; cursor: progress; }
    or vanished where there was nothing to borrow from. A border that belongs
    to somebody else is a border that disappears when they change. */
 
-/* THE CORNER. Firefox rounds the window's own corners, so a square tab
-   pressed into one has its top-left poking past the curve -- a small wedge
-   of tab where the window has already stopped. Rounding that one corner to
-   match tucks it back inside.
-   
+/* THE CORNER, CUT AS A PUZZLE PIECE. Some browser windows round their own
+   top-left corner and some do not -- it depends on the OS, the browser, and
+   whether the window is maximized -- and NOTHING ON THE PAGE CAN ASK. There
+   is no API for the shape of the chrome around you.
+
+   Matching a radius therefore means guessing, and a guess is wrong on half
+   the machines: too small leaves a wedge of tab poking past the curve, too
+   large leaves a hairline of background inside it, and square leaves the
+   wedge every time the window is round.
+
+   So the tab does not try to match anything. It takes a BITE out of its own
+   corner -- a quarter circle centred exactly on the page's corner, drawn in
+   the rails' orange -- which reads as a deliberate cut rather than as a
+   misfitted edge. Against a rounded window the notch sits inside the curve;
+   against a square one it is a shape the tab clearly meant to have. Either
+   way it looks intended, which is the one thing a guess can never be.
+
    ONLY WHILE IT IS IN THE CORNER. The class is set by the packing, which
    knows both which tab is leftmost and whether the row is scrolled home --
-   drag another tab into first place and the rounding goes with it; scroll
-   the row along and nothing is rounded, because whatever is under the corner
-   is passing through rather than sitting in it.
-   
-   8px is Firefox's radius on macOS. Being a pixel or two out shows as a
-   hairline of background inside the curve, which is what a square corner
-   there looks like anyway -- so erring large is the safer way to be wrong. */
-.panel.tab-corner > .bar { border-top-left-radius: 8px; }
+   drag another tab into first place and the notch goes with it; scroll the
+   row along and no tab is notched, because whatever is under the corner is
+   passing through rather than sitting in it. */
+/* THE BITE IS ONE CIRCLE, drawn over the tab's corner in the rails' orange
+   and centred exactly on the page's own corner. Being solid, it needs no
+   mask and no second element: the tab keeps its square outline underneath,
+   and what you see in the corner is the circle sitting in it.
+
+   A quarter of it shows -- the rest is off the page, above and left -- which
+   is what makes it read as a bite taken out of the tab rather than a dot
+   placed on it. */
+.panel.tab-corner > .notch {
+  position: absolute; left: 0; top: 0; z-index: 3;
+  /* Centred on the corner means the box is twice the radius and half of it
+     hangs off each edge. */
+  width: calc(var(--notch) * 2); height: calc(var(--notch) * 2);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--rail);
+  pointer-events: none;
+}
+/* Off unless this is the tab in the corner. The class is the packing's;
+   the element is on every tab, since which tab is leftmost changes. */
+.panel:not(.tab-corner) > .notch { display: none; }
 
 /* -- WHERE A TAB WENT ------------------------------------------------------
 
