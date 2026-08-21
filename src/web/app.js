@@ -67,6 +67,84 @@ function zoomAt(factor, cx, cy) {
   keepHitInView();
 }
 
+/* THE ROOM THE DRAWING HAS LEFT.
+
+   A window snapped to an edge is furniture: it is not going to move, and the
+   graph centred behind it is half hidden by something that will still be
+   there tomorrow. So a fit measures the space those windows leave rather
+   than the whole pane.
+
+   ONLY THE ONES ACTUALLY AGAINST AN EDGE, and only across their full span.
+   A window filling the right side takes width off the drawing; one floating
+   in the middle takes nothing, because moving it would give the room back
+   and a fit that flinched from every open panel would never settle. That is
+   the whole test: does this window span an edge, corner to corner.
+
+   MEASURED, NOT REMEMBERED. Nothing marks a window as snapped -- it is one
+   whose box happens to line up with an edge right now, which is also true of
+   one dragged there by hand, and false the moment either is moved away. A
+   flag would have to be kept in step with every drag, resize and close; the
+   geometry is already in step with itself. */
+function freeArea() {
+  const full = { left: 0, top: 0,
+                 right: pane.clientWidth, bottom: pane.clientHeight };
+  const room = Object.assign({}, full);
+  const slack = 2;   // a pixel of rounding either way still counts as flush
+
+  for (const root of document.querySelectorAll('.panel:not(.shut)')) {
+    const b = root.getBoundingClientRect();
+    const spansHeight = b.top <= full.top + slack && b.bottom >= full.bottom - slack;
+    const spansWidth = b.left <= full.left + slack && b.right >= full.right - slack;
+    // Against the right, full height: the drawing loses that much width.
+    if (spansHeight && b.right >= full.right - slack) {
+      room.right = Math.min(room.right, b.left);
+    }
+    // Against the left, full height.
+    if (spansHeight && b.left <= full.left + slack) {
+      room.left = Math.max(room.left, b.right);
+    }
+    // Against the bottom, full width.
+    if (spansWidth && b.bottom >= full.bottom - slack) {
+      room.bottom = Math.min(room.bottom, b.top);
+    }
+    // Against the top, full width.
+    if (spansWidth && b.top <= full.top + slack) {
+      room.top = Math.max(room.top, b.bottom);
+    }
+  }
+
+  // A WINDOW CAN LEAVE NO ROOM AT ALL -- one filling the screen, or two
+  // meeting in the middle. There is nothing to fit into then, so the fit
+  // falls back to the whole pane and draws behind them rather than dividing
+  // by a negative and flinging the graph off the page.
+  if (room.right - room.left < 80 || room.bottom - room.top < 80) return full;
+  return room;
+}
+
+// THE ROOM AS A STRING, so a tick can tell whether it moved without fitting
+// anything. Same trick the rail's `railShape` uses for the same reason.
+let roomShape = '';
+
+/* REFIT WHEN THE ROOM CHANGES, and only then.
+
+   A snapped window covers part of the drawing; shutting it, moving it, or
+   pulling it off the edge gives that part back, and the graph should take
+   the room in both directions -- otherwise it stays squeezed into a strip
+   long after the window that squeezed it has gone.
+
+   WATCHED RATHER THAN ANNOUNCED. The room changes on a shut, a drag, a
+   close, a window resized by the corner, and a viewport resize: five call
+   sites to keep in step, and a sixth the day something else moves a panel.
+   The room is measured from the panels themselves, so asking what it is now
+   costs four numbers and answers all of them at once. */
+function roomChanged() {
+  const room = freeArea();
+  const shape = [room.left, room.top, room.right, room.bottom].join(',');
+  if (shape === roomShape) return false;
+  roomShape = shape;
+  return true;
+}
+
 function fit() {
   const svg = pane.querySelector('svg');
   if (!svg) return;
@@ -80,11 +158,20 @@ function fit() {
   const h = svg.height.baseVal.value;
   if (!w || !h) return;
   const pad = 24;
-  scale = Math.min((pane.clientWidth - pad * 2) / w,
-                   (pane.clientHeight - pad * 2) / h);
+  // Into the room the snapped windows leave, which is the whole pane when
+  // there are none. See `freeArea`.
+  const room = freeArea();
+  const roomW = room.right - room.left;
+  const roomH = room.bottom - room.top;
+  scale = Math.min((roomW - pad * 2) / w, (roomH - pad * 2) / h);
   scale = Math.min(MAX, Math.max(MIN, scale));
-  tx = (pane.clientWidth - w * scale) / 2;
-  ty = (pane.clientHeight - h * scale) / 2;
+  // Centred IN THE ROOM, so the offset carries where the room begins.
+  tx = room.left + (roomW - w * scale) / 2;
+  ty = room.top + (roomH - h * scale) / 2;
+  // The room this view was fitted to, so the watcher does not call it a
+  // change and fit again on the next tick.
+  const fitted = freeArea();
+  roomShape = [fitted.left, fitted.top, fitted.right, fitted.bottom].join(',');
   // Back to a view the page chose, so a resize may reframe again.
   touched = false;
   // Immediate, like the redraw path: a fit follows a fresh SVG or a resize,
@@ -762,6 +849,15 @@ function makePanel(root, options = {}) {
            }
            const now = root.getBoundingClientRect();
            if (options.onResize) options.onResize(now.width, now.height);
+           // THE DRAWING TAKES THE ROOM THAT IS LEFT. A window snapped to an
+           // edge has just covered part of the graph for good, so the graph
+           // refits into what remains rather than staying centred behind it.
+           //
+           // EVEN IF THE VIEW WAS TOUCHED. `touched` protects a view the user
+           // chose from being thrown away by a window resize -- but the thing
+           // that view was chosen against has just changed shape, and leaving
+           // it alone means leaving it half behind a panel.
+           fit();
          }
          showEdges([]);
        });
@@ -3432,7 +3528,15 @@ function railChanged() {
   railWidths = now;
   return true;
 }
-setInterval(() => { if (!railDragging && railChanged()) packRail(); }, 250);
+setInterval(() => {
+  if (railDragging) return;
+  if (railChanged()) packRail();
+  // THE DRAWING TAKES BACK WHAT IT IS GIVEN. A snapped window shut, moved or
+  // pulled off its edge leaves room the graph should spread into, the same
+  // way it gave room up when the window arrived. Watched here rather than
+  // announced from each of those places -- see `roomChanged`.
+  if (roomChanged()) fit();
+}, 250);
 
 function addToRail(panel, at) {
   if (onRail(panel)) return;
