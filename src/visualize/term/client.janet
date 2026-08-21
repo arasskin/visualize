@@ -237,8 +237,17 @@
           # before a connection can land. Retried on a short timer rather
           # than slept on once, so the common case costs a few milliseconds
           # and a slow start still succeeds.
+          #
+          # THIRTY TRIES, WHICH IS SIX HUNDRED MILLISECONDS. A supervisor
+          # binds on the FIRST try -- measured, repeatedly -- so this budget
+          # is not for the ordinary case at all; it is what gets waited out
+          # when the spawn FAILED and nothing is ever going to answer. Every
+          # try past the first is latency the caller pays to be told no, so
+          # the number is a margin over the worst honest start rather than
+          # room for a hang: thirty times the observed cost, and a failure
+          # reported in well under a second instead of two.
           (var found nil)
-          (for _ 0 100
+          (for _ 0 30
             (unless found
               (ev/sleep 0.02)
               (set found (connect))))

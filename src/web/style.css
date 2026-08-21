@@ -390,26 +390,42 @@ button:disabled { opacity: .5; cursor: progress; }
    drag another tab into first place and the notch goes with it; scroll the
    row along and no tab is notched, because whatever is under the corner is
    passing through rather than sitting in it. */
-/* THE BITE IS ONE CIRCLE, drawn over the tab's corner in the rails' orange
-   and centred exactly on the page's own corner. Being solid, it needs no
-   mask and no second element: the tab keeps its square outline underneath,
-   and what you see in the corner is the circle sitting in it.
+/* THE BITE IS A HOLE WITH A LINE AROUND IT, so the tab's own border does
+   not simply stop where the circle starts. The bar is cut by a mask -- a
+   circle centred on the corner, removed -- and an arc is stroked along the
+   cut in the tab's own border colour, which is how the outline stays
+   continuous: down the left edge, round the bite, along the top.
 
-   A quarter of it shows -- the rest is off the page, above and left -- which
-   is what makes it read as a bite taken out of the tab rather than a dot
-   placed on it. */
+   FIXED TO THE PAGE'S CORNER, not to the tab. The circle marks where the
+   window's corner is, so it stays at 0,0 whichever tab happens to be
+   sitting there and whatever that tab is doing. */
+.panel.tab-corner > .bar {
+  -webkit-mask-image: radial-gradient(circle var(--notch) at 0 0,
+                                      transparent 0 var(--notch), #000 var(--notch));
+  mask-image: radial-gradient(circle var(--notch) at 0 0,
+                              transparent 0 var(--notch), #000 var(--notch));
+}
+
+/* THE ARC ALONG THE CUT. A square box pinned to the corner with one rounded
+   side and one border: the rounded quarter of it traces the circle exactly,
+   and the border draws it. Orange, as the rails are -- this is the same kind
+   of furniture, a mark about where things sit rather than part of a tab. */
 .panel.tab-corner > .notch {
   position: absolute; left: 0; top: 0; z-index: 3;
-  /* Centred on the corner means the box is twice the radius and half of it
-     hangs off each edge. */
-  width: calc(var(--notch) * 2); height: calc(var(--notch) * 2);
-  transform: translate(-50%, -50%);
-  border-radius: 50%;
-  background: var(--rail);
+  /* THE ARC CURVES TOWARD THE CORNER, since that is the side the circle
+     took away. A box sitting in the cut with its OWN top-left rounded by the
+     full radius has exactly that curve along its top and left edges: it runs
+     from (0, r) round to (r, 0), hugging the hole. Rounding the far corner
+     instead bows the line the other way, into the tab. */
+  width: var(--notch); height: var(--notch);
+  box-sizing: border-box;
+  border-top-left-radius: var(--notch);
+  border-top: 1px solid var(--rail);
+  border-left: 1px solid var(--rail);
   pointer-events: none;
 }
-/* Off unless this is the tab in the corner. The class is the packing's;
-   the element is on every tab, since which tab is leftmost changes. */
+/* Off unless this is the tab in the corner. The class is the packing's; the
+   element is on every tab, since which tab is leftmost changes. */
 .panel:not(.tab-corner) > .notch { display: none; }
 
 /* -- WHERE A TAB WENT ------------------------------------------------------
