@@ -735,24 +735,35 @@ function makePanel(root, options = {}) {
          root.style.width = w + 'px';
          root.style.height = h + 'px';
          if (options.onResize) options.onResize(w, h);
-         // THE FLOOR OFFERS ITSELF while you are dragging near it. Shown from
-         // the edge the grip is actually approaching, so the guide answers the
-         // question the hand is asking.
-         showFloor(nearFloor(root));
+         // THE EDGES OFFER THEMSELVES while you are dragging near them. Shown
+         // from the edges the grip is actually approaching, so the guides
+         // answer the question the hand is asking.
+         showEdges(nearEdges(root));
        },
        () => {
          // SNAPPED ON RELEASE, not while dragging. A window that jumped to
          // full height the moment you crossed the line would fight the hand
          // for the rest of the drag -- and there would be no way to stop just
-         // short of the floor on purpose. Landing it on the drop makes the
+         // short of an edge on purpose. Landing it on the drop makes the
          // guide a promise rather than a rule.
-         if (nearFloor(root)) {
-           const top = root.getBoundingClientRect().top;
-           const h = Math.max(options.minHeight || 120, innerHeight - top);
-           root.style.height = h + 'px';
-           if (options.onResize) options.onResize(root.getBoundingClientRect().width, h);
+         //
+         // BOTH EDGES IF BOTH WERE OFFERED: a grip let go in the corner fills
+         // the corner, which is the one reading of two lit rails that is not
+         // a surprise.
+         const landing = nearEdges(root);
+         if (landing.length) {
+           const box = root.getBoundingClientRect();
+           const want = Object.assign({}, ...landing.map((name) => EDGES[name].fill(box)));
+           if (want.height !== undefined) {
+             root.style.height = Math.max(options.minHeight || 120, want.height) + 'px';
+           }
+           if (want.width !== undefined) {
+             root.style.width = Math.max(options.minWidth || 240, want.width) + 'px';
+           }
+           const now = root.getBoundingClientRect();
+           if (options.onResize) options.onResize(now.width, now.height);
          }
-         showFloor(false);
+         showEdges([]);
        });
 
   const panel = {
@@ -3511,42 +3522,69 @@ const cornerMark = document.createElement('div');
 cornerMark.className = 'notch';
 document.body.appendChild(cornerMark);
 
-/* -- THE FLOOR -------------------------------------------------------------
+/* -- THE EDGES ------------------------------------------------------------
 
-   A RAIL AT THE BOTTOM OF THE PAGE, offered while a window is being resized
-   near it, that takes the window down to the full height when the grip is
-   let go.
+   RAILS AT THE BOTTOM AND RIGHT OF THE PAGE, offered while a window is being
+   resized near one, that take the window to the full height or the full width
+   when the grip is let go. Both at once when the grip is in the corner.
 
    THE SAME BARGAIN THE TAB RAIL MAKES, and it looks the same on purpose: a
    dashed orange line that appears while you are aiming and leaves once you
-   have landed. One guide vocabulary rather than two -- if it is a dashed
+   have landed. One guide vocabulary rather than three -- if it is a dashed
    orange line, dropping there snaps.
 
    OFFERED, NOT IMPOSED. The window is not resized until the drop, so the
    guide is a promise rather than a rule: crossing the line and coming back
    leaves the window exactly where the hand put it. Snapping live would fight
-   the drag and make "nearly full height" impossible to ask for. */
-const FLOOR_GRAB = 48;      // how near the bottom edge has to come to count
+   the drag and make "nearly full width" impossible to ask for.
 
-const floorMark = document.createElement('div');
-floorMark.id = 'floor-mark';
-floorMark.innerHTML = '<i></i>';
-document.body.appendChild(floorMark);
+   TWO EDGES, ONE MECHANISM. The bottom came first and the right is the same
+   idea rotated, so it is the same code with the axis as data rather than a
+   second copy that has to be kept in step. Each edge knows only which side of
+   the box to measure and which dimension to fill. */
+const EDGE_GRAB = 48;       // how near an edge has to come to count
 
-// Is this panel's bottom edge close enough to the floor to land on it?
-//
-// MEASURED FROM THE BOTTOM EDGE, which is the one the grip moves and the one
-// that would end up on the floor. Anything above the floor counts, including
-// a window already dragged past it -- overshooting is how most people aim at
-// an edge, and refusing the snap for it would make the target harder to hit
-// the harder you tried.
-function nearFloor(root) {
-  const box = root.getBoundingClientRect();
-  return box.bottom >= innerHeight - FLOOR_GRAB;
+const EDGES = {
+  floor: {
+    near: (box) => box.bottom >= innerHeight - EDGE_GRAB,
+    // FROM WHEREVER THE TOP SITS, not the whole viewport: the grip moves the
+    // bottom edge, so the top is where the hand left it and the window fills
+    // what is below it.
+    fill: (box) => ({ height: innerHeight - box.top }),
+  },
+  wall: {
+    near: (box) => box.right >= innerWidth - EDGE_GRAB,
+    fill: (box) => ({ width: innerWidth - box.left }),
+  },
+};
+
+// One mark per edge, dressed by the stylesheet.
+const edgeMarks = {};
+for (const name of Object.keys(EDGES)) {
+  const mark = document.createElement('div');
+  mark.id = name + '-mark';
+  mark.className = 'edge-mark';
+  mark.innerHTML = '<i></i>';
+  document.body.appendChild(mark);
+  edgeMarks[name] = mark;
 }
 
-function showFloor(near) {
-  floorMark.classList.toggle('near', !!near);
+// Which edges this panel is close enough to land on -- none, one, or both.
+//
+// MEASURED FROM THE EDGE THE GRIP MOVES, which is the one that would end up
+// on the rail. Anything at or past it counts, including a window already
+// dragged beyond: overshooting is how most people aim at an edge, and
+// refusing the snap for it would make the target harder to hit the harder
+// you tried.
+function nearEdges(root) {
+  const box = root.getBoundingClientRect();
+  return Object.keys(EDGES).filter((name) => EDGES[name].near(box));
+}
+
+function showEdges(names) {
+  for (const name of Object.keys(EDGES)) {
+    edgeMarks[name].classList.toggle('near', names.includes(name));
+  }
 }
 
 // THE RAILS, drawn only while a tab is near them. Two lines rather than a
