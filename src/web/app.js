@@ -831,7 +831,13 @@ function makePanel(root, options = {}) {
          // THE EDGES OFFER THEMSELVES while you are dragging near them. Shown
          // from the edges the grip is actually approaching, so the guides
          // answer the question the hand is asking.
-         showEdges(nearEdges(root));
+         //
+         // ONLY THE ONES THAT WILL BE TAKEN. A guide is a promise, so an edge
+         // this window cannot land on -- the wall, while it is on the rail --
+         // must not light up. Filtered the same way the drop filters, so the
+         // rail is offered exactly what it will accept.
+         showEdges(nearEdges(root)
+           .filter((name) => !(name === 'wall' && onRail(panel))));
        },
        () => {
          // SNAPPED ON RELEASE, not while dragging. A window that jumped to
@@ -843,7 +849,18 @@ function makePanel(root, options = {}) {
          // BOTH EDGES IF BOTH WERE OFFERED: a grip let go in the corner fills
          // the corner, which is the one reading of two lit rails that is not
          // a surprise.
-         const landing = nearEdges(root);
+         // A TAB ON THE RAIL DOES NOT TAKE THE WALL. Its left edge belongs to
+         // the row -- the packing pins the first tab at zero -- so filling to
+         // the right edge from there makes it as wide as the whole viewport,
+         // and a row cannot scroll past a window that is already the width of
+         // the screen. Revealing any tab after it then has nowhere to put it
+         // except off the left, which is the tab you were cycling from
+         // sliding away and a different window appearing in its place.
+         //
+         // The floor is fine: a row is a row of widths, and how tall a window
+         // hangs is nobody else's business.
+         const landing = nearEdges(root)
+           .filter((name) => !(name === 'wall' && onRail(panel)));
          if (landing.length) {
            const box = root.getBoundingClientRect();
            const want = Object.assign({}, ...landing.map((name) => EDGES[name].fill(box)));
@@ -862,9 +879,7 @@ function makePanel(root, options = {}) {
            //
            // NOT FOR A TAB STILL ON THE RAIL, whose position belongs to the
            // row rather than to itself -- holding one against an edge fights
-           // the packing and runs away. It still snaps once, here, because
-           // that is what the drop was asking for; it simply is not held
-           // there afterwards. See the note in `resnap`.
+           // the packing and runs away. See the note in `resnap`.
            if (!onRail(panel)) root.dataset.snapped = landing.join(' ');
            const now = root.getBoundingClientRect();
            if (options.onResize) options.onResize(now.width, now.height);
@@ -1844,17 +1859,32 @@ document.addEventListener('keydown', (e) => {
 // is shut when alt comes up, unless the release is a tap on it. That is the
 // same rule the plain hold already follows, applied per step.
 function altWalk(by) {
-  if (rail.length < 2) return;
-  // Where we are now: the selected tab if it is on the rail, else the start.
+  // SOMEWHERE TO GO. Two tabs in the row is the ordinary case, but ONE is
+  // enough when the pane you are standing in is not in the row -- a window
+  // pulled off to be snapped against an edge leaves a single tab behind, and
+  // that tab is still somewhere the walk can take you. Counting the row
+  // alone, the walk went dead exactly when a snapped window was selected.
+  const off = rail.indexOf(pickedPanel()) < 0;
+  if (rail.length < (off ? 1 : 2)) return;
+  // Where we are now: the selected tab if it is on the rail.
   const here = rail.indexOf(pickedPanel());
-  const from = here < 0 ? 0 : here;
   // THE ENDS ARE ENDS. Walking off the last tab used to land on the first,
   // which is a jump the length of the row for a keypress that asked for one
   // step -- and on a row too wide to see at once, a jump to somewhere you
   // were not looking. Held at the end instead: keep pressing and nothing
   // moves, which is what the end of a row should feel like.
-  const to = Math.max(0, Math.min(rail.length - 1, from + by));
-  if (to === from) return;
+  //
+  // NOTHING ON THE RAIL IS SELECTED when the pane you are in has been pulled
+  // off the row -- a window snapped to an edge, most often, since pulling it
+  // off is how you snap one. There is no place in the row to be held at the
+  // end of, so the walk ENTERS the row rather than moving within it: from
+  // the left going right, from the right going left. Held at zero instead,
+  // this did nothing at all, which is a walk that stops working the moment
+  // you are standing in a snapped window.
+  const to = here < 0
+    ? (by > 0 ? 0 : rail.length - 1)
+    : Math.max(0, Math.min(rail.length - 1, here + by));
+  if (to === here) return;
   const next = rail[to];
 
   // PUT AWAY WHAT THIS PRESS PUT UP, before moving off it. That is either a
@@ -3521,7 +3551,16 @@ function revealTab(panel) {
   const far = bar.left + span;
   if (bar.left < RAIL_LEFT) scrollRail(RAIL_LEFT - bar.left);
   else if (far > right) {
-    // Left-aligned when it cannot fit whole, near-edge when it can.
+    // A WINDOW TOO WIDE TO SHOW IS SHOWN BY ITS TAB. Its span is the whole
+    // panel -- see `railSpan` -- so a window near the width of the screen
+    // cannot be brought into view whole however far the row scrolls, and
+    // asking for its far edge scrolls until everything BEFORE it is off the
+    // left instead. That is the tab you were cycling from disappearing and a
+    // different window arriving in its place.
+    //
+    // So a window that cannot fit is aligned by its tab and left to overhang
+    // on the right: the thing being revealed is which tab has the focus, and
+    // that is the tab.
     if (span > right - RAIL_LEFT) scrollRail(RAIL_LEFT - bar.left);
     else scrollRail(right - far);
   }
