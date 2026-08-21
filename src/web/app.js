@@ -1691,7 +1691,13 @@ function altWalk(by) {
   // Where we are now: the selected tab if it is on the rail, else the start.
   const here = rail.indexOf(pickedPanel());
   const from = here < 0 ? 0 : here;
-  const to = ((from + by) % rail.length + rail.length) % rail.length;
+  // THE ENDS ARE ENDS. Walking off the last tab used to land on the first,
+  // which is a jump the length of the row for a keypress that asked for one
+  // step -- and on a row too wide to see at once, a jump to somewhere you
+  // were not looking. Held at the end instead: keep pressing and nothing
+  // moves, which is what the end of a row should feel like.
+  const to = Math.max(0, Math.min(rail.length - 1, from + by));
+  if (to === from) return;
   const next = rail[to];
 
   // PUT AWAY WHAT THIS PRESS PUT UP, before moving off it. That is either a
