@@ -461,11 +461,20 @@ button:disabled { opacity: .5; cursor: progress; }
    above everything. */
 /* ABOVE ITS NEIGHBOURS, so the pixel where two tabs overlap is painted in
    the selected one's colour rather than in whichever happens to come later
-   in the document. A fixed number rather than `raise`, which hands out
-   ever-larger values as panels are opened and dragged: this has to beat all
-   of them for as long as the selection lasts. Still under the compose bar
-   and the search bar, which are above everything. */
-.panel.picked { z-index: 12 !important; }
+   in the document.
+   
+   THE NUMBER IS NOT WRITTEN HERE. It was, and it was a fixed 12 with
+   `!important` -- which beat the inline z-index the selection had just been
+   given by `raise` and PINNED IT DOWN while every other panel climbed past
+   on being opened or dragged. After a few rounds the neighbours were at 44
+   and up, the selected panel was held at 12, and the shared edge went grey.
+   That is the bug that took several opens and closes to appear: it was
+   counting.
+   
+   `raise` puts the selection on top instead -- see selectPane -- and the
+   only thing left here is the floor, so a panel that has never been raised
+   still sits above the unselected ones. */
+.panel.picked { z-index: 12; }
 
 /* THE WHOLE FIGURE GOES GREEN, both pieces, every edge either draws. There
    is no longer an edge that has to be told to stay a different colour. */

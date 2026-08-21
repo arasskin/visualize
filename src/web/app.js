@@ -3435,7 +3435,16 @@ function selectPane(root) {
   for (const p of document.querySelectorAll('.panel.picked')) {
     p.classList.remove('picked');
   }
-  if (root) root.classList.add('picked');
+  if (root) {
+    root.classList.add('picked');
+    // ON TOP, THE SAME WAY EVERYTHING ELSE GETS THERE. The tabs overlap by a
+    // pixel so their shared border collapses into one line, and whichever
+    // panel is higher paints it -- the selected one has to be. Through
+    // `raise` rather than a number in the stylesheet: `raise` hands out
+    // ever-larger values as panels are opened and dragged, so any fixed
+    // number is one a neighbour eventually passes.
+    raise(root);
+  }
   // THE BAR FOLLOWS THE SELECTION, mid-sentence if need be. Its mode was
   // settled when it opened, so walking from the config to a terminal with
   // half a line typed left you writing shell into a box still wrapped in
