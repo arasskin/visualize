@@ -383,6 +383,54 @@ button:disabled { opacity: .5; cursor: progress; }
    there looks like anyway -- so erring large is the safer way to be wrong. */
 .panel.tab-corner > .bar { border-top-left-radius: 8px; }
 
+/* -- WHERE A TAB WENT ------------------------------------------------------
+
+   The outline left behind when a tab is pushed along by a window opening,
+   and the arrow from where it is back to where it was. See showShift.
+
+   DASHED, AND THE COLOUR OF THE RAILS. This is the same kind of thing the
+   rails are -- furniture that appears to answer a question about where tabs
+   go and leaves once it is answered -- so it says so by looking like them
+   rather than like a tab. A solid outline would read as another tab, which
+   is the one thing it must not be mistaken for.
+
+   pointer-events:none: it is a picture of a tab, not a tab. Clicks belong to
+   whatever is underneath, and to the real tab it is a picture OF. */
+.tab-shift { pointer-events: none; }
+
+.tab-ghost {
+  position: fixed; z-index: 3;
+  box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px dashed var(--rail);
+  border-radius: 2px;
+  color: var(--rail);
+  font-size: 12px; white-space: nowrap; overflow: hidden;
+  opacity: .8;
+}
+
+/* THE ARROW: a line with a head, pointing back the way the tab came. Drawn
+   in borders rather than as an SVG because it is one horizontal rule and one
+   triangle, and a whole document to hold two shapes that simple is more
+   machinery than the thing is worth. */
+.tab-ghost-arrow {
+  position: fixed; z-index: 3;
+  height: 0;
+  border-top: 1.5px dashed var(--rail);
+  opacity: .8;
+}
+/* The head, at the LEFT end -- the end nearest the ghost, since the arrow
+   runs from the tab's new place back to its old one. */
+.tab-ghost-arrow::before {
+  content: '';
+  position: absolute; left: 0; top: 50%;
+  width: 0; height: 0;
+  transform: translate(0, -50%);
+  border-top: 5px solid transparent;
+  border-bottom: 5px solid transparent;
+  border-right: 8px solid var(--rail);
+}
+
 /* THE RAILS. Two lines marking where the tab row sits, drawn ONLY while a
    tab is being dragged near them -- the bar has no body and nothing to see,
    and a strip of furniture across the top of the drawing would cost the page
