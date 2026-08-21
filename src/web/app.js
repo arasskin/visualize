@@ -832,12 +832,7 @@ function makePanel(root, options = {}) {
          // from the edges the grip is actually approaching, so the guides
          // answer the question the hand is asking.
          //
-         // ONLY THE ONES THAT WILL BE TAKEN. A guide is a promise, so an edge
-         // this window cannot land on -- the wall, while it is on the rail --
-         // must not light up. Filtered the same way the drop filters, so the
-         // rail is offered exactly what it will accept.
-         showEdges(nearEdges(root)
-           .filter((name) => !(name === 'wall' && onRail(panel))));
+         showEdges(nearEdges(root));
        },
        () => {
          // SNAPPED ON RELEASE, not while dragging. A window that jumped to
@@ -849,18 +844,7 @@ function makePanel(root, options = {}) {
          // BOTH EDGES IF BOTH WERE OFFERED: a grip let go in the corner fills
          // the corner, which is the one reading of two lit rails that is not
          // a surprise.
-         // A TAB ON THE RAIL DOES NOT TAKE THE WALL. Its left edge belongs to
-         // the row -- the packing pins the first tab at zero -- so filling to
-         // the right edge from there makes it as wide as the whole viewport,
-         // and a row cannot scroll past a window that is already the width of
-         // the screen. Revealing any tab after it then has nowhere to put it
-         // except off the left, which is the tab you were cycling from
-         // sliding away and a different window appearing in its place.
-         //
-         // The floor is fine: a row is a row of widths, and how tall a window
-         // hangs is nobody else's business.
-         const landing = nearEdges(root)
-           .filter((name) => !(name === 'wall' && onRail(panel)));
+         const landing = nearEdges(root);
          if (landing.length) {
            const box = root.getBoundingClientRect();
            const want = Object.assign({}, ...landing.map((name) => EDGES[name].fill(box)));
@@ -3518,52 +3502,31 @@ function scrollRail(by) {
   return true;
 }
 
-// BRING A TAB INTO VIEW, scrolling the row as little as it takes. Called
-// when the keyboard moves the selection: walking to a tab that is off the
-// side should show it, or the mark moves somewhere you cannot see and the
-// row looks unchanged.
-//
-// THE WHOLE PANEL, NOT THE TAB. What you walked to is the pane, and on an
-// open one the tab is the small part of it -- scrolling until the 43px tab
-// cleared the edge left the window it opened still hanging off the side,
-// which is the thing you were looking at. So an open tab is revealed by the
-// span it occupies in the row, window and all. See `railSpan`.
-//
-// A WINDOW WIDER THAN THE PAGE cannot be shown whole, and asking for its
-// right edge would scroll its LEFT edge off instead -- the pane pushed away
-// to bring in a part of it you were not looking at. Those are aligned to
-// the left instead: as much of the window as fits, from its near edge.
-//
-// SCROLLED TO ITS NEAR EDGE, not to the middle: a tab just past the right
-// edge should come in from the right and stop, rather than the whole row
-// jumping to centre it. The stops are `scrollRail`'s, so this cannot slide
-// past either end.
+/* BRING THE SELECTION INTO VIEW by scrolling the row, and nothing else.
+
+   THE OVERHANG IS THE WHOLE RULE. Whatever the selection is -- a 43px tab, a
+   window as wide as the screen -- it occupies a span in the row starting at
+   its left edge. If that span runs off the right, scroll left by exactly how
+   much runs off. If it starts off the left, scroll right by exactly that. If
+   it fits, do nothing.
+
+   That is one subtraction, and it is right for every case the row can be in
+   without knowing which case it is. The version this replaces asked whether
+   the span was wider than the viewport and left-aligned those separately,
+   which is the same answer the subtraction gives on its own -- `scrollRail`
+   clamps at the ends, so asking to scroll further than the row can go simply
+   goes as far as it goes.
+
+   NO MARGIN. The row's own stops are the window edges, so asking to sit a
+   few pixels inside one is asking for something the scroll cannot give: it
+   goes as far as it can and leaves the tab that far short, which is the case
+   this exists to fix. */
 function revealTab(panel) {
-  if (!panel || !railOverflows()) return;
+  if (!panel) return;
   const bar = panel.root.querySelector('.bar').getBoundingClientRect();
-  const span = railSpan(panel);
-  // NO MARGIN ON THE LEFT. The row's own left stop is the window edge, so
-  // asking to sit a few pixels inside it is asking for something the scroll
-  // cannot give -- it goes as far as it can and leaves the tab that far
-  // short, which is exactly the case this is meant to fix. A margin on the
-  // right is fine: there is room to spare on that side.
-  const right = innerWidth - 8;
-  const far = bar.left + span;
+  const over = bar.left + railSpan(panel) - innerWidth;
   if (bar.left < RAIL_LEFT) scrollRail(RAIL_LEFT - bar.left);
-  else if (far > right) {
-    // A WINDOW TOO WIDE TO SHOW IS SHOWN BY ITS TAB. Its span is the whole
-    // panel -- see `railSpan` -- so a window near the width of the screen
-    // cannot be brought into view whole however far the row scrolls, and
-    // asking for its far edge scrolls until everything BEFORE it is off the
-    // left instead. That is the tab you were cycling from disappearing and a
-    // different window arriving in its place.
-    //
-    // So a window that cannot fit is aligned by its tab and left to overhang
-    // on the right: the thing being revealed is which tab has the focus, and
-    // that is the tab.
-    if (span > right - RAIL_LEFT) scrollRail(RAIL_LEFT - bar.left);
-    else scrollRail(right - far);
-  }
+  else if (over > 0) scrollRail(-over);
 }
 
 // A WHEEL OVER THE ROW, either axis. A trackpad swipe sideways arrives as
