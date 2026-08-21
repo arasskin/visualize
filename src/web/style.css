@@ -598,9 +598,9 @@ button:disabled { opacity: .5; cursor: progress; }
 #rail-marks i:first-child { top: 0; }
 #rail-marks i:last-child { bottom: 0; }
 
-/* THE EDGE RAILS. One across the bottom of the page and one down the right,
-   shown while a window is being resized near them, that take the window to
-   the full height or width on the drop.
+/* THE EDGE RAIL. A line across the bottom of the page, shown while a window
+   is being resized near it, that takes the window to the full height on the
+   drop. The bottom only -- see the note on EDGES.
 
    DRESSED EXACTLY LIKE THE TAB RAIL, because it is the same offer: dashed,
    orange, appearing while you aim and leaving once you land. Guides that
@@ -623,10 +623,6 @@ button:disabled { opacity: .5; cursor: progress; }
 #floor-mark { left: 0; right: 0; bottom: 0; height: 0; }
 #floor-mark i { left: 0; right: 0; bottom: 0; height: 0;
                 border-top: 1.5px dashed var(--rail); }
-
-#wall-mark { top: 0; bottom: 0; right: 0; width: 0; }
-#wall-mark i { top: 0; bottom: 0; right: 0; width: 0;
-               border-left: 1.5px dashed var(--rail); }
 
 /* THE BIN, bottom-left, and only while something is being dragged. Nothing
    to throw away the rest of the time, and a bin sitting on the drawing would

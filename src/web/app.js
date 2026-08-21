@@ -851,9 +851,6 @@ function makePanel(root, options = {}) {
            if (want.height !== undefined) {
              root.style.height = Math.max(options.minHeight || 120, want.height) + 'px';
            }
-           if (want.width !== undefined) {
-             root.style.width = Math.max(options.minWidth || 240, want.width) + 'px';
-           }
            // WRITTEN DOWN, because staying snapped is an INTENT and not a
            // measurement. Which edges a window reaches is a fact about right
            // now; that it was PUT there is a fact about what was asked for,
@@ -3502,6 +3499,22 @@ function scrollRail(by) {
   return true;
 }
 
+/* KEEP THE DOCUMENT AT THE ORIGIN.
+
+   `overflow: hidden` on the body stops SCROLLBARS; it does not stop the page
+   being scrolled by something else. Focusing an input inside a window that
+   hangs off the side is enough -- the browser scrolls the document to bring
+   the focused thing into view -- and walking the tabs focuses a pane on every
+   step. Forty pixels of document scroll then shifts EVERY panel forty pixels
+   left of where the row put it, so the row's own arithmetic comes out right
+   and the screen still shows a window overhanging its edge.
+
+   Put back here, where the row is about to be measured, rather than chased
+   from each of the places focus can move. */
+function unscrollPage() {
+  if (window.scrollX !== 0 || window.scrollY !== 0) window.scrollTo(0, 0);
+}
+
 /* BRING THE SELECTION INTO VIEW by scrolling the row, and nothing else.
 
    THE OVERHANG IS THE WHOLE RULE. Whatever the selection is -- a 43px tab, a
@@ -3523,9 +3536,16 @@ function scrollRail(by) {
    this exists to fix. */
 function revealTab(panel) {
   if (!panel) return;
-  const bar = panel.root.querySelector('.bar').getBoundingClientRect();
-  const over = bar.left + railSpan(panel) - innerWidth;
-  if (bar.left < RAIL_LEFT) scrollRail(RAIL_LEFT - bar.left);
+  unscrollPage();
+  // THE PANEL'S OWN LEFT EDGE, not its tab's. On an open pane the tab is the
+  // small part of it, and a window hanging off the left with its tab just
+  // inside the edge is a window you cannot read -- scrolling until the 43px
+  // tab cleared the edge was the whole of the old behaviour, and it left the
+  // thing you actually walked to still off the screen.
+  const box = panel.root.getBoundingClientRect();
+  const left = Math.min(box.left, panel.root.querySelector('.bar').getBoundingClientRect().left);
+  const over = left + railSpan(panel) - innerWidth;
+  if (left < RAIL_LEFT) scrollRail(RAIL_LEFT - left);
   else if (over > 0) scrollRail(-over);
 }
 
@@ -3563,6 +3583,7 @@ function railChanged() {
 }
 setInterval(() => {
   if (railDragging) return;
+  unscrollPage();
   if (railChanged()) packRail();
   // HELD AGAINST THEIR EDGES. A window pushed along by a neighbour being
   // resized, or by the row repacking, has drifted off the edge it was put
@@ -3573,7 +3594,13 @@ setInterval(() => {
   // pulled off its edge leaves room the graph should spread into, the same
   // way it gave room up when the window arrived. Watched here rather than
   // announced from each of those places -- see `roomChanged`.
-  if (roomChanged()) fit();
+  //
+  // NOT WHILE ALT IS HELD. Walking the tabs opens and shuts a window at every
+  // step, so the room churns from step to step and the graph would rescale
+  // under you on each keypress -- a drawing that jumps while you are reading
+  // the row. The walk moves the ROW; the drawing behind it holds still and
+  // takes stock when the key comes up.
+  if (!altDown && roomChanged()) fit();
 }, 250);
 
 function addToRail(panel, at) {
@@ -3664,26 +3691,27 @@ const cornerMark = document.createElement('div');
 cornerMark.className = 'notch';
 document.body.appendChild(cornerMark);
 
-/* -- THE EDGES ------------------------------------------------------------
+/* -- THE FLOOR ------------------------------------------------------------
 
-   RAILS AT THE BOTTOM AND RIGHT OF THE PAGE, offered while a window is being
-   resized near one, that take the window to the full height or the full width
-   when the grip is let go. Both at once when the grip is in the corner.
+   A RAIL AT THE BOTTOM OF THE PAGE, offered while a window is being resized
+   near it, that takes the window to the full height when the grip is let go.
 
    THE SAME BARGAIN THE TAB RAIL MAKES, and it looks the same on purpose: a
    dashed orange line that appears while you are aiming and leaves once you
-   have landed. One guide vocabulary rather than three -- if it is a dashed
+   have landed. One guide vocabulary rather than two -- if it is a dashed
    orange line, dropping there snaps.
 
    OFFERED, NOT IMPOSED. The window is not resized until the drop, so the
    guide is a promise rather than a rule: crossing the line and coming back
    leaves the window exactly where the hand put it. Snapping live would fight
-   the drag and make "nearly full width" impossible to ask for.
+   the drag and make "nearly full height" impossible to ask for.
 
-   TWO EDGES, ONE MECHANISM. The bottom came first and the right is the same
-   idea rotated, so it is the same code with the axis as data rather than a
-   second copy that has to be kept in step. Each edge knows only which side of
-   the box to measure and which dimension to fill. */
+   THE BOTTOM ONLY. A right edge was tried and taken out again: a window held
+   against the right is a window whose WIDTH the row cannot change, and the
+   row is the thing that has to move a wide window into view. The two rules
+   pulled opposite ways and the row lost. Height costs the row nothing, so
+   the floor stays. Kept as a table of one because an edge is still data --
+   which side of the box to measure, and which dimension to fill. */
 const EDGE_GRAB = 48;       // how near an edge has to come to count
 
 const EDGES = {
@@ -3693,10 +3721,6 @@ const EDGES = {
     // bottom edge, so the top is where the hand left it and the window fills
     // what is below it.
     fill: (box) => ({ height: innerHeight - box.top }),
-  },
-  wall: {
-    near: (box) => box.right >= innerWidth - EDGE_GRAB,
-    fill: (box) => ({ width: innerWidth - box.left }),
   },
 };
 
@@ -3727,13 +3751,11 @@ for (const name of Object.keys(EDGES)) {
    viewport narrowed until `innerWidth - left` is under the minimum width
    cannot be answered by stretching -- the window would have to shrink below
    what it is allowed to be. So it keeps its minimum and MOVES: the edge it
-   was snapped to is the promise, and the far corner is what gives. Without
-   this a window snapped to the right hangs off the side the moment the
-   browser is made narrow, which is the bug this exists to stop.
+   was snapped to is the promise, and the far corner is what gives.
 
    A window too small to use is still worse than one too big to fit, so the
-   minimums are never crossed -- past the point where even a slid window
-   cannot fit, it overhangs on the far side rather than the snapped one. */
+   minimum is never crossed -- past the point where even a slid window cannot
+   fit, it overhangs at the top rather than coming off the floor. */
 function resnap() {
   let moved = false;
   for (const root of document.querySelectorAll('.panel[data-snapped]')) {
@@ -3741,19 +3763,11 @@ function resnap() {
     if (!names.length) continue;
     // A shut panel has no size to hold; it takes its edge back when it opens.
     if (root.classList.contains('shut')) continue;
-    // A TAB ON THE RAIL CANNOT HOLD AN EDGE, because its position is not its
-    // own: the packing puts it where the row says, and stretching it to reach
-    // an edge from there makes the row longer, which moves it further along,
-    // which asks for more stretch. That loop diverges -- a window measured at
-    // 1400px wide walked out to 2239px and off the left of the screen in a
-    // few ticks, taking every tab after it with it.
-    //
-    // So the rail wins. A tab is part of a row; a snapped window is a piece
-    // of furniture. It can be either, and being on the rail is the one the
-    // hand chose most recently -- dropping it back on the row is how you say
-    // you want it in the row again.
+    // A TAB ON THE RAIL MAY HOLD THE FLOOR. Its LEFT is the packing's
+    // business and its height is nobody's, so holding one against the bottom
+    // costs the row nothing -- which is exactly why the right edge is gone:
+    // holding a width fought the row for the one thing the row controls.
     const panel = panelsByRoot.get(root);
-    if (panel && onRail(panel)) { delete root.dataset.snapped; continue; }
     const box = root.getBoundingClientRect();
     const want = Object.assign({}, ...names.map((name) => EDGES[name] && EDGES[name].fill(box)));
     // Per panel, so one window being stretched does not tell every other
@@ -3766,14 +3780,6 @@ function resnap() {
       if (h > innerHeight - box.top) {
         const top = Math.max(0, innerHeight - h);
         if (Math.abs(box.top - top) > 0.5) { root.style.top = top + 'px'; stretched = true; }
-      }
-    }
-    if (want.width !== undefined) {
-      const w = Math.max(240, want.width);
-      if (Math.abs(box.width - w) > 0.5) { root.style.width = w + 'px'; stretched = true; }
-      if (w > innerWidth - box.left) {
-        const left = Math.max(0, innerWidth - w);
-        if (Math.abs(box.left - left) > 0.5) { root.style.left = left + 'px'; stretched = true; }
       }
     }
     if (stretched) {
