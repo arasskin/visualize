@@ -3236,6 +3236,17 @@ function scrollRail(by) {
 // side should show it, or the mark moves somewhere you cannot see and the
 // row looks unchanged.
 //
+// THE WHOLE PANEL, NOT THE TAB. What you walked to is the pane, and on an
+// open one the tab is the small part of it -- scrolling until the 43px tab
+// cleared the edge left the window it opened still hanging off the side,
+// which is the thing you were looking at. So an open tab is revealed by the
+// span it occupies in the row, window and all. See `railSpan`.
+//
+// A WINDOW WIDER THAN THE PAGE cannot be shown whole, and asking for its
+// right edge would scroll its LEFT edge off instead -- the pane pushed away
+// to bring in a part of it you were not looking at. Those are aligned to
+// the left instead: as much of the window as fits, from its near edge.
+//
 // SCROLLED TO ITS NEAR EDGE, not to the middle: a tab just past the right
 // edge should come in from the right and stop, rather than the whole row
 // jumping to centre it. The stops are `scrollRail`'s, so this cannot slide
@@ -3243,14 +3254,20 @@ function scrollRail(by) {
 function revealTab(panel) {
   if (!panel || !railOverflows()) return;
   const bar = panel.root.querySelector('.bar').getBoundingClientRect();
+  const span = railSpan(panel);
   // NO MARGIN ON THE LEFT. The row's own left stop is the window edge, so
   // asking to sit a few pixels inside it is asking for something the scroll
   // cannot give -- it goes as far as it can and leaves the tab that far
   // short, which is exactly the case this is meant to fix. A margin on the
   // right is fine: there is room to spare on that side.
   const right = innerWidth - 8;
+  const far = bar.left + span;
   if (bar.left < RAIL_LEFT) scrollRail(RAIL_LEFT - bar.left);
-  else if (bar.right > right) scrollRail(right - bar.right);
+  else if (far > right) {
+    // Left-aligned when it cannot fit whole, near-edge when it can.
+    if (span > right - RAIL_LEFT) scrollRail(RAIL_LEFT - bar.left);
+    else scrollRail(right - far);
+  }
 }
 
 // A WHEEL OVER THE ROW, either axis. A trackpad swipe sideways arrives as
