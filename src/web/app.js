@@ -1,21 +1,21 @@
-// The page: pan and zoom over the graph, and a line editor for the config.
+// The config editor: the list of lines, the compose bar, completions, the
+// help panel and the keyboard that drives them.
 //
-// Vanilla, no build step, no framework. Two parts that barely talk to each
-// other -- the viewport and the editor -- joined only by the panel furniture
-// they share.
+// WHAT IS LEFT AFTER THE SPLIT, and it is one thing rather than the remainder
+// of several. The alt chords and the completion list read and write the same
+// list of lines the rows do -- pulling either out would mean handing it the
+// editor's insides back, which is a way of saying it was never separate.
+//
+// This file is also where the page is put together: the modules below know
+// nothing of each other, so their hooks are wired here at the bottom.
 
-import { makeTerminal, keyToBytes } from './term.js';
+import { pane, wire as wireGraph, paint, repaint, fit, fitSoon, isTouched } from './graph.js';
 import {
-  pane, scale, wire as wireGraph,
-  paint, repaint, zoomAt, fit, fitSoon, panBy, isTouched,
-} from './graph.js';
-import {
-  find, hits, unitCache, wire as wireFind,
-  placeArrow, keepHitInView, redrawFind,
+  find, hits, wire as wireFind, placeArrow, keepHitInView, redrawFind,
 } from './find.js';
 import { moduleNames, hideEdge, wireEdges } from './hover.js';
 import {
-  configPanel, makeConfigPanel, rail, EDGES, inset,
+  configPanel, makeConfigPanel, rail, EDGES,
   selectPane, pickedPanel, revealTab, openTerminal, resnap,
   startRail, wire as wirePanes,
 } from './panes.js';
