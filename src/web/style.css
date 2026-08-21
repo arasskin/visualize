@@ -387,28 +387,20 @@ button:disabled { opacity: .5; cursor: progress; }
 }
 
 
-/* TABS TOUCH, AND SHARE THE LINE BETWEEN THEM. Sitting flush, each tab's
-   left border lands on its neighbour's right one and the pair read as a 2px
-   rule -- twice the weight of every other line on the page. Pulled back by
-   one pixel so the two overlap into one.
-   
-   Not applied to the first tab, which has nothing to its left to share
-   with: the row would start a pixel off the edge. The rail decides which
-   that is -- it reorders -- so the class is set in app.js. */
-/* THE WHOLE PANEL SHIFTS, not just the bar. Pulling only the bar left put
-   its window a pixel to the right of it, so an open tab no longer lined up
-   with the thing it opened -- the one alignment a tab has to keep. Moving
-   the panel takes the body with it and the tabs still overlap by the pixel
-   that collapses their shared border. */
-/* A TAB DRAWS NO LEFT EDGE; ITS NEIGHBOUR'S RIGHT EDGE IS THE LINE BETWEEN
-   THEM. That is what "sharing a border" means, and it needs no overlap to
-   arrange -- which matters because the tabs are 43.63px wide, so pulling one
-   a whole pixel onto the next left a 0.37px slit of background showing
-   through wherever the arithmetic landed badly.
-   
-   The first tab in the row draws its own left edge, having nothing to its
-   left to borrow one from. The rail marks it, being what knows the order. */
-.panel.tab-joined > .bar { border-left: 0; }
+/* TABS TOUCH, AND EVERY TAB DRAWS ALL FOUR OF ITS OWN EDGES. Sitting flush,
+   two neighbours put two lines in the same pixel, and the one on top wins --
+   which is what the stacking is for: the selected tab is above the rest, so
+   where it meets a neighbour the line is ITS colour, green.
+
+   Not borrowed, and not overlapped. Both were tried. Pulling each tab a
+   pixel onto the next collapsed the pair of lines into one, but the tabs are
+   43.63px wide and a whole pixel is the wrong amount -- a 0.37px slit of
+   background showed through wherever the arithmetic landed badly. Dropping
+   each tab's left edge to stand on its neighbour's right one had no such
+   slit, and was fine while both were grey, but wrong the moment one was not:
+   the selected tab's left side came out in the colour of the tab beside it,
+   or vanished where there was nothing to borrow from. A border that belongs
+   to somebody else is a border that disappears when they change. */
 
 /* THE CORNER. Firefox rounds the window's own corners, so a square tab
    pressed into one has its top-left poking past the curve -- a small wedge

@@ -3175,7 +3175,6 @@ function packRail() {
     // costs. Squaring on the first move rather than on the drop is what
     // makes picking it up feel like picking it up.
     const held = p.root === railDragging;
-    p.root.classList.toggle('tab-joined', i > 0 && !held);
 
     // THE TAB IN THE CORNER, which is the leftmost one and only while the
     // row is scrolled home: scrolled along, the first tab is off the left
@@ -3296,7 +3295,7 @@ function removeFromRail(panel) {
   // it runs leaves whatever it decides. A tab pulled onto the graph kept
   // the rounded corner it had while it was in the corner, and the pixel of
   // overlap it had while it had a neighbour.
-  panel.root.classList.remove('tab-joined', 'tab-corner');
+  panel.root.classList.remove('tab-corner');
 }
 
 /* -- the bin ---------------------------------------------------------------
@@ -3405,7 +3404,7 @@ function railDrag(panel) {
   // too, but it only runs when the drag is near the rail and changes slot --
   // a tab pulled straight down would keep its rounded corner all the way to
   // the drop. Cleared here, where every move passes.
-  panel.root.classList.remove('tab-corner', 'tab-joined');
+  panel.root.classList.remove('tab-corner');
   // THE BIN COMES UP FOR ANYTHING THAT CAN GO IN IT. visualize cannot: it is
   // the page rather than a thing on it, and offering to throw the page away
   // is not an offer worth making. A pane knows it can be destroyed by having
