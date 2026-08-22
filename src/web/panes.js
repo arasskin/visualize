@@ -1101,13 +1101,21 @@ const railState = {
   scroll: 0,      // how far the row is slid, negative to see later tabs
   end: 0,         // where the row ends unscrolled
   spans: new Map(),
+  // The panel under a hand right now, skipped by the packing because the row
+  // has already closed up behind it.
+  dragging: null,
+  // What the row measured last, as a string, so a tick can tell whether
+  // anything moved without laying anything out.
+  widths: '',
+  // The outline left behind when a window pushes its neighbour along.
+  ghost: null,
 };
 
 // Read every width, and nothing else. The only phase allowed to touch the
 // page for an answer.
 function measureRail() {
   railState.spans = new Map(rail.map((p) => [p, railSpan(p)]));
-  railWidths = railShape();
+  railState.widths = railShape();
 }
 
 // Where each tab sits. A walk over the list -- no element is read and none is
@@ -1171,7 +1179,7 @@ export function packRailNow() {
 function renderRail() {
   const at = placeRail();
   rail.forEach((p, i) => {
-    const held = p.root === railDragging;
+    const held = p.root === railState.dragging;
     if (!held) p.place(at.get(p), RAIL_TOP, true);
     // THE TAB IN THE CORNER, which is the leftmost one and only while the row
     // is scrolled home: scrolled along, the first tab is off the left edge
@@ -1210,12 +1218,12 @@ function renderRail() {
    shut is derivable from the row as it is -- hard against that tab's bar --
    so the marks are rebuilt from the positions every time the row is laid
    out, and no captured value can fall out of step with them. */
-let shiftGhost = null;
+
 
 function clearShift() {
-  if (!shiftGhost) return;
-  shiftGhost.remove();
-  shiftGhost = null;
+  if (!railState.ghost) return;
+  railState.ghost.remove();
+  railState.ghost = null;
 }
 
 function showShift() {
@@ -1272,7 +1280,7 @@ function showShift() {
 
   if (!wrap.children.length) return;
   document.body.appendChild(wrap);
-  shiftGhost = wrap;
+  railState.ghost = wrap;
 }
 
 // SCROLLING THE ROW, and only when there is a reason to.
@@ -1386,15 +1394,15 @@ window.addEventListener('resize', () => { scrollRail(0); });
 // has nothing to say about), and it is another thing that goes quiet in a
 // hidden tab. Comparing the widths we last laid out against the widths that
 // are there costs one offsetWidth per tab and cannot miss.
-let railWidths = '';
+
 function railChanged() {
   const now = railShape();
-  if (now === railWidths) return false;
-  railWidths = now;
+  if (now === railState.widths) return false;
+  railState.widths = now;
   return true;
 }
 setInterval(() => {
-  if (railDragging) return;
+  if (railState.dragging) return;
   unscrollPage();
   if (railChanged()) packRail();
   // HELD AGAINST THEIR EDGES. A window pushed along by a neighbour being
@@ -1482,7 +1490,7 @@ function binEat(panel) {
 
 // Which panel is under the hand right now, or null. Held so the packing can
 // leave it alone and the rails know to show themselves.
-let railDragging = null;
+
 
 // THE MARK IN THE CORNER, which belongs to the PAGE and not to any tab.
 // It was a child of whichever tab was leftmost, which meant it came and went
@@ -1657,7 +1665,7 @@ function slotFor(panel) {
 }
 
 function railDrag(panel) {
-  railDragging = panel.root;
+  railState.dragging = panel.root;
   // OFF THE MOMENT IT IS PICKED UP. `packRail` clears these for the held tab
   // too, but it only runs when the drag is near the rail and changes slot --
   // a tab pulled straight down would keep its rounded corner all the way to
@@ -1688,7 +1696,7 @@ function railDrag(panel) {
 }
 
 function railDrop(panel) {
-  railDragging = null;
+  railState.dragging = null;
   railMarks.classList.remove('near');
 
   // DROPPED ON THE BIN is the way a pane is destroyed -- see overBin. Asked
