@@ -157,6 +157,9 @@
 # for every row. That is the whole reason for the markup: the rows are the
 # same rows, and the last one is printed a few points down.
 (def- count-size 8)
+# The blank row that separates the two. Small, because it is air rather than
+# a line -- see `label-markup`.
+(def- gap-size 4)
 
 (defn- label-markup
   ``A node's label as HTML-like markup, so its last row can be smaller.
@@ -168,7 +171,13 @@
   (when (and (> (length rows) 1)
              (peg/match ~(* (some (range "09")) -1) (last rows)))
     (def name (slice rows 0 -2))
+    # A THIN ROW BETWEEN THE NAME AND THE COUNT. They are two different kinds
+    # of thing -- what the file is called, and a fact about it -- and pressed
+    # together they read as one more row of the name. An empty line break at a
+    # few points is the whole gap: it costs that many points of height and
+    # says the two are not the same thing.
     (string (string/join (map escaped-html name) "<BR/>")
+            "<BR/><FONT POINT-SIZE=\"" gap-size "\"> </FONT>"
             "<BR/><FONT POINT-SIZE=\"" count-size "\">"
             (escaped-html (last rows)) "</FONT>")))
 
