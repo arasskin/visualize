@@ -983,10 +983,10 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    free to grow both ways. */
 #compose.typing .paren { display: none; }
 /* WIDER THAN A CONFIG LINE, and the width is app.js's to decide: it sizes
-   the field to 88 characters of 12px type and no more. The cap here only
-   stops a narrow window being overrun -- `none` rather than a number,
-   because a second opinion about the width is a second thing to keep in
-   step with the first. */
+   the field to a page measure -- the text column of an A4 sheet with its
+   margins, which is the width a line is comfortable to read at. The cap here
+   only stops a narrow window being overrun; app.js holds the same limit, so
+   this is a backstop rather than a second opinion. */
 #compose.typing { max-width: 94vw; }
 /* NO FLASH WHILE IT RESIZES. The box changes size on almost every keystroke
    -- a character wider, or a whole step smaller -- and a transition on those

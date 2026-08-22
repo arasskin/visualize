@@ -648,6 +648,23 @@ function composeTarget() {
 const COMPOSE_MAX_PX = 17;
 const COMPOSE_MIN_PX = 12;
 const COMPOSE_ROWS = 7;
+/* HOW WIDE THE BOX GETS, as a sheet of paper rather than as a count of
+   characters.
+
+   A4 IS 210mm AND A TYPESET MARGIN IS ABOUT 25mm A SIDE, which leaves 160mm
+   -- a little over six inches -- of text. That is the measure books and
+   letters have settled on because it is the width an eye reads a line at
+   without losing the start of the next one, and it does not care what the
+   line is made of.
+
+   THE COUNT OF CHARACTERS WAS THE WRONG RULE. It was eighty-eight times the
+   width of the widest glyph, so a box that never held a W was still sized
+   for eighty-eight of them -- far wider than any line anyone types. A sheet
+   of paper is the same width whatever is written on it, which is the point.
+
+   96 CSS pixels to the inch, by definition, whatever the screen is doing. */
+const COMPOSE_INCHES = 6.3;
+const COMPOSE_CAP_PX = Math.round(COMPOSE_INCHES * 96);
 
 // PUT THE BAR IN THE MODE ITS TAB WANTS. Called whenever the selection
 // changes, and on opening. Cheap enough to call when nothing has changed:
@@ -716,12 +733,11 @@ function sizeFor(value) {
   const lines = value.split('\n');
   const longest = Math.max(1, ...lines.map(l => l.length));
 
-  // How wide the widest character is at a given size, in this face. The face
-  // is proportional, so this is the worst case rather than the typical one --
-  // which is what makes the 88 a floor: eighty-eight of ANYTHING fits, and
-  // ordinary text leaves room over.
+  // How wide a character is on average, at a given size, in this face. Used
+  // to guess how many characters a line holds -- a guess is all it has to be
+  // now that the WIDTH is a fixed measure rather than a count.
   const em = charWidth();
-  const capPx = Math.round(88 * COMPOSE_MIN_PX * em);
+  const capPx = Math.min(COMPOSE_CAP_PX, Math.round(innerWidth * 0.94));
 
   // WHAT SIZE FITS THIS LINE. At the full size a line of `longest` wants
   // `longest * MAX * em` pixels; if that is over budget, the size that fits
@@ -767,36 +783,33 @@ function sizeFor(value) {
   composeInput.style.height = (rows * line) + 'px';
 }
 
-// THE WIDEST CHARACTER, as a fraction of the font size. Measured from the
-// real face rather than assumed -- an assumption was close enough for a rough
-// cap and not for a promise of 88 characters. Cached: it is a property of the
+// HOW WIDE A CHARACTER IS ON AVERAGE, as a fraction of the font size.
+//
+// A GUESS, AND ONLY A GUESS. It used to carry a promise -- eighty-eight
+// characters fit -- which is why it measured the WIDEST glyph, and why a box
+// that never held a W was sized as though it might. The width is a fixed
+// measure now (see COMPOSE_CAP_PX), so all this has to do is estimate how
+// many characters a line holds before it wraps, and being a little out either
+// way costs a row of guessing rather than a broken promise.
+//
+// MEASURED ON ORDINARY TEXT, so the estimate is right for what people type
+// rather than for the worst thing they could. Cached: it is a property of the
 // font, and the font does not change.
 let charEm = 0;
 function charWidth() {
   if (charEm) return charEm;
-  // THE WIDEST GLYPH, not an average one. The face is proportional now, so
-  // there is no single character width to measure -- and the number is used
-  // to promise that eighty-eight characters fit. Measured on the widest
-  // thing that can be typed, that promise holds whatever is typed; measured
-  // on an average, a line of capitals would overflow the box it was told it
-  // fitted in. The cost is that a line of narrow letters leaves room over,
-  // which is the right way round to be wrong.
   const probe = document.createElement('span');
   probe.style.cssText =
     'position:absolute;visibility:hidden;white-space:pre;font:100px/1 ' +
     getComputedStyle(document.body).fontFamily;
-  // W and M are the usual widest in a Latin face; the digits are here because
-  // config lines are full of them and tabular figures can be wider still.
-  const candidates = 'WM@%0123456789';
-  let widest = 0;
-  for (const ch of candidates) {
-    probe.textContent = ch.repeat(50);
-    document.body.appendChild(probe);
-    widest = Math.max(widest, probe.getBoundingClientRect().width / 50 / 100);
-    probe.remove();
-  }
-  charEm = widest;
-  return charEm || 0.6;
+  // A pangram rather than a repeated letter: it has the letter frequencies of
+  // real writing, which is what the average is meant to describe.
+  const sample = 'the quick brown fox jumps over the lazy dog 0123456789';
+  probe.textContent = sample;
+  document.body.appendChild(probe);
+  charEm = probe.getBoundingClientRect().width / sample.length / 100;
+  probe.remove();
+  return charEm || 0.5;
 }
 
 // -- the list --------------------------------------------------------------
