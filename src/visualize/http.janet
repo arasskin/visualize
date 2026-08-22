@@ -263,7 +263,11 @@
    ".mjs" "text/javascript; charset=utf-8"
    ".css" "text/css; charset=utf-8"
    ".svg" "image/svg+xml"
-   ".json" "application/json"})
+   ".json" "application/json"
+   # The font the page draws in, vendored beside it. Served as a font rather
+   # than as text so the browser will use it, and read as bytes rather than
+   # characters -- `slurp` returns a byte string, so a TTF survives the trip.
+   ".ttf" "font/ttf"})
 
 (defn content-type
   ``What to call this file.

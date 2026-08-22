@@ -43,7 +43,24 @@
 # says what is IN the graph; how the drawing looks on your screen is not a
 # fact about your codebase. Changing the face means changing this line and
 # the CSS together, which is the honest amount of work for the change.
-(def- font "Comic Sans MS")
+# NAMED HERE, MEASURED BY DOT, DRAWN BY THE BROWSER -- and those are three
+# different lookups of the same name.
+#
+# The browser's is answered by the @font-face in style.css, which points at
+# the TTFs vendored beside it, so the page always draws in the real face.
+#
+# DOT'S IS ANSWERED BY THE SYSTEM, and only by the system. It sizes every
+# ellipse from the metrics it finds, and it looks where fontconfig looks --
+# not at the repo, and not at FONTCONFIG_FILE either, both measured. Without
+# the font installed it measures a fallback: 111pt for a label the real face
+# needs 137pt for, which is labels crowding outlines cut for other glyphs.
+#
+# So the fonts ship in src/web/ AND want installing on the machine that runs
+# the server. The first is what makes the page look right anywhere; the
+# second is what makes the ellipses fit. A machine without them gets a
+# correctly drawn graph in slightly tight ellipses, which is a bad haircut
+# rather than a broken page.
+(def- font "Parkinsans")
 
 (defn- quoted
   "A DOT string literal: quotes and backslashes escaped, newlines as \\n."
