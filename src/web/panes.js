@@ -1570,24 +1570,30 @@ export function resnap() {
     // costs the row nothing -- which is exactly why the right edge is gone:
     // holding a width fought the row for the one thing the row controls.
     const panel = panelsByRoot.get(root);
+    // MEASURED ONCE, and every decision made from that one reading. The
+    // version this replaces read the box, wrote a height, then asked the same
+    // box for its top -- a value the write had just invalidated, so the
+    // browser had to lay the page out again to answer, and the answer was for
+    // a window that had already moved.
     const box = root.getBoundingClientRect();
     const want = Object.assign({}, ...names.map((name) => EDGES[name] && EDGES[name].fill(box)));
+    if (want.height === undefined) continue;
+
+    const h = Math.max(120, want.height);
+    // WHERE IT ENDS UP, worked out before anything is written: the height it
+    // should have, and the top that height needs if there is not room below
+    // where it sits now.
+    const top = h > innerHeight - box.top ? Math.max(0, innerHeight - h) : box.top;
+    const wantsHeight = Math.abs(box.height - h) > 0.5;
+    const wantsTop = Math.abs(box.top - top) > 0.5;
+    if (!wantsHeight && !wantsTop) continue;
+
+    if (wantsHeight) root.style.height = h + 'px';
+    if (wantsTop) root.style.top = top + 'px';
+    moved = true;
     // Per panel, so one window being stretched does not tell every other
     // window that it moved.
-    let stretched = false;
-    if (want.height !== undefined) {
-      const h = Math.max(120, want.height);
-      if (Math.abs(box.height - h) > 0.5) { root.style.height = h + 'px'; stretched = true; }
-      // Slid up when the room below the top is less than the window may be.
-      if (h > innerHeight - box.top) {
-        const top = Math.max(0, innerHeight - h);
-        if (Math.abs(box.top - top) > 0.5) { root.style.top = top + 'px'; stretched = true; }
-      }
-    }
-    if (stretched) {
-      moved = true;
-      if (panel && panel.resized) panel.resized();
-    }
+    if (panel && panel.resized) panel.resized();
   }
   return moved;
 }
