@@ -85,12 +85,13 @@
 (def- points-per-inch 72)
 
 # HOW TALL, in inches, for a label of N rows at fontsize 11. A row is about
-# 15 points with its leading; the rest is the air above the first and below
-# the last. Fixed sizing means dot will not grow a node that does not fit, so
+# thirteen points with its leading -- tighter than the face's natural
+# spacing, because a node's rows are one word each and read as a stack rather
+# than as prose; the rest is the air above the first row and below the last. Fixed sizing means dot will not grow a node that does not fit, so
 # this has to be right rather than close -- it warns when it is not, which is
 # how the numbers here were checked.
-(def- row-height 15.0)
-(def- rows-padding 22.0)
+(def- row-height 13.2)
+(def- rows-padding 18.0)
 
 (defn- label-height
   "How tall the ellipse for this label should be, in INCHES."
@@ -243,10 +244,13 @@
     (def pad (string/repeat "  " (+ depth 1)))
     (def hue (hue-of key))
     (array/push out (string pad "subgraph \"cluster_" (quoted key) "\" {"))
+    # THE SAME SIZE AS A NODE'S LABEL. A box names a group of files and a node
+    # names a file; one is not a note about the other, and printing it smaller
+    # said it was.
     (array/push out (string pad "  label=\"" (quoted key) "\"; style=dashed;"
                             " color=\"" hue "\";"
                             " fontcolor=\"" hue "\";"
-                            " fontsize=10;"))
+                            " fontsize=11;"))
     # Children first, then this box's own nodes, so a nested rectangle is not
     # separated from its siblings by the loose members around it.
     (each child (sorted (keys (or (kids key) @{})))
