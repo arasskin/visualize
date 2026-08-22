@@ -716,9 +716,10 @@ function sizeFor(value) {
   const lines = value.split('\n');
   const longest = Math.max(1, ...lines.map(l => l.length));
 
-  // How wide a character is at a given size, in this face. Monospace, so one
-  // number does for all of them -- measured once rather than guessed at, so
-  // the 88 is 88 and not "about 88".
+  // How wide the widest character is at a given size, in this face. The face
+  // is proportional, so this is the worst case rather than the typical one --
+  // which is what makes the 88 a floor: eighty-eight of ANYTHING fits, and
+  // ordinary text leaves room over.
   const em = charWidth();
   const capPx = Math.round(88 * COMPOSE_MIN_PX * em);
 
@@ -748,7 +749,11 @@ function sizeFor(value) {
                         lines.reduce((n, l) => n + Math.max(1, Math.ceil(l.length / per)), 0));
 
   const line = Math.round(px * 1.45);
-  composeInput.style.font = `${px}px/${line}px ui-monospace, monospace`;
+  // THE PAGE'S FACE, set here because the SIZE is worked out here -- the
+  // family has to come along with it or the shorthand drops back to the
+  // stylesheet's and the two disagree about how wide a line is.
+  composeInput.style.font =
+    `${px}px/${line}px ` + getComputedStyle(document.body).fontFamily;
   // THE WIDTH ONLY EVER GROWS on the way out. Sized to the text at the
   // current size, each step DOWN in font makes the same text narrower in
   // pixels -- so the box sprang back a few tens of pixels at every step and
@@ -762,20 +767,35 @@ function sizeFor(value) {
   composeInput.style.height = (rows * line) + 'px';
 }
 
-// ONE CHARACTER WIDE, as a fraction of the font size. Measured from the real
-// face rather than assumed to be .6 -- the assumption was close enough for a
-// rough cap and not for a promise of 88 characters. Cached: it is a property
-// of the font, and the font does not change.
+// THE WIDEST CHARACTER, as a fraction of the font size. Measured from the
+// real face rather than assumed -- an assumption was close enough for a rough
+// cap and not for a promise of 88 characters. Cached: it is a property of the
+// font, and the font does not change.
 let charEm = 0;
 function charWidth() {
   if (charEm) return charEm;
+  // THE WIDEST GLYPH, not an average one. The face is proportional now, so
+  // there is no single character width to measure -- and the number is used
+  // to promise that eighty-eight characters fit. Measured on the widest
+  // thing that can be typed, that promise holds whatever is typed; measured
+  // on an average, a line of capitals would overflow the box it was told it
+  // fitted in. The cost is that a line of narrow letters leaves room over,
+  // which is the right way round to be wrong.
   const probe = document.createElement('span');
   probe.style.cssText =
-    'position:absolute;visibility:hidden;white-space:pre;font:100px/1 ui-monospace, monospace';
-  probe.textContent = '0'.repeat(100);
-  document.body.appendChild(probe);
-  charEm = probe.getBoundingClientRect().width / 100 / 100;
-  probe.remove();
+    'position:absolute;visibility:hidden;white-space:pre;font:100px/1 ' +
+    getComputedStyle(document.body).fontFamily;
+  // W and M are the usual widest in a Latin face; the digits are here because
+  // config lines are full of them and tabular figures can be wider still.
+  const candidates = 'WM@%0123456789';
+  let widest = 0;
+  for (const ch of candidates) {
+    probe.textContent = ch.repeat(50);
+    document.body.appendChild(probe);
+    widest = Math.max(widest, probe.getBoundingClientRect().width / 50 / 100);
+    probe.remove();
+  }
+  charEm = widest;
   return charEm || 0.6;
 }
 

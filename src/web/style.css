@@ -943,8 +943,12 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   --field-h: 2.6rem;
   min-width: min(22rem, 74vw); max-width: min(32rem, 84vw);
   /* Set on the bar, so the field and the brackets letter alike -- and the
-     `ch` width the field is measured in follows from it. */
-  font: 17px/1.5 ui-monospace, monospace;
+     `ch` width the field is measured in follows from it.
+     PARKINSANS, like the rest of the page. It is proportional, so `ch` is the
+     width of a "0" rather than of every character -- see `charWidth`, which
+     measures the WIDEST glyph so the eighty-eight column budget still fits
+     eighty-eight of anything. */
+  font: 17px/1.5 var(--font-ui);
 }
 #compose.shut { display: none; }
 
@@ -1175,7 +1179,7 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   right: calc(12px + 3.4rem);
   z-index: 15;
   min-width: min(20rem, 62vw);
-  font: 15px/1.5 ui-monospace, monospace;
+  font: 15px/1.5 var(--font-ui);
 }
 #find.shut { display: none; }
 
