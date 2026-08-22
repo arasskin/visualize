@@ -642,17 +642,11 @@ function composeTarget() {
 }
 
 // HOW SMALL THE TEXT GETS. A shell command can be long, and a bar that only
-// ever grows wider walks off the screen; letting the type shrink buys a few
-// more characters before that happens.
-//
-// TWO POINTS, AND NO MORE. The box is a fixed measure now -- a sheet of paper
-// with margins -- so the type is not what buys the room any more; the width
-// does that, and past its edge a line wraps. What is left for the type to do
-// is take the edge off a line that only just overruns, and a step of two
-// points does that without the text changing character. Five points made the
-// bar shrink into something you were reading rather than writing.
+// ever grows wider walks off the screen; letting the type shrink buys about
+// twice the characters before that happens. 12px is the floor -- past that it
+// stops being text you can check before sending.
 const COMPOSE_MAX_PX = 17;
-const COMPOSE_MIN_PX = 15;
+const COMPOSE_MIN_PX = 12;
 const COMPOSE_ROWS = 7;
 /* HOW WIDE THE BOX GETS, as a sheet of paper rather than as a count of
    characters.
@@ -729,14 +723,13 @@ function sizeFor(value) {
 
   // A TERMINAL BAR GROWS BOTH WAYS, in that order and only that order.
   //
-  // THE BOX IS A PAGE WIDE, and that is the whole budget. The type shrinks
-  // ONLY WHILE THE TEXT IS ON ONE LINE: a first line that keeps growing is a
-  // first line that keeps needing more room, so it buys that room by getting
-  // smaller until it is as small as it goes -- two points down and no
-  // further. Past that the box is full, and anything more wraps -- so by the
-  // time there is a second line the type is ALREADY at the floor and never
-  // changes again. Nothing shrinks while you are typing line four; it cannot,
-  // it is as small as it gets.
+  // THE BOX IS 88 CHARACTERS OF 12px WIDE, and that is the whole budget. The
+  // type shrinks ONLY WHILE THE TEXT IS ON ONE LINE: a first line that keeps
+  // growing is a first line that keeps needing more room, so it buys that
+  // room by getting smaller until it is as small as it goes. Past that the
+  // box is full, and anything more wraps -- so by the time there is a second
+  // line the type is ALREADY at 12px and never changes again. Nothing shrinks
+  // while you are typing line four; it cannot, it is at the floor.
   const lines = value.split('\n');
   const longest = Math.max(1, ...lines.map(l => l.length));
 
@@ -750,7 +743,7 @@ function sizeFor(value) {
   // `longest * MAX * em` pixels; if that is over budget, the size that fits
   // is the budget divided by the characters -- floored at 12, which is where
   // the box stops giving and the text starts wrapping instead.
-  // MORE THAN ONE LINE MEANS THE FLOOR, whatever the lines say. Deriving the size
+  // MORE THAN ONE LINE MEANS 12px, whatever the lines say. Deriving the size
   // from the longest line let three SHORT lines sit at 17px -- true to the
   // arithmetic and not to the rule, which is that the small type is what
   // buys the first line its room, and once a second line exists that room
@@ -765,7 +758,7 @@ function sizeFor(value) {
   // HOW MANY LINES THAT MAKES, counted rather than measured. Measuring means
   // writing `height: auto`, reading scrollHeight and writing the height back
   // -- three layouts, the middle one of which the browser can paint, which
-  // is the flash. At a known size the box holds a known number of characters, so
+  // is the flash. At 12px the box holds a known number of characters, so
   // wrapping is arithmetic.
   const per = Math.max(1, Math.floor(capPx / (px * em)));
   const rows = Math.min(COMPOSE_ROWS,
