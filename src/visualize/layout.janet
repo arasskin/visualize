@@ -181,6 +181,15 @@
             "<BR/><FONT POINT-SIZE=\"" count-size "\">"
             (escaped-html (last rows)) "</FONT>")))
 
+(defn- hatch-id
+  ``The id of the hatch drawn in this ink. One pattern per colour, named after
+  it, so a node can ask for the stripes that match its own outline.
+
+  The ink is a hex colour, and `#` cannot start an id -- so it is dropped and
+  what is left is the name.``
+  [ink]
+  (string "fold-" (string/replace-all "#" "" (string ink))))
+
 (defn to-dot
   ``The graph as a DOT document.
 
@@ -259,6 +268,7 @@
                               [["style" "filled"]
                                ["fillcolor" (node :fill)]]
                               [])
+
                            ;(if (empty? marks)
                               []
                               [["class" (string/join marks " ")]])])
@@ -333,6 +343,12 @@
   (array/push out "}")
   (string/join out "\n"))
 
+(defn- folded-inks
+  "The distinct inks among the folded nodes, so each gets a hatch."
+  [graph]
+  (distinct (map |($ :ink)
+                 (filter |($ :folded) (get graph :nodes [])))))
+
 (defn- trimmed-svg
   ``graphviz's output, ready to inline into the page.
 
@@ -344,7 +360,7 @@
   The `-&#45;&gt;` in edge titles becomes `-&gt;`: dot escapes the hyphen
   because a `--` inside an XML comment is illegal, and web/app.js matches
   edge titles as "from->to" when it highlights an edge's endpoints.``
-  [text]
+  [text inks]
   (def at (string/find "<svg" text))
   (def body (if at (string/slice text at) text))
   (def fixed (string/replace-all "&#45;&gt;" "-&gt;" body))
@@ -353,15 +369,37 @@
   # resolves against the document the shape is in, and the stylesheet cannot
   # carry a shape of its own.
   #
-  # The stripes take their colour from `currentColor`, so a node hatched this
-  # way is striped in whatever ink it already draws its outline in -- one
-  # pattern serves every group's hue rather than one per colour.
+  # ONE PATTERN PER INK, so a folded node is striped in a shade of its own
+  # colour rather than in a grey that belongs to nothing.
+  #
+  # NOT `currentColor`, which is what this wanted to be. Inside a <pattern>
+  # that keyword resolves against the PATTERN's own inherited colour rather
+  # than against the shape using it -- measured, it came out black on every
+  # node whatever ink the node drew itself in. So the colour is written into
+  # each pattern, and there are as many patterns as there are inks among the
+  # folded nodes: usually one or two, and never more than there are groups.
+  #
+  # THIN, AND WELL APART: one pixel of stripe every six. A texture rather than
+  # a fill -- it should read as a hint that the node stands for several things,
+  # not as a block of colour competing with the outline, and the label has to
+  # stay readable over it.
+  #
+  # DRAWN AS A RECTANGLE, not a line. A zero-width line has no box for the
+  # renderer to fill, and at low opacity the result was nothing at all.
   (def hatch
-    (string "<defs><pattern id=\"fold-hatch\" width=\"6\" height=\"6\""
-            " patternUnits=\"userSpaceOnUse\" patternTransform=\"rotate(45)\">"
-            "<line x1=\"0\" y1=\"0\" x2=\"0\" y2=\"6\""
-            " stroke=\"currentColor\" stroke-width=\"1.4\" opacity=\"0.30\"/>"
-            "</pattern></defs>"))
+    (string "<defs>"
+            (string/join
+              (map (fn [ink]
+                     (string "<pattern id=\"" (hatch-id ink) "\""
+                             " width=\"6\" height=\"6\""
+                             " patternUnits=\"userSpaceOnUse\""
+                             " patternTransform=\"rotate(45)\">"
+                             "<rect x=\"0\" y=\"0\" width=\"1\" height=\"6\""
+                             " fill=\"" ink "\" fill-opacity=\"0.55\"/>"
+                             "</pattern>"))
+                   inks)
+              "")
+            "</defs>"))
   (if-let [shut (string/find ">" fixed)]
     (string (string/slice fixed 0 (+ shut 1)) hatch (string/slice fixed (+ shut 1)))
     fixed))
@@ -386,7 +424,7 @@
       (def svg (:read (proc :out) :all))
       (def status (os/proc-wait proc))
       (if (zero? status)
-        [true (trimmed-svg (string svg))]
+        [true (trimmed-svg (string svg) (folded-inks graph))]
         [false "graphviz failed to draw this graph"]))
     ([err]
       [false (string "graphviz is required to draw the graph, and running "

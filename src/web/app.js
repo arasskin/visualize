@@ -9,7 +9,7 @@
 // This file is also where the page is put together: the modules below know
 // nothing of each other, so their hooks are wired here at the bottom.
 
-import { pane, wire as wireGraph, paint, repaint, fit, fitSoon, isTouched } from './graph.js';
+import { pane, wire as wireGraph, paint, repaint, fit, fitSoon, isTouched, hatchFolded } from './graph.js';
 import {
   find, hits, wire as wireFind, placeArrow, keepHitInView, redrawFind,
 } from './find.js';
@@ -30,6 +30,7 @@ wireGraph({ onRepaint: () => placeArrow(), onFit: () => keepHitInView() });
 
 fitSoon();
 wireEdges();
+hatchFolded();
 window.addEventListener('load', fitSoon);
 // Refit on resize only while untouched, so a resize never throws away a view
 // the user panned to deliberately.
@@ -389,6 +390,8 @@ async function send(action, index, keepView) {
         pane.innerHTML = out.svg;
         pane.appendChild(edgeLabel);
         wireEdges();
+        // The stripes on a folded node, which the SVG cannot carry itself.
+        hatchFolded();
         // The arrow was drawn into the svg that just went. Re-find against
         // the new one, so a hit survives a redraw rather than leaving the
         // bar claiming a match that is no longer marked.

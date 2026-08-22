@@ -454,14 +454,11 @@ button:disabled { opacity: .5; cursor: progress; }
    anything else: they are not a colour, so they do not collide with the
    group hues, and not an outline, so they do not collide with selection.
 
-   The pattern is defined inside the SVG -- see `trimmed-svg` -- and takes
-   `currentColor`, so a folded node is striped in the same ink it is drawn
-   in whatever group it belongs to. */
-#graph svg g.folded ellipse,
-#graph svg g.folded polygon,
-#graph svg g.folded path {
-  fill: url(#fold-hatch);
-}
+   THE FILL IS SET ON THE NODE, not here: each folded node points at a hatch
+   drawn in its OWN ink, and only the layout knows which colour that is. See
+   `hatch-id`. Nothing to do in the stylesheet -- this note is here because
+   the striping is a page-level idea and this is where someone would look
+   for it. */
 
 /* -- WHERE A TAB WENT ------------------------------------------------------
 

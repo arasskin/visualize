@@ -183,5 +183,26 @@ export function panBy(dx, dy) {
 // discard a view they chose.
 export function isTouched() { return touched; }
 
+/* THE HATCH ON A FOLDED NODE, applied after a drawing lands.
+
+   NOT WRITTEN INTO THE DOT, because graphviz does not know what a `url(#...)`
+   is: handed one as a fill colour it writes `fill="#000000"` and the node
+   comes out solid black -- measured, not assumed. It carries the CLASS
+   happily though, and the patterns are in the document, so the page joins the
+   two.
+
+   NOT IN THE STYLESHEET EITHER. Which pattern a node wants depends on which
+   ink it is drawn in, and CSS cannot read a shape's stroke to build a url
+   from it. Four lines here rather than a rule per hue. */
+export function hatchFolded() {
+  const svg = pane.querySelector('svg');
+  if (!svg) return;
+  for (const g of svg.querySelectorAll('g.folded')) {
+    const shape = g.querySelector('ellipse, polygon, path');
+    const ink = shape && shape.getAttribute('stroke');
+    if (ink) shape.setAttribute('fill', `url(#fold-${ink.replace('#', '')})`);
+  }
+}
+
 export function fitSoon() { requestAnimationFrame(() => requestAnimationFrame(fit)); }
 
