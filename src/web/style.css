@@ -1,3 +1,38 @@
+/* PARKINSANS, CARRIED BY THE PROJECT rather than fetched from a font host.
+   Three weights, which is what the page uses.
+
+   VENDORED FOR THE SAME REASON THE RUNTIME IS. The page is drawn in this
+   face and graphviz SIZES EVERY ELLIPSE from its metrics -- so if the machine
+   running the server cannot find it, dot measures a fallback while the
+   browser draws the real thing and the labels sit in outlines cut for other
+   glyphs. A file in the repo is a file both of them can read, on any machine,
+   with no network and nothing to install.
+
+   Served flat, beside the stylesheet: the static route takes a single path
+   component and refuses anything with a slash in it, which is the whole of
+   its path safety. */
+@font-face {
+  font-family: Parkinsans;
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(/Parkinsans-Regular.ttf) format('truetype');
+}
+@font-face {
+  font-family: Parkinsans;
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(/Parkinsans-Medium.ttf) format('truetype');
+}
+@font-face {
+  font-family: Parkinsans;
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(/Parkinsans-Bold.ttf) format('truetype');
+}
+
 /* Vanilla CSS, no build step, no framework. Edit it and reload.
  *
  * Everything themeable is a custom property at the top. The rest of the file
@@ -8,7 +43,7 @@
   color-scheme: light dark;
 
   /* -- the theme -------------------------------------------------------- */
-  --font-ui: -apple-system, system-ui, sans-serif;
+  --font-ui: Parkinsans, -apple-system, system-ui, sans-serif;
   /* The config editor's face, and the GRAPH's. Deliberately informal: this is
      a scratchpad you poke at, not a settings dialog. graphviz names the font
      in the SVG but cannot embed it, so the page is what actually resolves it
@@ -17,7 +52,7 @@
      KEEP IN STEP with `font` in src/visualize/layout.janet, which is what
      graphviz sizes the ellipses from. Naming a different face here draws
      labels that do not fit the boxes computed for them. */
-  --font-config: "Comic Sans MS", "Chalkboard SE", cursive;
+  --font-config: Parkinsans, "Comic Sans MS", "Chalkboard SE", cursive;
 
   /* Node ink and group colours are baked into the SVG by src/layout.janet,
      which computes them from the palette and cannot know the page's theme --
@@ -42,34 +77,22 @@
      Distinct from --bad and from --lit, so nothing on this page reads as an
      error or a hover by accident.
 
-     THE SITE'S OWN MAROON -- the same value as `--mark` below, which is the
-     favicon's, which is the disc in the corner. Selection used to be green,
+     THE SITE'S OWN MAROON -- the favicon's colour. Selection used to be green,
      and green made a third unrelated hue on a page that already had maroon
      for the mark and orange for the rails; it also shouted loudest of the
      three. Selection and the corner mark are now literally one colour, which
      leaves the rails as the only other, and orange against maroon is a
      distinction nobody has to be told about.
 
-     KEPT IN STEP WITH `--mark` BY HAND, not by pointing one at the other. A
-     var here would say the two are the same thing, and they are not: one is
-     what the site is, the other is what selection means, and the day either
-     moves it should move alone. */
+     WRITTEN OUT RATHER THAN POINTED AT THE FAVICON'S. They are the same
+     colour today and mean different things: one is what the site is, the
+     other is what selection means, and the day either moves it moves
+     alone. */
   --pick: #8b1a2b;
   --pick-wash: #8b1a2b1c;
 
   /* The tab rail's guides. Orange, which nothing else here is. */
   --rail: #d2811e;
-
-  /* The radius of the disc in the page's corner. On the ROOT rather than on
-     a panel: the disc belongs to the page, and the tab that cuts itself
-     around it has to measure by the same number. */
-  --notch: 14px;
-
-  /* THE CORNER'S DISC, the same maroon the favicon is drawn on. The page's
-     top-left corner is where the site's own mark sits in the browser tab
-     above it, so the shape in the corner of the page wears the same colour
-     -- it reads as this site's, not as another piece of furniture. */
-  --mark: #8b1a2b;
 
   /* The colour a hovered dependency lights up in. */
   --lit: #c04040;
@@ -130,7 +153,7 @@
     --bad-wash: #ff8a7a14;
 
     /* Lifted to read against the dark ground, like every other colour here,
-       and to the same value `--mark` is lifted to. Where the light theme's
+       Where the light theme's
        maroon reads 8.89 against its canvas, this reads 3.59 against the dark
        one -- softer than the green it replaces, which is the point, and the
        softer of the two themes. */
@@ -138,10 +161,6 @@
     --pick-wash: #c2415a24;
 
     --rail: #e8a545;
-
-    /* Lifted off the dark ground: the favicon's maroon is nearly black
-       against it, and a disc you cannot see is not a mark. */
-    --mark: #c2415a;
 
     /* Lightened to read against the dark ground -- the mirror image of the
        light palette's problem: stock black and dim colours vanish here. */
@@ -229,7 +248,7 @@ button:disabled { opacity: .5; cursor: progress; }
   display: block; transform-origin: 0 0; will-change: transform;
   max-width: none;
   /* GRAPHVIZ NAMES THE FONT, THE PAGE RESOLVES IT. dot writes
-     font-family="Comic Sans MS" on every label because src/layout.janet tells
+     font-family="Parkinsans" on every label because src/layout.janet tells
      it to -- and it sizes each ellipse from that font's metrics -- but an SVG
      carries no font, so whether the label is DRAWN in it is the browser's
      business. Without this the drawing fell back to a default face whose
@@ -409,117 +428,22 @@ button:disabled { opacity: .5; cursor: progress; }
 }
 
 
-/* TABS TOUCH, AND EVERY TAB DRAWS ALL FOUR OF ITS OWN EDGES. Sitting flush,
-   two neighbours put two lines in the same pixel, and the one on top wins --
-   which is what the stacking is for: the selected tab is above the rest, so
-   where it meets a neighbour the line is ITS colour, the maroon.
+/* TABS STAND APART, and every tab draws all four of its own edges.
 
-   Not borrowed, and not overlapped. Both were tried. Pulling each tab a
-   pixel onto the next collapsed the pair of lines into one, but the tabs are
-   43.63px wide and a whole pixel is the wrong amount -- a 0.37px slit of
-   background showed through wherever the arithmetic landed badly. Dropping
-   each tab's left edge to stand on its neighbour's right one had no such
-   slit, and was fine while both were grey, but wrong the moment one was not:
-   the selected tab's left side came out in the colour of the tab beside it,
-   or vanished where there was nothing to borrow from. A border that belongs
-   to somebody else is a border that disappears when they change. */
+   A GAP RATHER THAN A SHARED LINE. Tabs that touch have to settle the pixel
+   between them: whose border it is, which of the two colours wins when one is
+   selected, what happens when a window pushes its neighbour along. Every
+   version of that arithmetic has been a bug -- borrowed edges that vanished
+   when the neighbour changed, a doubled 2px rule, a third of a pixel of
+   background showing through where the rounding fell badly. A gap has no
+   shared pixel to argue over, and each tab's outline is entirely its own.
 
-/* THE CORNER, MARKED RATHER THAN MATCHED. Some browser windows round their
-   own top-left corner and some do not -- it depends on the OS, the browser,
-   and whether the window is maximized -- and NOTHING ON THE PAGE CAN ASK.
-   There is no API for the shape of the chrome around you.
-
-   Matching a radius therefore means guessing, and a guess is wrong on half
-   the machines: too small leaves a wedge of tab poking past the curve, too
-   large leaves a hairline of background inside it, and square leaves the
-   wedge every time the window is round.
-
-   So the page stops trying to match anything and puts a SHAPE there instead:
-   a disc in the site's own maroon, the colour the favicon is drawn on.
-   Against a rounded window it tucks inside the curve; against a square one
-   it is simply the mark in the corner. Either way it looks intended, which
-   is the one thing a guess can never be.
-
-   THE DISC BELONGS TO THE PAGE, not to a tab. It used to be a child of
-   whichever tab was leftmost, so dragging that tab away emptied the corner
-   -- but the corner of the window does not stop existing because nothing is
-   sitting in it. It is drawn once, fixed to the viewport's 0,0, and is
-   always there. */
-.notch {
-  /* UNDER EVERY TAB. A panel's own z-index starts at 5 and `raise` only ever
-     hands out larger ones, so 4 keeps the disc below the tab whose border
-     curves around it -- from the first paint, before anything is clicked. */
-  position: fixed; left: 0; top: 0; z-index: 4;
-  /* Centred on the corner: the box is twice the radius and three quarters of
-     it hangs off the page, so exactly the quarter disc shows. */
-  width: calc(var(--notch) * 2); height: calc(var(--notch) * 2);
-  transform: translate(-50%, -50%);
-  box-sizing: border-box;
-  border-radius: 50%;
-  background: var(--mark);
-  /* NO BORDER OF ITS OWN. The line around the disc is the TAB's border
-     taking a detour, drawn by the tab -- see the arc below. A circle that
-     drew its own edge would keep drawing it out over the graph when no tab
-     was there, which is a ring on the page rather than the outline of a
-     tab. */
-  pointer-events: none;
-}
-
-/* THE TAB'S OUTLINE FOLLOWS THE CIRCLE. That is the whole point of putting a
-   circle there: the corner tab does not run its border along the window's
-   two straight edges and stop -- it goes AROUND THE PERIMETER of the disc.
-   The line arrives down the left side, curves out along the circle, and
-   leaves along the top.
-
-   Which means the tab is BIGGER at the corner, not smaller. An earlier
-   version masked the quarter disc out of the bar, so the tab retreated from
-   the corner and its border squared off against the window's edges with the
-   circle sitting in the gap -- a disc beside a tab, rather than a tab whose
-   edge is the disc.
-
-   Only the tab actually in the corner. The class is the packing's, which
-   knows both which tab is leftmost and whether the row is scrolled home;
-   scroll the row along and no tab curves, because whatever is under the
-   corner is passing through rather than sitting in it. */
-.panel.tab-corner > .bar {
-  /* The bar keeps its straight top and left edges everywhere EXCEPT where
-     the circle is, and the arc below draws the line there. The cut removes
-     just the border in that quarter, so two lines do not cross. */
-  -webkit-mask-image: radial-gradient(circle var(--notch) at 0 0,
-                                      transparent 0 var(--notch), #000 var(--notch));
-  mask-image: radial-gradient(circle var(--notch) at 0 0,
-                              transparent 0 var(--notch), #000 var(--notch));
-}
-
-/* THE ARC ALONG THE PERIMETER, drawn by the TAB because it is the tab's
-   border. A box in the corner rounded by the full radius on its FAR corner
-   carries the curve that bulges out around the disc: it leaves the left edge
-   at (0, r), swings out around the circle, and rejoins the top at (r, 0).
-
-   ON THE PANEL, NOT THE BAR: the bar's mask applies to its descendants, so
-   an arc inside the bar would be erased by the very cut it lines.
-
-   THE Z-INDEX IS THE PANEL'S, NOT ITS OWN. A panel carries a z-index, which
-   makes it a stacking context -- so a number on this pseudo-element only
-   orders it WITHIN the tab, and cannot lift it over the disc, which is a
-   child of the page rather than of the tab. The line was there from the
-   first paint and the disc was simply on top of it; it appeared on the
-   first click because that raises the panel above the disc.
-
-   The panel itself has to outrank the disc, so the arc travels up with it.
-   See `--disc-z` on the disc: one below the floor a panel ever sits at. */
-.panel.tab-corner::before {
-  content: '';
-  position: fixed; left: 0; top: 0; z-index: 1;
-  width: var(--notch); height: var(--notch);
-  box-sizing: border-box;
-  border-bottom-right-radius: var(--notch);
-  border-bottom: 1px solid var(--line-strong);
-  border-right: 1px solid var(--line-strong);
-  pointer-events: none;
-}
-/* Green with the rest of a selected tab's outline. */
-.panel.tab-corner.picked::before { border-color: var(--pick); }
+   SQUARE, ALL OF THEM, ALWAYS. The row stands in from the page's corner --
+   see RAIL_TOP and RAIL_LEFT -- so no tab is ever pressed into it, and none
+   has to answer for what the browser does with its own corner there. That is
+   a question a page cannot ask: Firefox rounds a floating window and squares
+   a maximized one, and nothing in the page changes between them. Standing
+   clear leaves it to the browser, which is the only one that knows. */
 
 /* -- WHERE A TAB WENT ------------------------------------------------------
 

@@ -1034,23 +1034,23 @@ export const extraPanes = [];
 
 
 
-// AGAINST THE TOP OF THE WINDOW. The row is furniture fixed to the edge of
-// the page rather than something floating on the drawing, and an inset here
-// left a band of graph above it that read as a gap it had fallen short of.
-const RAIL_TOP = 0;
+/* THE ROW SITS IN FROM THE CORNER, and its tabs stand apart.
+
+   IN, RATHER THAN AGAINST THE EDGE. A tab pressed into the very corner has to
+   answer for whatever the browser does with its own corner there, and a page
+   cannot ask: Firefox rounds a floating window and squares a maximized one,
+   with nothing in the page changing between them. Standing clear of the
+   corner leaves the question to the browser, which is the only one that knows
+   the answer.
+
+   APART, RATHER THAN SHARING A LINE. Tabs that touch have to negotiate the
+   pixel between them -- whose border it is, which colour wins when one is
+   selected -- and every version of that arithmetic has been a bug. A gap has
+   no shared pixel to argue over. */
+const RAIL_TOP = 8;
 const RAIL_GRAB = 56;         // how near a drag has to come to count as "on"
-// TABS OVERLAP BY THEIR SHARED BORDER. A tab starts on the very pixel the
-// one before it drew its right edge in, so the two lines land on top of each
-// other and read as the single line between the pair -- and which colour it
-// comes out is settled by the stacking, the selected tab being above the
-// rest. Advancing by the full width instead left the two edges side by side:
-// a 2px rule between neighbours, twice the weight of every other line, and
-// visibly two lines wherever one of them was the selected colour.
-const TAB_GAP = -1;
-// WHERE THE ROW STARTS: hard against the left edge, for the same reason. The
-// corner marks keep their own inset -- they are single glyphs floating on
-// the drawing, where this is a strip anchored to the top of it.
-const RAIL_LEFT = 0;
+const TAB_GAP = 6;
+const RAIL_LEFT = 10;
 
 // The tabs on the rail, in the order they sit. Panels not in here are the
 // ones that have been pulled off.
@@ -1209,12 +1209,6 @@ function renderRail() {
   rail.forEach((p, i) => {
     const held = p.root === railState.dragging;
     if (!held) p.place(at.get(p), RAIL_TOP, true);
-    // THE TAB IN THE CORNER, which is the leftmost one and only while the row
-    // is scrolled home: scrolled along, the first tab is off the left edge
-    // and whatever is under the corner is passing through rather than sitting
-    // in it. See the disc in style.css.
-    p.root.classList.toggle('tab-corner',
-                            i === 0 && railState.scroll === 0 && !held);
   });
 }
 
@@ -1432,11 +1426,6 @@ function removeFromRail(panel) {
   rail.splice(at, 1);
   packRail();
   // THE MARKS OF BEING IN A ROW COME OFF WITH IT, and AFTER the packing:
-  // `packRail` sets them on the tabs it lays out, and clearing them before
-  // it runs leaves whatever it decides. A tab pulled onto the graph kept
-  // the rounded corner it had while it was in the corner, and the pixel of
-  // overlap it had while it had a neighbour.
-  panel.root.classList.remove('tab-corner');
 }
 
 /* -- the bin ---------------------------------------------------------------
@@ -1498,15 +1487,6 @@ function binEat(panel) {
 // Which panel is under the hand right now, or null. Held so the packing can
 // leave it alone and the rails know to show themselves.
 
-
-// THE MARK IN THE CORNER, which belongs to the PAGE and not to any tab.
-// It was a child of whichever tab was leftmost, which meant it came and went
-// with that tab -- drag the last one off the rail and the corner emptied.
-// The corner of the window does not stop existing because nothing is sitting
-// in it, so the disc is part of the page and is always there.
-const cornerMark = document.createElement('div');
-cornerMark.className = 'notch';
-document.body.appendChild(cornerMark);
 
 /* -- THE FLOOR ------------------------------------------------------------
 
@@ -1673,11 +1653,6 @@ function slotFor(panel) {
 
 function railDrag(panel) {
   railState.dragging = panel.root;
-  // OFF THE MOMENT IT IS PICKED UP. `packRail` clears these for the held tab
-  // too, but it only runs when the drag is near the rail and changes slot --
-  // a tab pulled straight down would keep its rounded corner all the way to
-  // the drop. Cleared here, where every move passes.
-  panel.root.classList.remove('tab-corner');
   // THE BIN COMES UP FOR ANYTHING THAT CAN GO IN IT. visualize cannot: it is
   // the page rather than a thing on it, and offering to throw the page away
   // is not an offer worth making. A pane knows it can be destroyed by having
