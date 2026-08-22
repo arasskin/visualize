@@ -234,6 +234,11 @@
     (def name (node :name))
     (def ink (node :ink))
     (def fresh (node :fresh))
+    # WHAT THE PAGE NEEDS TO KNOW ABOUT THIS NODE, as classes on the group
+    # graphviz emits. Both can be true at once -- a folded node can also have
+    # just changed -- so they are joined rather than chosen between.
+    (def marks (filter identity [(when fresh "fresh")
+                                 (when (node :folded) "folded")]))
     (array/push out
                 (string indent "\"" (quoted name) "\""
                         (attrs
@@ -252,9 +257,11 @@
                            # lit up, and the page fades this in and out again.
                            ;(if fresh
                               [["style" "filled"]
-                               ["fillcolor" (node :fill)]
-                               ["class" "fresh"]]
-                              [])])
+                               ["fillcolor" (node :fill)]]
+                              [])
+                           ;(if (empty? marks)
+                              []
+                              [["class" (string/join marks " ")]])])
                         ";")))
 
   # A BOX BECOMES A CLUSTER: a dashed rectangle around members that belong
@@ -340,7 +347,24 @@
   [text]
   (def at (string/find "<svg" text))
   (def body (if at (string/slice text at) text))
-  (string/replace-all "&#45;&gt;" "-&gt;" body))
+  (def fixed (string/replace-all "&#45;&gt;" "-&gt;" body))
+  # THE HATCH A FOLDED NODE IS FILLED WITH, defined once at the top of the
+  # drawing. It has to live INSIDE the svg: a fill of `url(#fold-hatch)`
+  # resolves against the document the shape is in, and the stylesheet cannot
+  # carry a shape of its own.
+  #
+  # The stripes take their colour from `currentColor`, so a node hatched this
+  # way is striped in whatever ink it already draws its outline in -- one
+  # pattern serves every group's hue rather than one per colour.
+  (def hatch
+    (string "<defs><pattern id=\"fold-hatch\" width=\"6\" height=\"6\""
+            " patternUnits=\"userSpaceOnUse\" patternTransform=\"rotate(45)\">"
+            "<line x1=\"0\" y1=\"0\" x2=\"0\" y2=\"6\""
+            " stroke=\"currentColor\" stroke-width=\"1.4\" opacity=\"0.30\"/>"
+            "</pattern></defs>"))
+  (if-let [shut (string/find ">" fixed)]
+    (string (string/slice fixed 0 (+ shut 1)) hatch (string/slice fixed (+ shut 1)))
+    fixed))
 
 (defn draw
   ``Draw `graph` with graphviz. Returns [ok svg-or-error], the shape every

@@ -187,6 +187,12 @@
         (array/push nodes
                     {:name prefix
                      :label (string/join (string/split "." prefix) ".\n")
+                     # SAYS IT IS A FOLD, so the drawing can show it. A folded
+                     # node looks like any other -- one ellipse with a name --
+                     # and nothing about it says it stands for seven files
+                     # rather than being one. The page hatches it; see the
+                     # stripes in style.css.
+                     :folded true
                      # Ours if anything inside it was: a folded region of
                      # your own files is still yours.
                      :ours (truthy? (find |($ :ours) members))}))

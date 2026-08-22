@@ -445,6 +445,24 @@ button:disabled { opacity: .5; cursor: progress; }
    a maximized one, and nothing in the page changes between them. Standing
    clear leaves it to the browser, which is the only one that knows. */
 
+/* A FOLDED NODE IS HATCHED. It stands for several files rather than being
+   one, and nothing about an ellipse with a name in it says so -- (fold
+   ~.parsers) reads as a file called parsers until you notice the count is
+   the sum of seven.
+
+   DIAGONAL STRIPES, because they say "more than one thing" without saying
+   anything else: they are not a colour, so they do not collide with the
+   group hues, and not an outline, so they do not collide with selection.
+
+   The pattern is defined inside the SVG -- see `trimmed-svg` -- and takes
+   `currentColor`, so a folded node is striped in the same ink it is drawn
+   in whatever group it belongs to. */
+#graph svg g.folded ellipse,
+#graph svg g.folded polygon,
+#graph svg g.folded path {
+  fill: url(#fold-hatch);
+}
+
 /* -- WHERE A TAB WENT ------------------------------------------------------
 
    The outline left behind when a tab is pushed along by a window opening,
