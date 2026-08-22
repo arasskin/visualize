@@ -377,21 +377,22 @@
   # The app's render, and the values only the CORE knows, kept apart: the
   # graph does not reach into the server for a token, and the server does
   # not know what a graph is.
-  # ONE DRAWING, from the file: read the config, run it, render it. The three
-  # steps are three modules -- config owns the file and the language, graph
-  # owns the picture, and this is where they meet.
-  (defn draw []
-    (def lines (config/read-config config-path))
-    (def [state problems] (config/run lines))
-    (def [ok result] (graph/render-svg (scanned) state))
-    # THE EDITOR IS SHOWN THE CONFIG, not visualize's notes about itself.
-    # They are not lines anyone wrote and there is nothing to do to one; the
-    # edit endpoint puts them back afterwards, so leaving them out here is
-    # the whole of hiding them.
-    #
-    # The problems are keyed by line NUMBER, so they are renumbered against
-    # the shorter list -- a complaint about line four pointing at line three
-    # is worse than no complaint at all.
+  # WHAT THE EDITOR IS SHOWN, and where its complaints point.
+  #
+  # THE EDITOR IS SHOWN THE CONFIG, not visualize's notes about itself. They
+  # are not lines anyone wrote and there is nothing to do to one; the edit
+  # endpoint puts them back afterwards, so leaving them out here is the whole
+  # of hiding them.
+  #
+  # The problems are keyed by line NUMBER, so they are renumbered against the
+  # shorter list -- a complaint about line four pointing at line three is
+  # worse than no complaint at all.
+  #
+  # BOTH PATHS USE THIS. The page load stripped notes and the edit reply did
+  # not, so the first delete handed the browser a list with a note in it: the
+  # note appeared as a row, and every index after that pointed one line off
+  # what the person had clicked.
+  (defn- as-shown [lines problems]
     (var shown 0)
     (def visible @[])
     (def moved @{})
@@ -400,6 +401,16 @@
         (array/push visible line)
         (when-let [why (get problems i)] (put moved shown why))
         (++ shown)))
+    [visible moved])
+
+  # ONE DRAWING, from the file: read the config, run it, render it. The three
+  # steps are three modules -- config owns the file and the language, graph
+  # owns the picture, and this is where they meet.
+  (defn draw []
+    (def lines (config/read-config config-path))
+    (def [state problems] (config/run lines))
+    (def [ok result] (graph/render-svg (scanned) state))
+    (def [visible moved] (as-shown lines problems))
     [visible moved ok result])
 
   # THE PAGE, built here rather than in graph. Slurping a template and
@@ -486,8 +497,12 @@
       (if (or asking (not (config/draws action)))
         [true ""]
         (graph/render-svg (scanned) state)))
-    {"lines" lines
-     "problems" problems
+    # THE SAME LIST THE PAGE LOAD SHOWS. The browser replaces its rows with
+    # what comes back here, so a reply carrying the notes would put them on
+    # screen as rows -- and every index after that would be one line out.
+    (def [visible moved] (as-shown lines problems))
+    {"lines" visible
+     "problems" moved
      # A render failure belongs to no single line -- an unknown layout name
      # is not any one form's fault -- so it stays separate from the per-line
      # messages.

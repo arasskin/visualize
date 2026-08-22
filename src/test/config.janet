@@ -394,6 +394,18 @@
   (def lines ["(lines)" "@visualize terminal 3 socket /tmp/a.sock" "(box src)"])
   (t/is= [["3" "/tmp/a.sock"]] (config/terminals lines))
 
+  # WHAT THE EDITOR IS SHOWN, at every point it is shown anything. The page
+  # load stripped the notes and the edit reply did not, so the first delete
+  # handed the browser a list with a note in it: the note appeared as an
+  # editable row, and every index after that pointed one line off what had
+  # been clicked. The two answers have to be the same answer.
+  (def shown (filter |(not (config/note? $)) lines))
+  (t/is= ["(lines)" "(box src)"] shown
+         "a note is never a row the editor shows")
+  # And an edit made against that shorter list still lands on the right line.
+  (t/is= ["(lines)"] (config/edit shown "delete" 1)
+         "an index from the editor means the line the editor showed")
+
   # A NOTE IS NOT A CONFIG LINE, so the parser passes over it in silence --
   # complaining that one is not a call would be complaining about a line
   # nobody typed.
