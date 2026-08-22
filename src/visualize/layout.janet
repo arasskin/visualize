@@ -43,24 +43,73 @@
 # says what is IN the graph; how the drawing looks on your screen is not a
 # fact about your codebase. Changing the face means changing this line and
 # the CSS together, which is the honest amount of work for the change.
-# NAMED HERE, MEASURED BY DOT, DRAWN BY THE BROWSER -- and those are three
-# different lookups of the same name.
+# NAMED HERE, DRAWN BY THE BROWSER. dot writes this onto every label and the
+# @font-face in style.css is what resolves it, so the page draws in the real
+# face wherever it is opened -- the TTFs ship in src/web/ beside it.
 #
-# The browser's is answered by the @font-face in style.css, which points at
-# the TTFs vendored beside it, so the page always draws in the real face.
+# DOT DOES NOT NEED TO HAVE THE FONT, because it is not asked to measure it:
+# every ellipse is given an explicit width below. Left to its own devices it
+# would size each one from the metrics it can find, and it looks only where
+# fontconfig looks -- not at the repo, and not at FONTCONFIG_FILE either;
+# both were tried. A machine without the font installed measured 111pt for a
+# label the real face needs 137pt for, which is labels crowding outlines cut
+# for other glyphs.
 #
-# DOT'S IS ANSWERED BY THE SYSTEM, and only by the system. It sizes every
-# ellipse from the metrics it finds, and it looks where fontconfig looks --
-# not at the repo, and not at FONTCONFIG_FILE either, both measured. Without
-# the font installed it measures a fallback: 111pt for a label the real face
-# needs 137pt for, which is labels crowding outlines cut for other glyphs.
-#
-# So the fonts ship in src/web/ AND want installing on the machine that runs
-# the server. The first is what makes the page look right anywhere; the
-# second is what makes the ellipses fit. A machine without them gets a
-# correctly drawn graph in slightly tight ellipses, which is a bad haircut
-# rather than a broken page.
+# ASKING PEOPLE TO INSTALL A FONT IS NOT A DEPENDENCY THIS EARNS. The sizing
+# is arithmetic here instead, and the same on every machine.
 (def- font "Parkinsans")
+
+# HOW WIDE AN ELLIPSE HAS TO BE for a label of N characters, in points, at
+# fontsize 11.
+#
+# MEASURED ON THE RENDERED PAGE, not taken from dot. Parkinsans at this size
+# draws 5.95px per character, and an ellipse only has its full width across
+# the middle -- text fits within about 72% of it -- so a label of n
+# characters needs a radius of about 4.1n. The slope here is a little over
+# that, which is the air around the word.
+#
+# TIGHTER THAN DOT WOULD BE. Its own sizing left every node 24 to 43 points
+# wider than its longest line; this is the same drawing, more compact.
+#
+# THE LONGEST LINE, not the whole label. Labels are wrapped a path segment
+# per line, so `src.web.panes` is three short rows rather than one long one,
+# and sizing by the total would make every node a lozenge.
+(def- label-slope 4.4)
+(def- label-intercept 8.0)
+# THE FLOOR, in inches. A short label still wants to look like the others
+# rather than like a full stop -- and a node's label is up to four rows deep
+# (the path a segment at a time, then the line count), so the narrow ones are
+# the tall ones. Below this dot warns that the shape is too small for what is
+# in it.
+(def- min-width 0.86)
+(def- points-per-inch 72)
+
+# HOW TALL, in inches, for a label of N rows at fontsize 11. A row is about
+# 15 points with its leading; the rest is the air above the first and below
+# the last. Fixed sizing means dot will not grow a node that does not fit, so
+# this has to be right rather than close -- it warns when it is not, which is
+# how the numbers here were checked.
+(def- row-height 15.0)
+(def- rows-padding 22.0)
+
+(defn- label-height
+  "How tall the ellipse for this label should be, in INCHES."
+  [label]
+  (def rows (length (string/split "\n" (string label))))
+  (max 0.62 (/ (+ (* row-height rows) rows-padding) points-per-inch)))
+
+(defn- label-width
+  ``How wide the ellipse for this label should be, in INCHES -- the unit dot's
+  `width` attribute takes.
+
+  THE FIT IS FOR THE RADIUS, and `width` is the DIAMETER, so the points are
+  doubled on the way to inches. Getting that wrong halves every node and the
+  labels spill out of their outlines, which is what it looks like.``
+  [label]
+  (def lines (string/split "\n" (string label)))
+  (def longest (max ;(map length lines)))
+  (def radius (+ (* label-slope longest) label-intercept))
+  (max min-width (/ (* 2 radius) points-per-inch)))
 
 (defn- quoted
   "A DOT string literal: quotes and backslashes escaped, newlines as \\n."
@@ -95,9 +144,26 @@
   # follows the theme for free.
   (array/push out (string "  graph [bgcolor=\"transparent\", fontname=\""
                           (quoted font) "\", fontsize=10];"))
+  # FIXEDSIZE, so the width below is the width and not a floor. Without it
+  # dot treats `width` as a minimum and grows any node whose label it
+  # measures as wider -- which puts the font's metrics back in charge of the
+  # layout, and those are exactly what a machine without the font gets wrong.
+  # Measured: the same node came out 64.66pt with the font installed and
+  # 51.56 without; fixed, it is 32.4 either way.
+  #
+  # THE HEIGHT IS FIXED TOO, because `fixedsize` takes both or neither. Three
+  # short rows -- a path segment per line, plus the line count -- is what
+  # every label is, so one height fits them all -- and the tallest is what it
+  # has to fit: a prefixed name under a line count is four rows, sometimes
+  # five. Too short and dot warns that the shape is too small for the label,
+  # which is its way of saying the text will not fit inside the curve.
+  #
+  # Tall enough, too, that an ellipse sized for its widest line still reads
+  # as a circle rather than a lens: at 0.62 the nodes came out wide and flat,
+  # which is what a short fixed height does to a shape wider than it.
   (array/push out
               (string "  node [shape=ellipse, fontname=\"" (quoted font)
-                      "\", fontsize=11, penwidth=1.2];"))
+                      "\", fontsize=11, penwidth=1.2, fixedsize=true];"))
   (array/push out "  edge [arrowsize=0.7, color=\"#8a8a8a\"];")
 
   # A node's colour goes on the OUTLINE rather than inside the ellipse: a
@@ -117,6 +183,11 @@
                 (string indent "\"" (quoted name) "\""
                         (attrs
                           [["label" (quoted (node :label))]
+                           # SIZED HERE RATHER THAN BY DOT, so the drawing is
+                           # the same whether or not the machine running the
+                           # server has the font. See `label-width`.
+                           ["width" (string/format "%.3f" (label-width (node :label)))]
+                           ["height" (string/format "%.3f" (label-height (node :label)))]
                            ["color" ink]
                            ["fontcolor" ink]
                            # The group's own hue, tinted well down: the flash
