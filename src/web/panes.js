@@ -16,6 +16,7 @@
 
 import { makeTerminal, keyToBytes } from './term.js';
 import { pane, fit, isTouched } from './graph.js';
+import { changed, renders, renderNow } from './state.js';
 
 // Set by `wire`, at startup, once everything exists.
 let deps = {};
@@ -1030,12 +1031,8 @@ export const extraPanes = [];
    and keeps whatever position the drag gave it; dropped back on, it rejoins
    at the slot it was over. */
 
-// HOW FAR THE ROW IS SLID, in pixels, negative to see later tabs. Zero until
-// there is something off-screen to reach.
-let railScroll = 0;
-// Where the row ends when unscrolled -- set by the packing, read to decide
-// whether scrolling means anything.
-let railEnd = 0;
+
+
 
 // AGAINST THE TOP OF THE WINDOW. The row is furniture fixed to the edge of
 // the page rather than something floating on the drawing, and an inset here
@@ -1088,53 +1085,101 @@ function railShape() {
   return rail.map(railSpan).join(',');
 }
 
-export function packRail() {
-  // THE SCROLL CANNOT OUTLIVE WHAT IT WAS SCROLLING. Shutting a panel,
-  // pulling a tab out, or a window that grew all make the row shorter -- and
-  // a scroll left over from when it was longer holds the whole row off the
-  // left edge with nothing out to the right to justify it. That is the tab
-  // stuck where no scrolling brings it back: the row was already at its
-  // stop, so scrolling right did nothing and there was nothing to the left
-  // to scroll toward. Clamped here, where the row is measured anyway.
-  if (railEnd) {
-    const most = railOverflows() ? Math.min(0, (innerWidth - RAIL_LEFT) - railEnd) : 0;
-    railScroll = Math.max(most, Math.min(0, railScroll));
-  }
-  let x = RAIL_LEFT + railScroll;
-  railWidths = railShape();
-  // WHICH TABS HAVE A NEIGHBOUR to their left, and so share a border with
-  // it. Set here because this is what knows the order, and the order
-  // changes whenever a tab is dragged.
-  rail.forEach((p, i) => {
-    // A TAB IN HAND IS NOT IN THE ROW. It is under the pointer, going
-    // somewhere, and the row has already closed up behind it -- so it wears
-    // neither the corner's rounding nor the pixel of overlap a neighbour
-    // costs. Squaring on the first move rather than on the drop is what
-    // makes picking it up feel like picking it up.
-    const held = p.root === railDragging;
+/* -- THE ROW'S STATE, AND THE ONE PLACE IT IS DRAWN ------------------------
 
-    // THE TAB IN THE CORNER, which is the leftmost one and only while the
-    // row is scrolled home: scrolled along, the first tab is off the left
-    // edge and whatever is under the corner is passing through rather than
-    // sitting in it. See the rounding in style.css.
-    p.root.classList.toggle('tab-corner', i === 0 && railScroll === 0 && !held);
-  });
+   THREE PHASES, AND THEY DO NOT MIX. `measure` reads every width the layout
+   needs; `place` works out where each tab goes, touching nothing; `render`
+   writes. A style written between two reads makes the browser lay the page
+   out again to answer the second, and doing that once per tab is what made
+   this function slow and its arithmetic hard to follow -- it measured a tab,
+   moved it, and measured the next against a page it had just changed.
+
+   THE STATE IS THE TRUTH. Where the row is slid, how wide each tab is, where
+   the row ends: all of it here, so there is one place to look when the row is
+   wrong and one place to change when it should be different. */
+const railState = {
+  scroll: 0,      // how far the row is slid, negative to see later tabs
+  end: 0,         // where the row ends unscrolled
+  spans: new Map(),
+};
+
+// Read every width, and nothing else. The only phase allowed to touch the
+// page for an answer.
+function measureRail() {
+  railState.spans = new Map(rail.map((p) => [p, railSpan(p)]));
+  railWidths = railShape();
+}
+
+// Where each tab sits. A walk over the list -- no element is read and none is
+// written, so this can be asked as often as anything wants it.
+function placeRail() {
+  const at = new Map();
+  let x = RAIL_LEFT + railState.scroll;
   for (const p of rail) {
-    // Skip the one being dragged: it is under the pointer, not in the row,
-    // and moving it would fight the hand.
-    if (p.root === railDragging) {
-      x += railSpan(p) + TAB_GAP;
-      continue;
-    }
-    p.place(x, RAIL_TOP, true);
-    x += railSpan(p) + TAB_GAP;
+    at.set(p, x);
+    x += (railState.spans.get(p) || 0) + TAB_GAP;
   }
-  railEnd = x - TAB_GAP - railScroll;   // where the row ends, unscrolled
-  // THE GHOSTS DESCRIBE THE ROW, so they are rebuilt whenever it is laid
-  // out -- opening, shutting, dragging, scrolling, a window resized. There
-  // is no state to keep in step because there is nothing remembered: the
-  // marks are derived from where the tabs are.
+  railState.end = x - TAB_GAP - railState.scroll;
+  return at;
+}
+
+/* LAY THE ROW OUT: measure, clamp, place, write.
+
+   THE SCROLL CANNOT OUTLIVE WHAT IT WAS SCROLLING. Shutting a panel, pulling
+   a tab out, or a window that grew all make the row shorter -- and a scroll
+   left over from when it was longer holds the whole row off the left edge
+   with nothing out to the right to justify it. That is the tab stuck where no
+   scrolling brings it back: the row was already at its stop, so scrolling
+   right did nothing and there was nothing to the left to scroll toward. */
+/* ASK FOR THE ROW TO BE LAID OUT, on the next frame.
+
+   ELEVEN CALLERS, AND A WALK HITS THREE OF THEM per keypress -- it shuts one
+   tab, opens another and moves the selection, and each of those used to
+   measure and rewrite the whole row on the spot. Coalesced to one lay-out per
+   frame, which is the most a screen can show anyway.
+
+   `packRailNow` is for the few places that cannot wait: something about to
+   measure the row itself, and the tests, which have no frames. */
+export function packRail() { changed(); }
+
+renders(packRailNow);
+
+export function packRailNow() {
+  measureRail();
+  // Placing once to learn where the row ends, so the clamp has a length to
+  // clamp against; the second placing is what gets drawn.
+  placeRail();
+  if (railState.end) {
+    const most = railOverflows() ? Math.min(0, (innerWidth - RAIL_LEFT) - railState.end) : 0;
+    railState.scroll = Math.max(most, Math.min(0, railState.scroll));
+  }
+  renderRail();
+  // THE GHOSTS DESCRIBE THE ROW, so they are rebuilt whenever it is laid out
+  // -- opening, shutting, dragging, scrolling, a window resized. There is no
+  // state to keep in step because there is nothing remembered: the marks are
+  // derived from where the tabs are.
   showShift();
+}
+
+/* WRITE THE ROW, and read nothing. Everything this needs was measured above.
+
+   THE HELD TAB IS SKIPPED. It is under a pointer, going somewhere, and the
+   row has already closed up behind it -- so it wears neither the corner's
+   rounding nor the position the packing would give it. Squaring on the first
+   move rather than on the drop is what makes picking it up feel like picking
+   it up. */
+function renderRail() {
+  const at = placeRail();
+  rail.forEach((p, i) => {
+    const held = p.root === railDragging;
+    if (!held) p.place(at.get(p), RAIL_TOP, true);
+    // THE TAB IN THE CORNER, which is the leftmost one and only while the row
+    // is scrolled home: scrolled along, the first tab is off the left edge
+    // and whatever is under the corner is passing through rather than sitting
+    // in it. See the disc in style.css.
+    p.root.classList.toggle('tab-corner',
+                            i === 0 && railState.scroll === 0 && !held);
+  });
 }
 
 /* -- WHERE A TAB WENT -------------------------------------------------------
@@ -1239,21 +1284,21 @@ function showShift() {
 // NOTHING HAPPENS WHEN IT ALL FITS. A row shorter than the window has no
 // off-screen part to bring into view, and sliding it then would just be a
 // way to lose your tabs off the side.
-function railOverflows() { return railEnd > innerWidth - RAIL_LEFT; }
+function railOverflows() { return railState.end > innerWidth - RAIL_LEFT; }
 
 function scrollRail(by) {
   if (!railOverflows()) {
-    if (railScroll === 0) return false;
-    railScroll = 0;                 // a window that grew: put the row back
+    if (railState.scroll === 0) return false;
+    railState.scroll = 0;                 // a window that grew: put the row back
     packRail();
     return true;
   }
   // How far left the row may slide: enough to bring its end to the right
   // edge, and no further.
-  const most = Math.min(0, (innerWidth - RAIL_LEFT) - railEnd);
-  const next = Math.max(most, Math.min(0, railScroll + by));
-  if (next === railScroll) return false;
-  railScroll = next;
+  const most = Math.min(0, (innerWidth - RAIL_LEFT) - railState.end);
+  const next = Math.max(most, Math.min(0, railState.scroll + by));
+  if (next === railState.scroll) return false;
+  railState.scroll = next;
   // The ghosts are redrawn by the packing from the row's new positions, so
   // there is nothing here to keep in step.
   packRail();
@@ -1303,10 +1348,16 @@ export function revealTab(panel) {
   // inside the edge is a window you cannot read -- scrolling until the 43px
   // tab cleared the edge was the whole of the old behaviour, and it left the
   // thing you actually walked to still off the screen.
-  const box = panel.root.getBoundingClientRect();
-  const left = Math.min(box.left, panel.root.querySelector('.bar').getBoundingClientRect().left);
-  const over = left + railSpan(panel) - innerWidth;
-  if (left < RAIL_LEFT) scrollRail(RAIL_LEFT - left);
+  //
+  // ASKED OF THE LAYOUT, not of the page. Where a tab WILL be is what matters
+  // -- opening one moves everything after it, and the row is not written
+  // until the frame -- so reading the DOM here would aim at where the tab
+  // used to be. The layout already knows, and knowing costs nothing.
+  measureRail();
+  const at = placeRail().get(panel);
+  if (at === undefined) return;
+  const over = at + (railState.spans.get(panel) || 0) - innerWidth;
+  if (at < RAIL_LEFT) scrollRail(RAIL_LEFT - at);
   else if (over > 0) scrollRail(-over);
 }
 
