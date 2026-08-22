@@ -120,12 +120,57 @@
        (string/replace-all "\"" "\\\"")
        (string/replace-all "\n" "\\n")))
 
+# A VALUE THAT IS ALREADY MARKUP, not a string to be quoted. dot reads
+# `label=<...>` as an HTML-like label and `label="..."` as text, and the
+# difference is the angle brackets rather than anything inside them -- so a
+# value wrapped in this is printed as it stands.
+(defn- raw [text] {:raw (string text)})
+
 (defn- attrs
   "An attribute list from pairs, or the empty string when there are none."
   [pairs]
   (if (empty? pairs)
     ""
-    (string " [" (string/join (map (fn [[k v]] (string k "=\"" v "\"")) pairs) ", ") "]")))
+    (string " ["
+            (string/join (map (fn [[k v]]
+                                (if (and (dictionary? v) (v :raw))
+                                  (string k "=<" (v :raw) ">")
+                                  (string k "=\"" v "\"")))
+                              pairs)
+                         ", ")
+            "]")))
+
+(defn- escaped-html
+  "Text safe inside an HTML-like label."
+  [text]
+  (->> (string text)
+       (string/replace-all "&" "&amp;")
+       (string/replace-all "<" "&lt;")
+       (string/replace-all ">" "&gt;")))
+
+# THE LINE COUNT IS SMALLER THAN THE NAME. It is a fact about the file rather
+# than what the file is called, and at the same size the two read as one
+# four-word phrase; smaller, the eye takes the name first and the number when
+# it wants it.
+#
+# WHICH NEEDS AN HTML-LIKE LABEL, because a plain `\n` label carries one size
+# for every row. That is the whole reason for the markup: the rows are the
+# same rows, and the last one is printed a few points down.
+(def- count-size 8)
+
+(defn- label-markup
+  ``A node's label as HTML-like markup, so its last row can be smaller.
+
+  Returns nil when the label has no count on it -- one row, or a name that is
+  not a number -- and the caller prints the ordinary quoted label instead.``
+  [label]
+  (def rows (string/split "\n" (string label)))
+  (when (and (> (length rows) 1)
+             (peg/match ~(* (some (range "09")) -1) (last rows)))
+    (def name (slice rows 0 -2))
+    (string (string/join (map escaped-html name) "<BR/>")
+            "<BR/><FONT POINT-SIZE=\"" count-size "\">"
+            (escaped-html (last rows)) "</FONT>")))
 
 (defn to-dot
   ``The graph as a DOT document.
@@ -183,7 +228,9 @@
     (array/push out
                 (string indent "\"" (quoted name) "\""
                         (attrs
-                          [["label" (quoted (node :label))]
+                          [["label" (if-let [markup (label-markup (node :label))]
+                                       (raw markup)
+                                       (quoted (node :label)))]
                            # SIZED HERE RATHER THAN BY DOT, so the drawing is
                            # the same whether or not the machine running the
                            # server has the font. See `label-width`.
