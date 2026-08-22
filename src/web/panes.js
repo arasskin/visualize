@@ -1153,6 +1153,9 @@ export function packRail() { changed(); }
 renders(packRailNow);
 
 export function packRailNow() {
+  // BEFORE MEASURING, because a document scrolled sideways shifts every panel
+  // out from under the row's arithmetic -- see `unscrollPage`.
+  unscrollPage();
   measureRail();
   // Placing once to learn where the row ends, so the clamp has a length to
   // clamp against; the second placing is what gets drawn.
@@ -1160,6 +1163,31 @@ export function packRailNow() {
   if (railState.end) {
     const most = railOverflows() ? Math.min(0, (innerWidth - RAIL_LEFT) - railState.end) : 0;
     railState.scroll = Math.max(most, Math.min(0, railState.scroll));
+  }
+  // THE SELECTION IS ALWAYS IN VIEW, and this is the only place that has to
+  // know it. A mark you cannot see is a mark that may as well not be there,
+  // and the row is the one thing that has to move to fix it.
+  //
+  // HERE RATHER THAN AT EVERY CALLER. It used to hang off `selectPane`, which
+  // catches a keypress and a click on a DIFFERENT tab -- but not opening the
+  // tab you already had selected, which is the one that changes the row's
+  // width most. Anything that lays the row out can put the selection off the
+  // side; anything that lays the row out now brings it back.
+  // THE OVERHANG IS THE WHOLE RULE. Whatever the selection is -- a 43px tab
+  // or a window as wide as the screen -- it takes a span from its left edge:
+  // if that runs off the right, slide left by exactly how much runs off; if
+  // it starts off the left, slide right by that. Set here rather than through
+  // `scrollRail`, which asks for another lay-out -- we are in one, and the
+  // placing below will draw the answer.
+  const chosen = pickedPanel();
+  if (chosen && rail.includes(chosen) && railOverflows()) {
+    const at = placeRail().get(chosen);
+    const over = at + (railState.spans.get(chosen) || 0) - innerWidth;
+    const most = Math.min(0, (innerWidth - RAIL_LEFT) - railState.end);
+    let want = railState.scroll;
+    if (at < RAIL_LEFT) want = railState.scroll + (RAIL_LEFT - at);
+    else if (over > 0) want = railState.scroll - over;
+    railState.scroll = Math.max(most, Math.min(0, want));
   }
   renderRail();
   // THE GHOSTS DESCRIBE THE ROW, so they are rebuilt whenever it is laid out
@@ -1329,44 +1357,23 @@ function unscrollPage() {
   if (window.scrollX !== 0 || window.scrollY !== 0) window.scrollTo(0, 0);
 }
 
-/* BRING THE SELECTION INTO VIEW by scrolling the row, and nothing else.
+/* BRING THE SELECTION INTO VIEW.
 
-   THE OVERHANG IS THE WHOLE RULE. Whatever the selection is -- a 43px tab, a
-   window as wide as the screen -- it occupies a span in the row starting at
-   its left edge. If that span runs off the right, scroll left by exactly how
-   much runs off. If it starts off the left, scroll right by exactly that. If
-   it fits, do nothing.
+   THE PACKING DOES THE WORK -- see `packRailNow`, which slides the row for
+   whatever is selected every time it lays out. So all this has to do is put
+   the page back at its origin and ask for a lay-out: the walk opens a tab,
+   which changes the row's widths, and the packing that follows will find the
+   selection off the side and bring it back.
 
-   That is one subtraction, and it is right for every case the row can be in
-   without knowing which case it is. The version this replaces asked whether
-   the span was wider than the viewport and left-aligned those separately,
-   which is the same answer the subtraction gives on its own -- `scrollRail`
-   clamps at the ends, so asking to scroll further than the row can go simply
-   goes as far as it goes.
-
-   NO MARGIN. The row's own stops are the window edges, so asking to sit a
-   few pixels inside one is asking for something the scroll cannot give: it
-   goes as far as it can and leaves the tab that far short, which is the case
-   this exists to fix. */
+   THE UNSCROLL IS NOT DECORATION. Focusing a pane that hangs off the edge
+   makes the browser scroll the DOCUMENT to reach it, which shifts every panel
+   left of where the row put it -- so the row's arithmetic comes out right and
+   the screen still shows a window overhanging. Walking the tabs focuses a
+   pane on every step. */
 export function revealTab(panel) {
   if (!panel) return;
   unscrollPage();
-  // THE PANEL'S OWN LEFT EDGE, not its tab's. On an open pane the tab is the
-  // small part of it, and a window hanging off the left with its tab just
-  // inside the edge is a window you cannot read -- scrolling until the 43px
-  // tab cleared the edge was the whole of the old behaviour, and it left the
-  // thing you actually walked to still off the screen.
-  //
-  // ASKED OF THE LAYOUT, not of the page. Where a tab WILL be is what matters
-  // -- opening one moves everything after it, and the row is not written
-  // until the frame -- so reading the DOM here would aim at where the tab
-  // used to be. The layout already knows, and knowing costs nothing.
-  measureRail();
-  const at = placeRail().get(panel);
-  if (at === undefined) return;
-  const over = at + (railState.spans.get(panel) || 0) - innerWidth;
-  if (at < RAIL_LEFT) scrollRail(RAIL_LEFT - at);
-  else if (over > 0) scrollRail(-over);
+  packRail();
 }
 
 // A WHEEL OVER THE ROW, either axis. A trackpad swipe sideways arrives as
@@ -1743,13 +1750,11 @@ export function selectPane(root) {
     // ever-larger values as panels are opened and dragged, so any fixed
     // number is one a neighbour eventually passes.
     raise(root);
-    // THE SELECTION IS ALWAYS IN VIEW. Whatever moved it -- a keypress, a
-    // click, a tab dropped into the row -- a mark you cannot see is a mark
-    // that may as well not be there, and the row is the only thing that has
-    // to move to fix it. One call here rather than one beside every place
-    // the selection can change, which is how the walk came to reveal and
-    // the click did not.
-    revealTab(panelsByRoot.get(root));
+    // Bringing it into view is the packing's job -- see `packRailNow`. The
+    // selection is one of the things that can put a tab out of sight, but so
+    // is opening one, and so is a neighbour growing; the row handles all of
+    // them in the one place rather than each caller remembering.
+    packRail();
   }
   // THE BAR FOLLOWS THE SELECTION, mid-sentence if need be. Its mode was
   // settled when it opened, so walking from the config to a terminal with
