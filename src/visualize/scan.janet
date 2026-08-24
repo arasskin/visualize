@@ -68,14 +68,30 @@
   (max 1 (min 32 (or reported 8))))
 
 (defn find-files
-  ``Every file under `root` that some spec claims, with the spec that claims it.
+  ``EVERY file under `root`, each with the spec that claims it or nil.
 
-  Returns [{:path absolute :rel repo-relative :spec spec} ...] sorted by
-  relative path -- sorted because the DOT is generated in this order and an
-  unstable one would reshuffle the layout between runs for no reason.
+  Returns [{:path absolute :rel repo-relative :spec spec-or-nil} ...] sorted
+  by relative path -- sorted because the DOT is generated in this order and
+  an unstable one would reshuffle the layout between runs for no reason.
 
-  Directories are pruned as they are met rather than filtered afterwards, so a
-  node_modules with fifty thousand files in it costs one `stat` instead of
+  THE TREE COMES FIRST, AND IT IS NOT THE PARSEABLE SET. This used to keep
+  only files a spec claimed, which quietly made "what files are there" mean
+  "what can we parse" -- and everything downstream inherited that. A .ttf
+  next to the stylesheet that names it was not a file as far as the scan was
+  concerned, so the stylesheet's `url(/Parkinsans-Bold.ttf)` matched nothing
+  in the tree, fell through to the external branch, and was named from the
+  raw specifier: `Parkinsans-Bold.ttf`, bare at the top level, extension
+  intact, while every one of its siblings wore `src.web.`. The asset was
+  right there on disk the whole time.
+
+  So the walk reports what is on disk and NOTHING ELSE decides. A file with
+  no spec is still a file: it becomes a node, it can be depended upon, and
+  it is named by exactly the rule its neighbours are named by. What a spec
+  changes is whether the file is READ, which is a separate question asked
+  later (see `read-all`).
+
+  Directories are pruned as they are met rather than filtered afterwards, so
+  a node_modules with fifty thousand files in it costs one `stat` instead of
   fifty thousand.``
   [root]
   (def found @[])
@@ -92,10 +108,18 @@
       (case (os/stat full :mode)
         :directory (unless (or (skips entry) (string/has-prefix? "." entry))
                      (walk full here))
-        # `full` as well as the name, so a spec can look at a shebang when the
-        # name gives it nothing -- see parser/claims?.
-        :file (when-let [spec (find |(parser/claims? $ entry full) specs)]
-                (array/push found {:path full :rel here :spec spec})))))
+        # A DOTFILE IS NOT A NODE. Hidden directories are pruned above and
+        # hidden files are skipped here, for the same reason: `.gitignore`
+        # and `.DS_Store` are not what anyone is drawing.
+        #
+        # `full` as well as the name, so a spec can look at a shebang when
+        # the name gives it nothing -- see parser/claims?. No spec is not an
+        # error; it is a file this program cannot read, which is most of
+        # them and fine.
+        :file (unless (string/has-prefix? "." entry)
+                (array/push found
+                            {:path full :rel here
+                             :spec (find |(parser/claims? $ entry full) specs)})))))
 
   (walk root "")
   (sorted-by |($ :rel) found))
@@ -112,7 +136,12 @@
   Takes [index job] and returns [index result], so a result that arrives out
   of order still knows which file it belongs to.``
   [[index job]]
-  (def text (try (slurp (job :path)) ([_] nil)))
+  # A FILE WITH NO SPEC IS NOT READ. It is still a file -- it gets a node and
+  # a stamp below -- but nothing here can parse it, and slurping a 434KB wasm
+  # to count its "lines" would be work spent on an answer that means nothing.
+  # Its size is left nil, which is what `sizes` already omits.
+  (def parseable (truthy? (job :spec)))
+  (def text (when parseable (try (slurp (job :path)) ([_] nil))))
   # WHAT THE FILE LOOKED LIKE WHEN IT WAS READ, so a redraw can tell which
   # files moved since the one before it -- see `animate` in the config
   # language. Taken on the worker beside the read, because that is where the
@@ -127,10 +156,20 @@
   (def st (try (os/stat (job :path)) ([_] nil)))
   (def stamp (when st [(st :modified) (st :size)]))
   [index
-   (if-not text
+   (cond
+     # AN UNPARSEABLE FILE IS STILL PRESENT. No spec claims it, so it has no
+     # imports and declares nothing -- but it exists, and something may well
+     # depend on it (a stylesheet on a font, a loader on a wasm). Reported
+     # without :skipped so it reaches the graph as a node.
+     (not parseable)
+     {:rel (job :rel) :stamp stamp}
+
      # An unreadable file is skipped rather than fatal: a broken symlink or a
      # permissions hole should not take the whole graph down.
+     (not text)
      {:rel (job :rel) :skipped true}
+
+     true
      (let [found (parser/run (job :spec) text (job :rel))]
        {:rel (job :rel)
         :stamp stamp
@@ -312,10 +351,14 @@
     declared in two directories cannot be attributed without a type checker;
     guessing draws a confident edge that is wrong half the time. Losing an
     edge says nothing false.
-  - ARROWS POINT THE DATAFLOW WAY. `A -> B` means B depends on A, so the
-    arrowhead lands on the file doing the importing. That is pydeps'
-    direction, and matching it means the two graphs can sit side by side. It
-    also puts leaves at the top, since dot ranks by edge direction.``
+  - AN ARROW MEANS "DEPENDS ON". `A -> B` is A needing B, so the arrowhead
+    lands on the thing being depended upon and dependents sit above their
+    dependencies.
+
+  - A FILE NO PARSER CLAIMS IS STILL A FILE. Fonts, wasm, images and docs
+    get nodes like anything else; what they do not get is imports, since
+    nothing here can read them. This is what lets a stylesheet depend on the
+    font sitting beside it instead of on an invented external.``
   [parsed]
   (def live (filter |(and $ (not ($ :skipped))) parsed))
 
