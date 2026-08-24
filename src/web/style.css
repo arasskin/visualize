@@ -592,12 +592,20 @@ button:disabled { opacity: .5; cursor: progress; }
    still sits above the unselected ones. */
 .panel.picked { z-index: 12; }
 
-/* THE WHOLE FIGURE GOES GREEN, both pieces, all four edges of each. Every
-   edge a selected panel draws is its own, so every one of them is maroon --
-   including the foot the tab shares with its window, which is drawn once,
-   by the tab, and is the line the window hangs from. */
-.panel.picked > .bar { border-color: var(--pick); }
-.panel.picked > .panel-body { border-color: var(--pick); }
+/* THE LINE UNDER THE TITLE GOES MAROON. That line is the one part of the
+   figure that is in the same place whether the tab is shut or open -- the
+   underside of the title -- so a mark on it survives opening the window
+   instead of jumping somewhere else, and the eye does not have to find it
+   again.
+
+   A SHUT TAB DRAWS THE LINE ONLY WHEN IT IS THE SELECTED ONE. Unselected and
+   shut, there is nothing below the title to be separated from and the line
+   would be a rule across the bottom of a button. Selected, it IS the mark.
+
+   These were borders on the bar and the body, back when those drew the box.
+   The panel draws it now, so colouring them coloured nothing -- which is why
+   the mark went missing on a shut tab. */
+.panel.picked > .bar { border-bottom: 1px solid var(--pick); }
 
 .bar:active { cursor: grabbing; }
 /* A panel's own status, right of its name: how many config lines failed.
