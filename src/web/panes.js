@@ -41,6 +41,12 @@ const panelsByRoot = new Map();
 
 export function makePanel(root, options = {}) {
   const bar = root.querySelector('.bar');
+  // THE BOX'S WIDTH, from the start and in both states. A shut tab is this
+  // same box without its height, so opening one appears to expand it downward
+  // rather than to unfold something wider than the thing that was clicked.
+  // Set here rather than on first open, which is when it used to arrive --
+  // and which is why a shut tab was only as wide as its title.
+  root.style.width = options.width || 'min(46rem, 92vw)';
   const body = root.querySelector('.panel-body');
   const grip = root.querySelector('.grip');
 
@@ -176,9 +182,9 @@ export function makePanel(root, options = {}) {
     root.classList.toggle('shut', !opening);
     if (opening) {
       raise(root);
-      // First open gets a default size; after that it keeps whatever the grip
-      // was last dragged to.
-      if (!root.style.width) root.style.width = options.width || 'min(46rem, 92vw)';
+      // First open gets a default height; after that it keeps whatever the
+      // grip was last dragged to. The WIDTH is already set -- a shut tab is
+      // the same box at a smaller height, so it has had the width all along.
       if (!root.style.height) root.style.height = options.height || '22rem';
       if (options.onOpen) options.onOpen(panel);
     } else if (options.onShut) {
@@ -1107,8 +1113,6 @@ const railState = {
   // What the row measured last, as a string, so a tick can tell whether
   // anything moved without laying anything out.
   widths: '',
-  // The outline left behind when a window pushes its neighbour along.
-  ghost: null,
   // A HAND IS SCROLLING THE ROW right now, so the lay-out must not drag it
   // back to the selection. See `packRailNow`.
   scrolling: false,
@@ -1198,11 +1202,6 @@ export function packRailNow() {
     railState.scroll = Math.max(most, Math.min(0, want));
   }
   renderRail();
-  // THE GHOSTS DESCRIBE THE ROW, so they are rebuilt whenever it is laid out
-  // -- opening, shutting, dragging, scrolling, a window resized. There is no
-  // state to keep in step because there is nothing remembered: the marks are
-  // derived from where the tabs are.
-  showShift();
 }
 
 /* WRITE THE ROW, and read nothing. Everything this needs was measured above.
@@ -1218,99 +1217,6 @@ function renderRail() {
     const held = p.root === railState.dragging;
     if (!held) p.place(at.get(p), RAIL_TOP, true);
   });
-}
-
-/* -- WHERE A TAB WENT -------------------------------------------------------
-
-   OPENING A TAB PUSHES EVERYTHING AFTER IT the width of the window, and on a
-   row you are walking with alt+l that is the whole row jumping sideways each
-   time a pane opens -- you lose which tab you were on, because the one you
-   were looking at is no longer where you were looking.
-
-   So the tab that got pushed is drawn TWICE: once where it now is, which is
-   the real tab, and once in outline back where it was standing, with an
-   arrow between the two. The eye keeps the old position and is told where it
-   went, rather than having to find it again.
-
-   A COPY, NOT THE TAB. The ghost is a clone with its own class and no
-   handlers -- the real tab is still the one you can click, drag or bin, and
-   the outline is a picture of where it used to be. Anything else would mean
-   two things on the page claiming to be the same tab.
-
-   A STANDING RULE, NOT A NOTE ABOUT THE LAST CLICK. Every open tab that has
-   a tab to its right shows one, for as long as that is true -- so opening a
-   second pane leaves both marks up, and shutting one takes only its own
-   away. It used to be built by the click that opened a tab and cleared by
-   whatever happened next, which meant the mark vanished on a shut, a drag
-   or a scroll while the tab it described was still pushed aside.
-
-   NOTHING IS REMEMBERED. Where a neighbour would stand if the open tab were
-   shut is derivable from the row as it is -- hard against that tab's bar --
-   so the marks are rebuilt from the positions every time the row is laid
-   out, and no captured value can fall out of step with them. */
-
-
-function clearShift() {
-  if (!railState.ghost) return;
-  railState.ghost.remove();
-  railState.ghost = null;
-}
-
-function showShift() {
-  clearShift();
-  const wrap = document.createElement('div');
-  wrap.className = 'tab-shift';
-
-  // EVERY OPEN TAB THAT HAS A NEIGHBOUR, not just the one most recently
-  // opened. This is a standing description of the row rather than a note
-  // about the last click: open a second pane and BOTH windows are pushing
-  // somebody along, so both say where they pushed them from.
-  rail.forEach((p, i) => {
-    const after = rail[i + 1];
-    if (p.shut || !after) return;
-
-    const bar = p.root.querySelector('.bar').getBoundingClientRect();
-    // THE GHOST IS A PICTURE OF THE TAB THAT MOVED, so it is measured from
-    // THAT tab -- its own bar, not the bar of the one that pushed it. Sized
-    // from the pusher, a ghost of `zsh` shoved along by `visualize` came out
-    // visualize-wide, and a narrow tab pushed by a wide one came out too
-    // small for its own name to fit.
-    const mine = after.root.querySelector('.bar').getBoundingClientRect();
-    const now = after.root.getBoundingClientRect();
-    // WHERE THE NEIGHBOUR WOULD BE IF THIS TAB WERE SHUT: hard against this
-    // tab's bar. Derived rather than remembered -- the position a tab was
-    // pushed from is a fact about the row as it stands, so it survives
-    // anything that rebuilds the row and needs nothing captured beforehand.
-    const wasAt = bar.right + TAB_GAP;
-    const by = now.left - wasAt;
-    // Nothing to say when nothing moved: a window narrower than the tab, or
-    // a row against its stop. An arrow of no length is a mark on the page.
-    if (by < 1) return;
-
-    const ghost = document.createElement('div');
-    ghost.className = 'tab-ghost';
-    ghost.style.left = wasAt + 'px';
-    ghost.style.top = RAIL_TOP + 'px';
-    ghost.style.width = mine.width + 'px';
-    ghost.style.height = mine.height + 'px';
-    ghost.textContent = after.root.querySelector('.bar .name')?.textContent || '';
-
-    // THE ARROW POINTS BACK, from where the tab is now to where it was: the
-    // question the row raises is "where did that go", and the answer runs
-    // from the thing you are looking for to the place you last saw it.
-    const arrow = document.createElement('div');
-    arrow.className = 'tab-ghost-arrow';
-    arrow.style.left = (wasAt + mine.width) + 'px';
-    arrow.style.top = (RAIL_TOP + mine.height / 2) + 'px';
-    arrow.style.width = Math.max(0, by - mine.width) + 'px';
-
-    wrap.appendChild(ghost);
-    wrap.appendChild(arrow);
-  });
-
-  if (!wrap.children.length) return;
-  document.body.appendChild(wrap);
-  railState.ghost = wrap;
 }
 
 // SCROLLING THE ROW, and only when there is a reason to.

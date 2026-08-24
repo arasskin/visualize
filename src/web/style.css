@@ -91,6 +91,10 @@
   --pick: #8b1a2b;
   --pick-wash: #8b1a2b1c;
 
+  /* How round a tab and its window are. Small: enough to read as an object
+     rather than a cut edge, not enough to look like a bubble. */
+  --round: 5px;
+
   /* The tab rail's guides. Orange, which nothing else here is. */
   --rail: #d2811e;
 
@@ -315,24 +319,29 @@ button:disabled { opacity: .5; cursor: progress; }
   --gutter: .5rem;     /* one gutter for the bar and the rows below it, so a
                           panel's title and its contents share a left edge */
 }
-.panel.shut { width: auto !important; height: auto !important; }
+/* A SHUT TAB IS THE SAME BOX, WITHOUT ITS HEIGHT. It keeps the width the
+   window has, so opening one appears to expand it downward rather than to
+   unfold something wider than the thing you clicked. Only the height is
+   given up, and only because there is nothing below the bar to be tall for. */
+.panel.shut { height: auto !important; }
 .panel.shut .panel-body, .panel.shut .grip { display: none; }
 
-/* A MANILLA FOLDER, not a growing box. Opening a panel used to stretch its
-   title bar along with everything else, so the same title occupied a
-   different width depending on a state you were about to change -- and the
-   eye lost the thing it had just clicked. The bar now keeps the width it
-   has when shut, and only the body below it opens out. What was a button
-   stays exactly where it was and becomes the folder's tab.
+/* ONE BOX THAT GROWS DOWNWARD. Shut and open are the same box at two
+   heights: the width does not change, so opening a tab appears to expand it
+   rather than to unfold something wider than the thing you clicked. The
+   title stays exactly where it was -- top left, in the bar that is the box's
+   own top edge either way.
 
-   The panel itself is therefore transparent and borderless: the two pieces
-   below draw their own edges, or the bar's tab would sit inside a box its
-   own width. */
+   THIS USED TO BE A MANILLA FOLDER: the bar kept its title's width while the
+   window opened out wider beneath it, so a tab stuck up off a sheet. The
+   width is the box's now, in both states, and the bar stretches to it.
+
+   The panel is transparent and borderless throughout: the bar and the body
+   draw the box's edges between them. */
 .panel {
   border: 0; background: none;
-  align-items: flex-start;  /* the bar keeps its content width... */
 }
-.panel > .panel-body, .panel > .grip { align-self: stretch; }  /* ...the body does not */
+.panel > .bar, .panel > .panel-body, .panel > .grip { align-self: stretch; }
 
 /* -- ONE SHAPE, ONE OUTLINE -------------------------------------------------
 
@@ -385,6 +394,24 @@ button:disabled { opacity: .5; cursor: progress; }
    borrowed and nothing is given back now; each box draws its own edges and
    the overlap puts two of them in the same pixel. */
 .panel:not(.shut) > .panel-body { margin-top: -1px; }
+
+/* SLIGHTLY ROUNDED, both pieces. A square corner reads as a cut edge and a
+   round one as an object, and these are objects -- a tab you press and a
+   window you work in.
+
+   THE SHARED EDGE STAYS SQUARE. The bar's underside and the window's top are
+   one line; rounding either there would put a notch in the middle of the
+   figure where the two meet, which is the one place they must read as
+   continuous. So a shut tab rounds all four, an open one rounds its top two,
+   and the window below it rounds its bottom two. */
+.panel > .bar { border-radius: var(--round); }
+.panel:not(.shut) > .bar {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.panel > .panel-body {
+  border-radius: 0 var(--round) var(--round) var(--round);
+}
 
 /* NO LINE BETWEEN A TAB AND ITS OWN WINDOW. The tab draws a bottom and the
    window draws a top, in the same pixel, and that line is right everywhere
@@ -459,54 +486,6 @@ button:disabled { opacity: .5; cursor: progress; }
    `hatch-id`. Nothing to do in the stylesheet -- this note is here because
    the striping is a page-level idea and this is where someone would look
    for it. */
-
-/* -- WHERE A TAB WENT ------------------------------------------------------
-
-   The outline left behind when a tab is pushed along by a window opening,
-   and the arrow from where it is back to where it was. See showShift.
-
-   THE COLOUR OF AN ORDINARY TAB, and DASHED. It is a picture of a tab, so
-   it is drawn in a tab's own grey; what says it is a picture rather than the
-   thing is that its lines are broken. That is difference enough, and it
-   costs nothing: a second colour here would have been a third meaning to
-   learn, next to maroon for selected and orange for the rails.
-
-   pointer-events:none: it is a picture of a tab, not a tab. Clicks belong to
-   whatever is underneath, and to the real tab it is a picture OF. */
-.tab-shift { pointer-events: none; }
-
-.tab-ghost {
-  position: fixed; z-index: 3;
-  box-sizing: border-box;
-  display: flex; align-items: center; justify-content: center;
-  border: 1px dashed var(--line-strong);
-  border-radius: 2px;
-  color: var(--ink);
-  font-size: 12px; white-space: nowrap; overflow: hidden;
-  opacity: .8;
-}
-
-/* THE ARROW: a line with a head, pointing back the way the tab came. Drawn
-   in borders rather than as an SVG because it is one horizontal rule and one
-   triangle, and a whole document to hold two shapes that simple is more
-   machinery than the thing is worth. */
-.tab-ghost-arrow {
-  position: fixed; z-index: 3;
-  height: 0;
-  border-top: 1.5px dashed var(--line-strong);
-  opacity: .8;
-}
-/* The head, at the LEFT end -- the end nearest the ghost, since the arrow
-   runs from the tab's new place back to its old one. */
-.tab-ghost-arrow::before {
-  content: '';
-  position: absolute; left: 0; top: 50%;
-  width: 0; height: 0;
-  transform: translate(0, -50%);
-  border-top: 5px solid transparent;
-  border-bottom: 5px solid transparent;
-  border-right: 8px solid var(--line-strong);
-}
 
 /* THE RAILS. Two lines marking where the tab row sits, drawn ONLY while a
    tab is being dragged near them -- the bar has no body and nothing to see,
@@ -661,12 +640,16 @@ button:disabled { opacity: .5; cursor: progress; }
 .bar:active { cursor: grabbing; }
 /* A panel's own status, right of its name: how many config lines failed.
    Quiet enough to ignore. */
-/* THE TITLE AND ITS NOTE SIT IN THE MIDDLE. The bar centres its contents
-   and the name takes only the room it needs, so the pair is what gets
-   centred -- a note appearing widens the tab and both shift together rather
-   than the name staying put while the note grows off one side. */
-.bar { justify-content: center; }
-.bar .name { flex: none; text-align: center; }
+/* THE TITLE AND ITS NOTE SIT AT THE LEFT, together. They were centred when a
+   tab was only as wide as its title -- centring a box around its own contents
+   is the same as not centring it -- but a tab is the width of its window now,
+   and a title floating in the middle of that is nowhere near the corner the
+   eye went to.
+
+   The pair stays a pair: a note appearing pushes along beside the name rather
+   than growing off one side of it. */
+.bar { justify-content: flex-start; }
+.bar .name { flex: none; }
 /* THE NOTE CENTRES WITH THE TITLE, as one thing. A tab saying `exited` or
    `reconnecting...` grows to show it, and what sits in the middle is the
    name and its note together rather than the name alone with the note
