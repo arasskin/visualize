@@ -91,10 +91,6 @@
   --pick: #8b1a2b;
   --pick-wash: #8b1a2b1c;
 
-  /* How round a tab and its window are. Small: enough to read as an object
-     rather than a cut edge, not enough to look like a bubble. */
-  --round: 5px;
-
   /* The tab rail's guides. Orange, which nothing else here is. */
   --rail: #d2811e;
 
@@ -314,8 +310,9 @@ button:disabled { opacity: .5; cursor: progress; }
 .panel {
   position: absolute; z-index: 5; display: flex; flex-direction: column;
   border: 1px solid var(--line-strong); background: var(--canvas);
-  border-radius: var(--round);
-  overflow: hidden;   /* the rounded corners clip what is inside them */
+  /* SQUARE. Nothing inside a panel escapes it, so there is no clipping to do
+     either -- the bar and the body are laid out within its box. */
+  overflow: hidden;
   font: 13px/1.5 var(--font-config);
   touch-action: none;  /* dragging the bar must not also pan the graph */
   --gutter: .5rem;     /* one gutter for the bar and the rows below it, so a
