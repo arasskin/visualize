@@ -697,10 +697,56 @@ export function makeTerminalPane(root, prefix) {
   // that wait, multiplied by busy mode's back-to-back polling, is what made
   // typing laggy. The queue is empty at human typing speed anyway; it only
   // fills when keys arrive faster than a localhost round trip.
+  //
+  // AND KEYSTROKES BEHIND A KEYSTROKE MERGE. A round trip is ~8ms measured
+  // end to end (2ms of it the socket hop to the supervisor, the rest waiting
+  // for the echo to ride home), so the chain above sustains a bit over a
+  // hundred keys a second. That is plenty for typing and NOT plenty for a
+  // held key on a fast repeat setting, and what a full queue costs is not a
+  // slow character but a growing arrears: the finger stops and the screen
+  // keeps going.
+  //
+  // (An earlier version of this note claimed 65ms, from a benchmark that
+  // sent EMPTY text. A send with nothing to echo waits out the supervisor's
+  // full no-echo timeout, so it measured the one case typing never hits.
+  // The queue is worth having at 8ms; it is not worth having for the reason
+  // that number suggested.)
+  //
+  // So bytes that arrive while a request is in flight are concatenated and
+  // leave together on the next one. Order is preserved (that is the whole
+  // point of the chain), the pty receives exactly the same byte sequence,
+  // and a burst costs one round trip rather than one per key.
+  //
+  // ONLY PLAIN KEYSTROKES, and the exclusions are not fussiness. A `quiet`
+  // send is a wheel report, which must not be glued to typing. And a PASTE
+  // or a composed command line arrives as one whole string that must stay
+  // one write: under bracketed-paste mode a text-plus-CR in a single write
+  // reads as a paste, so its `\r` becomes a newline instead of a submit --
+  // this is the Enter-does-not-send bug, and merging is exactly how it would
+  // come back. Those callers pass `whole`.
   let inputTurn = Promise.resolve();
-  function sendInput(text, quiet) {
+  let merging = null;         // the pending keystroke batch, while one is queued
+  function sendInput(text, quiet, whole) {
     if (!text) return inputTurn;
+    // A batch is already waiting its turn: add to it rather than queueing
+    // another request. Same array the queued send will read when it runs.
+    //
+    // A SUBMIT ENDS THE BATCH RATHER THAN JOINING IT. `abc` typed fast and
+    // then Enter would otherwise merge into one `abc\r` write, which under
+    // bracketed paste is a PASTE -- and the CR inside a paste is a newline,
+    // not a submit. That is the Enter-does-not-send bug precisely. So a CR
+    // closes whatever is accumulating and travels alone.
+    const submits = text === '\r';
+    if (merging && !quiet && !whole && !submits) {
+      merging.push(text);
+      return inputTurn;
+    }
+    if (submits) merging = null;
+    const batch = (!quiet && !whole && !submits) ? [text] : null;
+    if (batch) merging = batch;
     inputTurn = inputTurn.then(() => {
+      // Whatever accumulated while this call waited goes out now, as one.
+      if (batch) { text = batch.join(''); if (merging === batch) merging = null; }
       const askedAt = at, askedGen = generation;
       const sentAt = performance.now();
       return post('input', quiet ? { text, at: askedAt, quiet: true }
@@ -752,7 +798,7 @@ export function makeTerminalPane(root, prefix) {
   screen.addEventListener('paste', (event) => {
     event.preventDefault();
     const text = event.clipboardData.getData('text');
-    if (text) sendInput(text);
+    if (text) sendInput(text, false, true);
   });
 
   // THE WHEEL BELONGS TO THE PROGRAM WHEN THE PROGRAM ASKED FOR IT. Claude
@@ -956,7 +1002,7 @@ export function makeTerminalPane(root, prefix) {
   // TYPED AT FROM OUTSIDE. The compose bar sends a whole command this way
   // when a terminal tab is the selected one -- the same path a keystroke
   // takes, so the echo and the polling need no special case.
-  termPanel.type = (text) => { if (text) sendInput(text); };
+  termPanel.type = (text) => { if (text) sendInput(text, false, true); };
 
   termPanel.boot = async () => {
     if (generation) return;                 // already has one
