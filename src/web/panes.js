@@ -275,10 +275,15 @@ export function makeTerminalPane(root, prefix) {
   // "am I at the bottom?" is off by up to a whole chunk, which is what made an
   // earlier version stop following fast streams.
   const paneBody = root.querySelector('.panel-body');
+  // THE SCREEN IS THE SCROLLER for a terminal, not the body around it -- see
+  // the note in style.css. Ghostty's renderer measures the element it was
+  // given to decide which scrollback rows to build, so that element has to be
+  // the one carrying the overflow; following it here rather than the body
+  // keeps the two agreeing about where "the bottom" is.
   let following = true;
-  paneBody.addEventListener('scroll', () => {
-    following = paneBody.scrollTop + paneBody.clientHeight
-      >= paneBody.scrollHeight - 4;
+  screen.addEventListener('scroll', () => {
+    following = screen.scrollTop + screen.clientHeight
+      >= screen.scrollHeight - 4;
   });
   // The pin runs only when the rendered line count moved: scrollHeight is a
   // forced layout, and a scroll-through-history repaint redraws the same 33
@@ -302,7 +307,7 @@ export function makeTerminalPane(root, prefix) {
     onPaint: (lines) => {
       const grew = lines !== paintedLines;
       paintedLines = lines;
-      if (grew && following) paneBody.scrollTop = paneBody.scrollHeight;
+      if (grew && following) screen.scrollTop = screen.scrollHeight;
     },
   });
   // -- the stall detector ----------------------------------------------------

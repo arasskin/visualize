@@ -49,6 +49,30 @@ export function makeTerminal(element, options = {}) {
   let pending = [];         // writes that arrived first
   let rows = 24, cols = 80; // what has been asked for meanwhile
 
+  /* THE INLINE HEIGHT WTERM WRITES ONCE, AND WE DO NOT WANT.
+
+     With `autoResize: false` -- which is what we want, because the pane is
+     the thing that knows its own chrome -- wterm locks an inline height on
+     the element at init and never touches it again. Its `resize` reflows the
+     grid and leaves that height behind, so the element keeps whatever size
+     the FIRST geometry gave it.
+
+     That is what opened a terminal slightly scrolled. The lock ran at
+     wterm's construction defaults against its fallback row height (24 rows x
+     17px = 408px); the pane then resized to the 20 rows it actually had
+     (324px); and the 84px difference was empty element hanging below the
+     grid, which the follow-the-output pin dutifully scrolled to the bottom
+     of -- pushing the top rows out of sight.
+
+     The height is cleared rather than corrected. `.term .screen` is a flex
+     child that scrolls (see style.css), so the box is the panel's business
+     and the grid inside it is wterm's; an inline number here could only
+     disagree with one of them. */
+  function unlockHeight() {
+    if (!term) return;
+    element.style.height = '';
+  }
+
   loadCore().then(async (core) => {
     core.init(cols, rows);
     term = new WTerm(element, {
@@ -63,6 +87,7 @@ export function makeTerminal(element, options = {}) {
     await term.init();
     for (const chunk of pending) term.write(chunk);
     pending = [];
+    unlockHeight();
     paint();
   }).catch((err) => {
     // A terminal that cannot start says so where a person will see it, rather
@@ -95,7 +120,7 @@ export function makeTerminal(element, options = {}) {
     resize(nextRows, nextCols) {
       if (nextRows === rows && nextCols === cols) return false;
       rows = nextRows; cols = nextCols;
-      if (term) { term.resize(cols, rows); paint(); }
+      if (term) { term.resize(cols, rows); unlockHeight(); paint(); }
       return true;
     },
 

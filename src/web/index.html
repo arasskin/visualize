@@ -15,6 +15,12 @@
   }
 }
 </script>
+<!-- Ghostty's own rules FIRST, ours second: the vendored sheet carries the
+     structure its renderer depends on (the scroller's overflow, the `contain`
+     that keeps a repaint local) plus a theme and a drop shadow we do not
+     want. Loading it ahead of style.css lets our rules override the looks
+     without touching the file, which the vendoring script would overwrite. -->
+<link rel="stylesheet" href="/wterm.css">
 <link rel="stylesheet" href="/style.css">
 <!-- No top bar. Regenerate is gone because a watcher notices edits on its
      own; Fit is the `0` key; and what is left -- the zoom level and what the

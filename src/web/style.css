@@ -1295,6 +1295,47 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
    maroon line across that seam would put back the very rule that one
    removes. */
 .term .panel-body { padding: .35rem .5rem; }
+/* THE SCREEN IS THE SCROLLER, and the body around it is not.
+
+   Ghostty's renderer VIRTUALIZES scrollback: it asks its own element for
+   `scrollTop` and `clientHeight` and builds DOM only for the rows those two
+   numbers cover, holding the rest open with spacers. That only works if the
+   element it measures is the one that actually scrolls.
+
+   Left inside the panel's own scrolling, `.screen` grew to its full height
+   with `overflow: visible` and a `scrollTop` frozen at 0 -- so the renderer
+   concluded every row was visible and rebuilt the whole history on each
+   keystroke, a cost that grows with the session. The body gives up its
+   overflow here; the vendored sheet supplies the screen's, via the
+   `has-scrollback` class wterm toggles for itself. */
+.term .panel-body { overflow: hidden; display: flex; }
+.term .screen { flex: 1; min-height: 0; }
+/* WHAT THE VENDORED SHEET WANTS TO LOOK LIKE, AND WE DO NOT. It ships a
+   VS Code theme, 12px of padding, a rounded corner and a drop shadow -- a
+   terminal meant to sit alone on a page rather than inside a panel that
+   already draws its own edges. The structure underneath it is what we
+   linked it for, so the looks are overridden here rather than edited out of
+   a file the vendoring script rewrites.
+
+   THE OVERFLOW IS LEFT ALONE on purpose. `.wterm.has-scrollback` is what
+   gives the scroller its `overflow-y`, and wterm toggles that class itself
+   when the first line rolls off the top -- so a fresh terminal has no
+   scrollbar and one with history does, without this file deciding. */
+.term .screen.wterm {
+  padding: 0; border-radius: 0; box-shadow: none;
+  background: transparent; color: var(--term-ink);
+  /* THE ROW HEIGHT IS A SHARED NUMBER, and this is where the sharing
+     happens. The vendored sheet defaults it to 17px and sizes `.term-row`
+     from it; the pane divides its own body height by a MEASURED character
+     box to decide how many rows to ask for. Left at 17 those two disagree,
+     and a terminal that believes it has one more row than it can show is
+     exactly the off-by-a-row scroll this file just stopped having. Pinned to
+     our own font-size x line-height (12 x 1.35), which is what the probe in
+     panes.js measures. */
+  --term-row-height: 16.2px;
+  --term-font-size: 12px;
+  --term-line-height: 1.35;
+}
 
 .screen {
   margin: 0; outline: none;

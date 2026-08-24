@@ -55,5 +55,17 @@ done
 
 cp "$work/ghostty/package/wasm/ghostty-vt.wasm" "$web/ghostty-vt.wasm"
 
+# THE STYLESHEET IS NOT OPTIONAL, and it is not in dist/ with the modules --
+# the package exports it as `@wterm/dom/css` from src/. Skipping it the first
+# time cost two bugs that looked like ours: `.wterm.has-scrollback` is the
+# rule that gives the scroller its overflow, so history was unreachable, and
+# the `contain:` declarations on the grid and rows are what keep a repaint
+# from touching the rest of the page.
+#
+# Taken as-is. Our own rules (see style.css) override the theme, the padding
+# and the radius afterwards, which is the supported way round -- editing a
+# vendored file would be undone by the next run of this script.
+cp "$work/dom/package/src/terminal.css" "$web/wterm.css"
+
 echo "vendored wterm $version into src/web/:"
-ls -1 "$web"/wterm-*.js "$web/ghostty-vt.wasm" | sed "s#^$web/#  #"
+ls -1 "$web"/wterm-*.js "$web/wterm.css" "$web/ghostty-vt.wasm" | sed "s#^$web/#  #"
