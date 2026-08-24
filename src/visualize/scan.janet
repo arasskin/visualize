@@ -382,10 +382,20 @@
   (each name (sorted (keys externals))
     (array/push nodes {:name name :label name :ours false}))
 
-  # THE FLIP: `used -> user`, so the arrowhead lands on the file that needs
-  # the thing. Sorted after reversing, so the DOT is ordered by the names as
-  # written rather than by collection order.
-  (def edges (sorted (map (fn [pair] [(pair 1) (pair 0)]) (keys pairs))))
+  # `user -> used`: an arrow reads "a depends on b", and the arrowhead lands
+  # on the thing being depended ON. That is the direction the pairs are
+  # collected in -- [here internal], the importing file first -- so they are
+  # taken as they are.
+  #
+  # THIS USED TO BE REVERSED, drawing `used -> user` so that arrows pointed
+  # along the direction a change propagates: touch a file and the arrowheads
+  # showed you who finds out. Both readings are defensible and the graph is
+  # the same graph either way; this one matches how the dependency is spoken
+  # aloud, which is what the arrow is asked to mean most often.
+  #
+  # Sorted, so the DOT is ordered by the names as written rather than by
+  # collection order.
+  (def edges (sorted (keys pairs)))
 
   {:nodes nodes :edges edges :sizes sizes :stamps stamps :ours ours})
 
