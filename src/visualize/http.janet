@@ -267,7 +267,12 @@
    # The font the page draws in, vendored beside it. Served as a font rather
    # than as text so the browser will use it, and read as bytes rather than
    # characters -- `slurp` returns a byte string, so a TTF survives the trip.
-   ".ttf" "font/ttf"})
+   ".ttf" "font/ttf"
+   # THE TERMINAL EMULATOR, which is a WASM binary. The type matters more
+   # here than anywhere else on this list: `WebAssembly.instantiateStreaming`
+   # REFUSES a response that is not `application/wasm`, and the failure reads
+   # as a corrupt module rather than as a mislabelled one.
+   ".wasm" "application/wasm"})
 
 (defn content-type
   ``What to call this file.
