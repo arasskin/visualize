@@ -259,8 +259,15 @@ export function placeArrow() {
 // Counter-scaling by 1/scale alone left the arrow 4/3 too big.
 //
 // Measured once per drawing rather than per frame: it is a property of the
-// svg, and reading a CTM forces layout. Cleared whenever the svg is replaced.
-export let unitCache = 0;
+// svg, and reading a CTM forces layout. Cleared whenever the svg is replaced
+// -- by `forgetUnit` below, because an imported binding is READ-ONLY at the
+// far end: app.js assigning `unitCache = 0` after a redraw could never have
+// worked, and threw "unitCache is not defined" instead, taking the redraw
+// with it.
+let unitCache = 0;
+
+// The svg was replaced, so the measurement taken from the old one is void.
+export function forgetUnit() { unitCache = 0; }
 function unitPx() {
   if (unitCache) return unitCache;
   const svg = pane.querySelector('svg');

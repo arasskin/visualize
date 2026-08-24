@@ -12,8 +12,9 @@
 import { pane, wire as wireGraph, paint, repaint, fit, fitSoon, isTouched, hatchFolded } from './graph.js';
 import {
   find, hits, wire as wireFind, placeArrow, keepHitInView, redrawFind,
+  forgetUnit,
 } from './find.js';
-import { moduleNames, hideEdge, wireEdges } from './hover.js';
+import { moduleNames, hideEdge, wireEdges, keepEdgeLabel } from './hover.js';
 import {
   configPanel, makeConfigPanel, rail, EDGES,
   selectPane, pickedPanel, revealTab, openTerminal, resnap,
@@ -385,17 +386,20 @@ async function send(action, index, keepView) {
       problems.textContent = out.error || '';
       if (out.svg) {
         // innerHTML replaces the label element too, so put it back before
-        // anything tries to show it.
+        // anything tries to show it. hover.js owns that element and hands it
+        // back -- reaching for it by name from here is what threw
+        // "edgelabel is not defined" on every redraw that carried an SVG,
+        // which meant one config action broke the page.
         hideEdge();
         pane.innerHTML = out.svg;
-        pane.appendChild(edgeLabel);
+        keepEdgeLabel();
         wireEdges();
         // The stripes on a folded node, which the SVG cannot carry itself.
         hatchFolded();
         // The arrow was drawn into the svg that just went. Re-find against
         // the new one, so a hit survives a redraw rather than leaving the
         // bar claiming a match that is no longer marked.
-        unitCache = 0;
+        forgetUnit();
         redrawFind();
         // A different set of files is a different shape, so start it framed
         // rather than under the previous view's pan -- EXCEPT when the

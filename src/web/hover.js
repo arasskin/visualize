@@ -44,7 +44,36 @@ export function moduleNames(svg) {
   return byNode;
 }
 
-const edgeLabel = document.getElementById('edgelabel');
+// THE LABEL THE EDGE HOVER WRITES INTO, and the one element on this page
+// that has to survive being deleted. It lives inside #graph, and a redraw
+// sets that pane's innerHTML to the new SVG -- which takes the label with
+// it. So the reference is not cached: it is looked up when needed, and
+// `keepEdgeLabel` puts a fresh one back after a redraw.
+//
+// Cached in a module-level const, this was a bug twice over. The binding
+// went stale the first time the pane was rewritten, and app.js -- which does
+// the rewriting -- reached for a name that only ever existed in here,
+// throwing "edgelabel is not defined" on every redraw that carried an SVG.
+// One config action was enough to break the page.
+function labelEl() {
+  let el = document.getElementById('edgelabel');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'edgelabel';
+    el.style.display = 'none';
+    (document.getElementById('graph') || document.body).appendChild(el);
+  }
+  return el;
+}
+
+// Put the label back into a pane that has just been rewritten. Called by
+// whoever replaced the SVG, because that is who knows it happened.
+export function keepEdgeLabel() {
+  const el = labelEl();
+  const pane = document.getElementById('graph');
+  if (pane && el.parentNode !== pane) pane.appendChild(el);
+  return el;
+}
 
 function showEdge(group, names) {
   // Read off the dataset, not a <title> child: wireEdges moves the text there
@@ -57,6 +86,7 @@ function showEdge(group, names) {
   const svg = group.ownerSVGElement;
   group.classList.add('lit');
   if (svg) svg.classList.add('hovering');
+  const edgeLabel = labelEl();
   edgeLabel.replaceChildren();
   const a = document.createElement('b');
   a.textContent = names.get((from || '').trim()) || from || '?';
@@ -73,13 +103,14 @@ export function hideEdge() {
   for (const lit of pane.querySelectorAll('.lit')) lit.classList.remove('lit');
   const svg = pane.querySelector('svg');
   if (svg) svg.classList.remove('hovering');
-  edgeLabel.style.display = 'none';
+  labelEl().style.display = 'none';
 }
 
 // Follows the pointer rather than sitting in a fixed corner: a dense graph has
 // edges at both ends of the pane, and a label 900px from the line it names is a
 // label you have to hunt for. Flipped near the edges so it never leaves.
 function moveLabel(event) {
+  const edgeLabel = labelEl();
   if (edgeLabel.style.display !== 'block') return;
   const box = pane.getBoundingClientRect();
   let x = event.clientX - box.left + 14;
