@@ -314,6 +314,8 @@ button:disabled { opacity: .5; cursor: progress; }
 .panel {
   position: absolute; z-index: 5; display: flex; flex-direction: column;
   border: 1px solid var(--line-strong); background: var(--canvas);
+  border-radius: var(--round);
+  overflow: hidden;   /* the rounded corners clip what is inside them */
   font: 13px/1.5 var(--font-config);
   touch-action: none;  /* dragging the bar must not also pan the graph */
   --gutter: .5rem;     /* one gutter for the bar and the rows below it, so a
@@ -338,9 +340,13 @@ button:disabled { opacity: .5; cursor: progress; }
 
    The panel is transparent and borderless throughout: the bar and the body
    draw the box's edges between them. */
-.panel {
-  border: 0; background: none;
-}
+/* THE BOX IS THE PANEL, and the pieces inside it draw no edges of their own.
+   The bar and the body used to carry a border each, overlapped by a pixel so
+   their two lines fell in one place -- which worked while the corners were
+   square and showed as a seam the moment they were rounded: two arcs meeting
+   at the end of a straight edge, which is the mark at the right of the row.
+
+   One border on one element cannot disagree with itself. */
 .panel > .bar, .panel > .panel-body, .panel > .grip { align-self: stretch; }
 
 /* -- ONE SHAPE, ONE OUTLINE -------------------------------------------------
@@ -393,64 +399,20 @@ button:disabled { opacity: .5; cursor: progress; }
    lines staggered where they should have run straight through. Nothing is
    borrowed and nothing is given back now; each box draws its own edges and
    the overlap puts two of them in the same pixel. */
-.panel:not(.shut) > .panel-body { margin-top: -1px; }
 
-/* SLIGHTLY ROUNDED, both pieces. A square corner reads as a cut edge and a
-   round one as an object, and these are objects -- a tab you press and a
-   window you work in.
-
-   THE SHARED EDGE STAYS SQUARE. The bar's underside and the window's top are
-   one line; rounding either there would put a notch in the middle of the
-   figure where the two meet, which is the one place they must read as
-   continuous. So a shut tab rounds all four, an open one rounds its top two,
-   and the window below it rounds its bottom two. */
-.panel > .bar { border-radius: var(--round); }
-.panel:not(.shut) > .bar {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-}
-.panel > .panel-body {
-  border-radius: 0 var(--round) var(--round) var(--round);
-}
-
-/* NO LINE BETWEEN A TAB AND ITS OWN WINDOW. The tab draws a bottom and the
-   window draws a top, in the same pixel, and that line is right everywhere
-   ALONG THE ROW -- it is what the shut tabs beside it end on -- but wrong
-   under the open tab itself, where it cuts the title off from the thing it
-   opened. The two should read as one shape.
-
-   PAINTED OVER RATHER THAN REMOVED. Every attempt to stop that pixel being
-   drawn moved the geometry: taking the tab's bottom away staggered the row,
-   giving it back as padding staggered it the other way, and each fix cost a
-   pixel somewhere else. So the line is still drawn, by both boxes, and the
-   row is still level -- a strip of the panel's own background is simply laid
-   on top of the stretch that should not show.
-
-   EXACTLY THE BOX, edge to edge. Both ways of missing show: inset by a
-   pixel it leaves a stub of the old line where the side borders turn, and
-   spread a pixel wider it eats a pixel out of those borders, so the tab's
-   sides no longer run into the window's. `left: 0; right: 0` on an
-   absolutely positioned child spans the bar's padding box, which is the
-   stretch between the two side borders -- the whole line and nothing else.
-
-   The offsets are 0 and stay written down, because "no offset" is the
-   answer here rather than the absence of one. */
-.panel:not(.shut) > .bar::after {
-  content: '';
-  position: absolute; left: 0; right: 0; bottom: -1px;
-  height: 1px;
-  /* INHERITED, so it is whatever ground this particular tab stands on: a
-     config tab paints --canvas and a terminal paints --term, and a strip
-     hard-coded to either shows as a dash of the wrong colour on the other. */
-  background: inherit;
-  pointer-events: none;
-}
+/* THE LINE UNDER THE TITLE, and only when a window hangs below it. A shut
+   tab is a title in a box and has nothing to be separated from; an open one
+   needs the eye to know where the title stops and the thing it opened
+   begins. Drawn by the BAR, downward, so it is one line inside one box
+   rather than two boxes meeting. */
+.panel:not(.shut) > .bar { border-bottom: 1px solid var(--line-strong); }
 
 .bar {
   display: flex; align-items: center; gap: .3rem; flex: none;
   padding: .4rem var(--gutter); cursor: grab; user-select: none;
-  background: var(--canvas);
-  border: 1px solid var(--line-strong);
+  /* NO BORDER AND NO GROUND OF ITS OWN: the panel is the box. What remains
+     here is the LINE UNDER THE TITLE, drawn only when there is something
+     below it to be separated from. */
   position: relative; z-index: 1;
 }
 
@@ -670,8 +632,6 @@ button:disabled { opacity: .5; cursor: progress; }
 .panel-body {
   flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
   padding: .4rem var(--gutter);
-  background: var(--canvas);
-  border: 1px solid var(--line-strong);
 }
 
 /* Resize grip, bottom-right, drawn as two diagonal rules. */
