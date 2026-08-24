@@ -93,7 +93,7 @@
   useful otherwise -- the first version of this died with
   `env: node: No such file or directory`, since the agent harnesses are node
   scripts and could not find node without a PATH.``
-  [argv &opt rows cols env]
+  [argv &opt rows cols env directory]
   (default rows 30)
   (default cols 100)
   (def environment (or env (os/environ)))
@@ -115,6 +115,19 @@
     # unless it fails -- and if it does, exiting immediately is the only safe
     # move: a forked copy of the server that kept running would answer HTTP
     # requests from a half-initialised process.
+    #
+    # WHERE THE TERMINAL OPENS. A forked child inherits the SERVER's working
+    # directory, which is wherever the person happened to be standing when
+    # they typed `visualize ~/code/thing` -- so a terminal opened on a project
+    # started in the directory the server was launched from rather than the
+    # one it is showing. Setting PWD in the environment is not enough: that is
+    # a shell convention, and the process's actual directory is the one the
+    # kernel keeps. This changes it.
+    #
+    # A directory that is gone or unreadable is not worth dying over: the
+    # terminal opens where the server was, which is where it used to open
+    # anyway.
+    (when directory (try (os/cd directory) ([_] nil)))
     (try (os/posix-exec argv :pe environment) ([_] nil))
     (os/exit 127))
 

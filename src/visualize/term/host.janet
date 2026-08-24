@@ -363,7 +363,11 @@
                                      # test caught within the minute.
                                      (put environment "VISUALIZE_TOOLS"
                                           "vz: scan|faults|eval|pane|state|where"))
-                                   environment))
+                                   environment)
+                                 # AND THE DIRECTORY IT OPENS IN, which is the
+                                 # project being shown rather than wherever
+                                 # the server happened to be started from.
+                                 directory)
                     ([e] {:error (string e)})))
       (ev/give reply opened)
       (unless (opened :error)

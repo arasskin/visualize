@@ -1083,7 +1083,7 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 #graph svg g.fresh ellipse,
 #graph svg g.fresh polygon,
 #graph svg g.fresh path {
-  animation: flash 1.6s ease-in-out forwards;
+  animation: flash 3s ease-in-out forwards;
 }
 
 /* IN AND OUT IN EQUAL TIME, and never to full. The fill rises to just over

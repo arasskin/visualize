@@ -955,9 +955,23 @@ async function commitCompose() {
     //
     // Interior newlines get the same treatment, since a multi-line paste is
     // several Enters as far as the program is concerned.
+    // THE TEXT, THEN THE RETURN, as two separate writes.
+    //
+    // A whole line arriving in ONE write is indistinguishable from a paste,
+    // and a program that has turned bracketed paste on (mode 2004 -- claude
+    // does) treats a run of bytes that way: the return inside it becomes a
+    // line break in the message being composed rather than the key that
+    // sends it. Which is the bug -- typing into Claude Code here grew the
+    // message instead of submitting it.
+    //
+    // Split, the return arrives on its own, after the text has landed, and
+    // reads as a keystroke. \r rather than \n because that is what the Enter
+    // key is: a shell in cooked mode cannot tell them apart, but a raw-mode
+    // reader takes \n as ctrl-J, which a readline-style box inserts.
     if (term.type) {
-      const keys = typed.replace(/\r\n|\n/g, '\r');
-      term.type(keys.endsWith('\r') ? keys : keys + '\r');
+      const body = typed.replace(/\r\n|\n/g, '\r');
+      if (body) term.type(body);
+      term.type('\r');
     }
     shutCompose();
     return;
