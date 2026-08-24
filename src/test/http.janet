@@ -58,7 +58,16 @@
 (t/test "every file the page actually asks for is servable"
   # The regression, stated directly: if index.html references it, the server
   # has to be willing to serve it.
-  (def here (string (os/realpath (string (dyn :current-file) "/../..")) "/web"))
+  (def src-dir (os/realpath (string (dyn :current-file) "/../..")))
+  (def here (string src-dir "/web"))
+  # TWO ROOTS, because the page asks for vendored files by bare filename too
+  # -- Ghostty's modules, its stylesheet and its wasm live in
+  # external-src/wterm/ rather than in web/, and the server looks in both.
+  # The test asks the question the server answers: can this name be served,
+  # from anywhere it is allowed to look.
+  (def roots [here (string src-dir "/../external-src/wterm")])
+  (defn servable? [name]
+    (find |(= :file (os/stat (string $ "/" name) :mode)) roots))
   (def markup (slurp (string here "/index.html")))
   (def wanted @[])
   # src="/x" and href="/x" -- the two ways the page names a file.
@@ -70,8 +79,8 @@
   (each name wanted
     (t/is= name (http/static-file (string "/" name))
            (string name " is referenced by index.html and must be servable"))
-    (t/ok (= :file (os/stat (string here "/" name) :mode))
-          (string name " exists in web/")))
+    (t/ok (servable? name)
+          (string name " exists in web/ or external-src/wterm/")))
   # And the import that started all this: app.js pulls in term.js, which no
   # route served.
   (def script (slurp (string here "/app.js")))

@@ -166,6 +166,11 @@
   # web/ and the parsers are siblings of that directory, not of this file.
   (def here (os/realpath (string (dyn :current-file) "/../..")))
   (def web-dir (string here "/web"))
+  # Vendored third-party code, served beside our own but kept apart from it
+  # on disk -- see the static route below, and tools/vendor-wterm which puts
+  # it here. `here` is src/, so this climbs out to the repo root.
+  (def vendor-dir (string here "/../external-src/wterm"))
+  (def static-roots [web-dir vendor-dir])
   (def config-path (string root "/" config/config-name))
   # THE SOURCE GENERATION. Bumped whenever the watcher sees the tree change;
   # the page waits on it and redraws, which is what replaced the Regenerate
@@ -605,11 +610,22 @@
       # module -- so panning, zooming and the config editor all died along
       # with the terminal. One missing line took out every interaction on the
       # page, which is exactly the failure a whitelist invites.
+      # TWO ROOTS, ONE RULE. `web/` holds what this project wrote and
+      # `external-src/wterm/` holds what it vendored -- Ghostty's emulator,
+      # its stylesheet and its wasm -- and the page asks for both by bare
+      # filename. The SINGLE-COMPONENT rule in `static-file` is what keeps
+      # that safe and is unchanged: a request still names a file and cannot
+      # describe a route to one, so adding a second directory to look in
+      # adds a place to find that name, not a way to escape it.
+      #
+      # `web/` FIRST, so a name this project owns is never shadowed by a
+      # vendored one that happens to match.
       (and (= method "GET")
            (when-let [name (http/static-file path)]
-             (= :file (os/stat (string web-dir "/" name) :mode))))
-      (let [name (http/static-file path)]
-        ["200 OK" (http/content-type name) (slurp (string web-dir "/" name))])
+             (find |(= :file (os/stat (string $ "/" name) :mode)) static-roots)))
+      (let [name (http/static-file path)
+            dir (find |(= :file (os/stat (string $ "/" name) :mode)) static-roots)]
+        ["200 OK" (http/content-type name) (slurp (string dir "/" name))])
 
       # The graph app's route, answered whole by the app. The core knows
       # only that something owns /config; what a config is, what a button
