@@ -400,12 +400,10 @@ button:disabled { opacity: .5; cursor: progress; }
    borrowed and nothing is given back now; each box draws its own edges and
    the overlap puts two of them in the same pixel. */
 
-/* THE LINE UNDER THE TITLE, and only when a window hangs below it. A shut
-   tab is a title in a box and has nothing to be separated from; an open one
-   needs the eye to know where the title stops and the thing it opened
-   begins. Drawn by the BAR, downward, so it is one line inside one box
-   rather than two boxes meeting. */
-.panel:not(.shut) > .bar { border-bottom: 1px solid var(--line-strong); }
+/* NOTHING DIVIDES THE TITLE FROM THE CONTENT. A tab and the thing it opens
+   are one box, and a rule across the middle of a box says they are two. The
+   title sits at the top of the shape and the content below it, and the space
+   between them is what separates them. */
 
 .bar {
   display: flex; align-items: center; gap: .3rem; flex: none;
@@ -592,20 +590,18 @@ button:disabled { opacity: .5; cursor: progress; }
    still sits above the unselected ones. */
 .panel.picked { z-index: 12; }
 
-/* THE LINE UNDER THE TITLE GOES MAROON. That line is the one part of the
-   figure that is in the same place whether the tab is shut or open -- the
-   underside of the title -- so a mark on it survives opening the window
-   instead of jumping somewhere else, and the eye does not have to find it
-   again.
+/* THE TOP EDGE OF THE BOX GOES MAROON. The box's own top line, thickened
+   and coloured -- so the mark is part of the outline rather than a second
+   line drawn near it.
 
-   A SHUT TAB DRAWS THE LINE ONLY WHEN IT IS THE SELECTED ONE. Unselected and
-   shut, there is nothing below the title to be separated from and the line
-   would be a rule across the bottom of a button. Selected, it IS the mark.
+   THE SAME EDGE IN BOTH STATES. Shut and open are one box at two heights and
+   the top does not move between them, so the mark stays exactly where it was
+   when the window opens beneath it.
 
-   These were borders on the bar and the body, back when those drew the box.
-   The panel draws it now, so colouring them coloured nothing -- which is why
-   the mark went missing on a shut tab. */
-.panel.picked > .bar { border-bottom: 1px solid var(--pick); }
+   It was UNDER the title before, which put a rule across the middle of an
+   open box: two lines close together read as a shadow rather than as one
+   shape. */
+.panel.picked { border-top-color: var(--pick); }
 
 .bar:active { cursor: grabbing; }
 /* A panel's own status, right of its name: how many config lines failed.
