@@ -650,9 +650,35 @@
     lines))
 
 (defn write-config
-  "Write the lines back, as a real edit to the real file."
+  ``Write the lines back, as a real edit to the real file.
+
+  A WRITE THAT CHANGES NOTHING DOES NOT HAPPEN. The config lives in the tree
+  the watcher watches -- it is the drawing's own source, and hiding it from a
+  tool for seeing a directory would be the wrong trade -- so every `spit`
+  moves its mtime, and a moved mtime is indistinguishable from someone
+  editing the file. That is a loop: the page saves, the watcher announces
+  that the source changed, the page redraws, its open panes re-register
+  themselves in the file (see `remember-terminals`), and it saves again. One
+  delete click cost five full redraws.
+
+  Most of those writes carry no news. `remember-panes` runs whenever a pane
+  is made and writes the same list it wrote last time; only the FIRST write
+  after a real change says anything. Comparing before writing is what turns
+  the rest into nothing at all, and it is worth more than the loop it closes:
+  no write here ever announces a change it did not make.
+
+  A REAL EDIT STILL REDRAWS, which is the point of the watcher and is not
+  what this touches -- different bytes still reach the disk, still move the
+  mtime, and still tell the page.``
   [path lines]
-  (spit path (string (string/join lines "\n") "\n")))
+  (def next (string (string/join lines "\n") "\n"))
+  # `slurp` HANDS BACK A BUFFER, and a buffer is never `=` to a string in
+  # Janet however identical the bytes -- the first version of this compared
+  # the two directly, was false every time, and skipped nothing at all.
+  # `string` on the way out is what makes the comparison about content.
+  (def now (try (string (slurp path)) ([_] nil)))
+  (unless (= next now)
+    (spit path next)))
 
 # Which actions are worth a redraw. Inserting adds an EMPTY line, which by
 # definition draws the same graph -- so it saves and returns immediately

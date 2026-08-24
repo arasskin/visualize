@@ -484,13 +484,19 @@
 # a thread would mean copying the spec list per tick and marshalling results
 # back for no gain.
 
-# THE CONFIG IS NOT IN THE LIST, and does not need excluding from it. Editing
-# it through the page once closed a loop -- the page saved, the fingerprint
-# moved, the watcher announced that the source had changed, the page redrew
-# and saved again, and the server span at 7% CPU printing nothing -- but that
-# was when the config was `config.janet` and the Janet parser claimed it.
-# `visualize.conf` is an extension no parser claims, so `find-files` never
-# returns it and the fingerprint never sees it.
+# THE CONFIG IS IN THE LIST, and that is on purpose: it is a file in the tree
+# and this walk reports the tree. It used to be absent by accident -- no
+# parser claimed `.conf`, back when the walk kept only files a parser claimed
+# -- and the accident was load-bearing, because a config write moves its
+# mtime and the fingerprint cannot tell that from someone editing it. That
+# closed a loop twice: the page saves, the watcher announces a changed
+# source, the page redraws, its panes re-register in the file, and it saves
+# again.
+#
+# What broke the loop is that a write which changes nothing no longer
+# happens -- see `write-config` in config.janet, which compares before it
+# spits. The file stays visible here, an edit to it still redraws, and the
+# writes that carried no news no longer pretend to.
 
 (defn fingerprint
   ``One number standing for the state of the tree: every file's mtime and
