@@ -1109,6 +1109,9 @@ const railState = {
   widths: '',
   // The outline left behind when a window pushes its neighbour along.
   ghost: null,
+  // A HAND IS SCROLLING THE ROW right now, so the lay-out must not drag it
+  // back to the selection. See `packRailNow`.
+  scrolling: false,
 };
 
 // Read every width, and nothing else. The only phase allowed to touch the
@@ -1179,7 +1182,12 @@ export function packRailNow() {
   // it starts off the left, slide right by that. Set here rather than through
   // `scrollRail`, which asks for another lay-out -- we are in one, and the
   // placing below will draw the answer.
-  const chosen = pickedPanel();
+  // NOT WHILE A HAND IS ON IT. A wheel over the row asks for a lay-out, and a
+  // lay-out that pulls the selection back into view undoes the scroll on the
+  // very next frame -- so the row sprang back under the finger and looked
+  // stuck. Walking with alt+h/l was unaffected, because that MOVES the
+  // selection and the reveal was agreeing with it.
+  const chosen = railState.scrolling ? null : pickedPanel();
   if (chosen && rail.includes(chosen) && railOverflows()) {
     const at = placeRail().get(chosen);
     const over = at + (railState.spans.get(chosen) || 0) - innerWidth;
@@ -1317,6 +1325,14 @@ function showShift() {
 function railOverflows() { return railState.end > innerWidth - RAIL_LEFT; }
 
 function scrollRail(by) {
+  // MEASURE BEFORE DECIDING. `railOverflows` reads `railState.end`, which is
+  // only written when the row is laid out -- so a wheel arriving after
+  // anything changed a width was answered from a stale number. The row said
+  // it fitted, refused to move, and the trackpad did nothing at all while
+  // alt+h/l still worked, because that walks the selection and lays the row
+  // out on its way.
+  measureRail();
+  placeRail();
   if (!railOverflows()) {
     if (railState.scroll === 0) return false;
     railState.scroll = 0;                 // a window that grew: put the row back
@@ -1370,6 +1386,11 @@ export function revealTab(panel) {
   packRail();
 }
 
+// How long after the last wheel event the row is considered still. Cleared
+// and reset by every event in a gesture, so a trackpad's stream counts as one
+// scroll rather than as dozens.
+let scrollRelease = 0;
+
 // A WHEEL OVER THE ROW, either axis. A trackpad swipe sideways arrives as
 // deltaX and a mouse wheel as deltaY, and both mean the same thing here --
 // there is one direction the row can go.
@@ -1377,8 +1398,18 @@ window.addEventListener('wheel', (e) => {
   // Only over the row itself: the graph owns the wheel everywhere else, and
   // taking it here would break zooming for the top of the page.
   if (e.clientY > RAIL_TOP + railHeight()) return;
-  if (!railOverflows()) return;
+  // NO SECOND OPINION ABOUT WHETHER THE ROW FITS. This used to ask
+  // `railOverflows` first, which reads a number written the last time the row
+  // was laid out -- so a wheel arriving after any width changed was turned
+  // away on stale arithmetic before `scrollRail` could measure. Asking once,
+  // where the measuring happens, is the whole fix.
   const by = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? -e.deltaX : -e.deltaY;
+  // THE ROW STAYS WHERE THE HAND PUTS IT. Held over the whole gesture rather
+  // than one event: a trackpad sends a stream of them, and a flag cleared
+  // between two would let the frame in the gap pull the row back.
+  railState.scrolling = true;
+  clearTimeout(scrollRelease);
+  scrollRelease = setTimeout(() => { railState.scrolling = false; }, 400);
   if (scrollRail(by)) e.preventDefault();
 }, { passive: false });
 
