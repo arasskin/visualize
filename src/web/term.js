@@ -46,6 +46,7 @@ export function makeTerminal(element, options = {}) {
   const onPaint = options.onPaint || (() => {});
 
   let term = null;          // the WTerm, once its core has loaded
+  let ready = false;        // ...and once its init() has finished
   let pending = [];         // writes that arrived first
   let rows = 24, cols = 80; // what has been asked for meanwhile
 
@@ -69,7 +70,7 @@ export function makeTerminal(element, options = {}) {
      and the grid inside it is wterm's; an inline number here could only
      disagree with one of them. */
   function unlockHeight() {
-    if (!term) return;
+    if (!ready) return;
     element.style.height = '';
   }
 
@@ -85,6 +86,16 @@ export function makeTerminal(element, options = {}) {
       cursorBlink: true,
     });
     await term.init();
+    // READY ONLY NOW, and the flag is the whole point: `term` is assigned by
+    // the line above's constructor, but a WTerm cannot take a write until
+    // `init` has awaited its bridge into place. Gating on the variable rather
+    // than on this flag left a window -- one await, but a real one, since the
+    // pane starts writing the moment its session answers -- where a write saw
+    // a truthy `term`, skipped the queue, and went to an engine that was not
+    // there yet. The bytes that did that were lost while the queued ones
+    // replayed after them, which on screen is a line of typing coming out
+    // duplicated and out of order.
+    ready = true;
     for (const chunk of pending) term.write(chunk);
     pending = [];
     unlockHeight();
@@ -106,7 +117,7 @@ export function makeTerminal(element, options = {}) {
   return {
     write(text) {
       if (!text) return;
-      if (!term) { pending.push(text); return; }
+      if (!ready) { pending.push(text); return; }
       term.write(text);
       paint();
     },
@@ -120,7 +131,7 @@ export function makeTerminal(element, options = {}) {
     resize(nextRows, nextCols) {
       if (nextRows === rows && nextCols === cols) return false;
       rows = nextRows; cols = nextCols;
-      if (term) { term.resize(cols, rows); unlockHeight(); paint(); }
+      if (ready) { term.resize(cols, rows); unlockHeight(); paint(); }
       return true;
     },
 
@@ -129,7 +140,7 @@ export function makeTerminal(element, options = {}) {
     // terminal is: the sequence that means it.
     reset() {
       pending = [];
-      if (term) { term.write('\x1bc'); paint(); }
+      if (ready) { term.write('\x1bc'); paint(); }
     },
 
     get rows() { return rows; },
