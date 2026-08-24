@@ -287,13 +287,20 @@
       ([_] nil))))
 
 (defn- session-state
-  "What the page needs to know about the session, without its output."
-  []
+  ``What the page needs to know about the session, without its output.
+
+  `program` COSTS A PROCESS. Naming the foreground program means spawning
+  `ps` (see `foreground`), which measures ~2ms -- fine once a poll, and not
+  fine on the keystroke path, which asks for this table and then reads only
+  `running` and `generation` off it. Callers that do not need the name pass
+  false and skip the spawn.``
+  [&opt want-program]
+  (default want-program true)
   {"running" (truthy? (running?))
    "generation" generation
    "argv" (if session (session :argv) [])
    # What it is running NOW, which is not always what it was started with.
-   "program" (or (foreground) "")
+   "program" (if want-program (or (foreground) "") "")
    "chunks" (+ base (length backlog))
    "rows" pty-rows
    "trimmed" (pos? base)
@@ -550,8 +557,11 @@
       (if (neg? at)
         # An older page that does not send `at` gets the old answer.
         [{"ok" true} false]
+        # NO PROGRAM NAME HERE. Only `running` and `generation` are read out
+        # of this, and asking for the name would fork `ps` on every
+        # keystroke for a string nobody looks at.
         (let [[text next from] (session-since at)
-              now (session-state)]
+              now (session-state false)]
           [{"ok" true
             "text" text
             "at" next
@@ -597,13 +607,18 @@
     (let [asked (number-at "generation" -1)
           wait (min 25000 (number-at "wait" 0))]
       (when (pos? wait)
-        (def entry (session-state))
+        # NO PROGRAM NAME WHILE PARKED. This loop runs every 10ms for as long
+        # as the park lasts and compares only `running` and `generation` --
+        # asking for the name would fork `ps` a hundred times a second, per
+        # pane, to build a string the loop never reads. The reply below still
+        # names the program, which is where the page actually reads it.
+        (def entry (session-state false))
         (def from (number-at "at" 0))
         (def deadline (+ (os/clock :monotonic) (/ wait 1000)))
         (var parked true)
         (while parked
           (drain)
-          (def now (session-state))
+          (def now (session-state false))
           (def total (+ base (length backlog)))
           (cond
             # A generation mismatch replays from zero: answer now.
