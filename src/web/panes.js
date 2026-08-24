@@ -1072,16 +1072,19 @@ export function onRail(panel) { return rail.includes(panel); }
 // every tab after it -- so the one thing you could not do was open two
 // neighbours and see both.
 function railSpan(p) {
+  // THE PANEL, in both states, because the panel IS the box now. This used to
+  // measure the BAR when shut and the panel when open -- which were different
+  // things back when the bar drew its own edges, and are the same box at two
+  // heights today. The bar sits inside the panel's border, so a shut tab
+  // measured two pixels narrow and the gap after it grew by two the moment
+  // the tab beside it was opened. Which tab is open cannot change how wide
+  // its neighbour is.
+  //
   // MEASURED IN FRACTIONS, not whole pixels. `offsetWidth` rounds, and a tab
-  // is 43.63px wide -- so laying the row out on rounded widths left a third
-  // of a pixel of background showing between one tab and the next, wherever
-  // the rounding fell badly. getBoundingClientRect keeps the fraction and
-  // the tabs meet exactly.
-  const bar = p.root.querySelector('.bar').getBoundingClientRect().width;
-  if (p.shut) return bar;
-  // The body can be narrower than the bar on a short window; the row has to
-  // clear whichever reaches further.
-  return Math.max(bar, p.root.getBoundingClientRect().width);
+  // is not a whole number of pixels wide -- laying the row out on rounded
+  // widths left a sliver of background showing between one tab and the next,
+  // wherever the rounding fell badly.
+  return p.root.getBoundingClientRect().width;
 }
 
 // What the row measures, as a string, so a tick can tell whether anything
