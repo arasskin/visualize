@@ -403,13 +403,32 @@
       # `@scope/pkg` -- and a bare DOT identifier admits none of it.
       (def as-node (safe-name module))
       (def internal
-        (if (string/has-prefix? "." module)
+        (cond
           # A RELATIVE import names a file, and which file depends on where
           # the importing file sits. Resolved against that directory rather
           # than flattened, or `../visualize/color` becomes the node `___visualize_color`
           # -- a phantom external that nothing matches, instead of an edge to
           # the visualize/color the project already has.
+          (string/has-prefix? "." module)
           (safe-name (resolve-relative (file :rel) module))
+
+          # A SPECIFIER WITH A SLASH IN IT IS A PATH, and is named the way
+          # every other path is: extension off, separators to dots. The
+          # dotted-module rule below would read its extension as a package
+          # separator -- `external-src/janet/janet.c` becoming
+          # `external-src/janet/janet/c` -- which matches no file, so the
+          # build script's reference to janet.c invented an external that
+          # wore its extension while the real file beside it did not. That
+          # is the ONE node on this graph with a `.c` on the end, and this
+          # is why.
+          #
+          # `github.com/lib/pq` has slashes too and is not a file here; it
+          # simply matches nothing and stays an external, which is correct.
+          (string/find "/" module)
+          (node-name module)
+
+          # A DOTTED MODULE NAME: `visualize.color` is a path spelled in
+          # dots, so the dots are what separate its segments.
           (safe-name (string/replace-all "." "/" module))))
       (cond
         (ours internal) (unless (= internal here) (put pairs [here internal] true))
