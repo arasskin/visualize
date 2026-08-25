@@ -59,6 +59,35 @@ for pkg in core dom ghostty; do
   done
 done
 
+# -- A KNOWN BUG, AND WHY THERE IS NO PATCH HERE -------------------------------
+#
+# SCROLLING DOES NOTHING INSIDE CLAUDE CODE, and the cause is in the WASM,
+# which is why nothing in this script fixes it.
+#
+# Claude asks for mouse reports with `?1000h ?1002h ?1003h ?1006h` -- all
+# four, in that order, and it never sets `?1007h` (xterm's Alternate Scroll,
+# the other way a program can ask for the wheel). Mode 1003 is ANY-EVENT
+# tracking and it is the LAST one set, so it is the one in force.
+#
+# ghostty-vt.wasm does not implement 1003. Fed the modes one at a time into
+# a clean core, `mouse_tracking` answers:
+#
+#     ?1000h -> 1000        ?1003h -> 0     <-- reset, not 1003
+#     ?1002h -> 1002        ?1006h -> 0
+#
+# So the engine ends with tracking OFF. wterm's input handler then returns
+# without sending anything (correctly -- it is told there is no tracking),
+# the wheel report never reaches claude, and the alternate screen has no
+# scrollback to fall back on. Nothing scrolls.
+#
+# THE JS IS NOT WHERE TO FIX IT. @wterm/ghostty does clamp anything that is
+# not 1000 or 1002 to 0, which looks like the bug and is not: by the time it
+# reads the mode, the wasm has already answered 0. Patching that clamp here
+# was tried and changed nothing.
+#
+# WHAT WOULD FIX IT is 1003 support in ghostty-vt itself, upstream of this
+# repo and of @wterm. Not yet reported.
+
 cp "$work/ghostty/package/wasm/ghostty-vt.wasm" "$web/ghostty-vt.wasm"
 
 # THE STYLESHEET IS NOT OPTIONAL, and it is not in dist/ with the modules --
