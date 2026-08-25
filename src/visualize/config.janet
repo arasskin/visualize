@@ -139,7 +139,9 @@
    {:name "lines" :args []
     :blurb "Write each file's line count under its name."}
    {:name "animate" :args []
-    :blurb "Flash a node when its file is new or has been written since the last drawing. Nothing flashes on the first drawing, since there is no earlier one to differ from."}])
+    :blurb "Flash a node when its file is new or has been written since the last drawing. Nothing flashes on the first drawing, since there is no earlier one to differ from."}
+   {:name "visualize" :args [:name]
+    :blurb "Draw the subproject at p using its own visualize.conf. Every line of that file is read as though written here, with p put in front of the names it mentions, so a nested project keeps its own layout inside the bigger drawing."}])
 
 # LONGEST NAME FIRST is not cosmetic: a PEG alternation takes the first
 # branch that matches, so a verb whose name STARTS WITH another one -- were
@@ -391,7 +393,18 @@
       nil)
 
     :lines (do (put state :sized true) nil)
-    :animate (do (put state :animated true) nil)))
+    :animate (do (put state :animated true) nil)
+
+    # NOTHING TO DO HERE. The work is `run`'s: it reads the named project's
+    # own config and applies those lines in a pass of its own, after this
+    # file's, so that what the parent says still wins. This case exists so
+    # the verb is not an unhandled one, and to catch the empty name -- which
+    # parses, since `""` is a legal quoted name, and would otherwise read as
+    # "the project at the root", which is this one.
+    :visualize
+    (if (empty? (string/trim (or (first args) "") "./"))
+      "a nested project needs a directory -- (visualize p), like (visualize lib)"
+      nil)))
 
 (defn- complain
   ``What is wrong with a line the grammar refused.
@@ -500,6 +513,95 @@
         wrong)
       (complain text))))
 
+# THE ONE SPELLING of the config file's name. Up here because `nested-lines`
+# below needs it to find a subproject's own config, and a constant belongs
+# above its first reader.
+(def config-name "visualize.conf")
+
+(defn- visualize-targets
+  ``The subprojects a line asks for, as written.
+
+  A line may hold several forms, so `(visualize a) (visualize b)` names
+  both. Anything that does not parse names none -- the complaint about that
+  belongs to the ordinary passes, which have already made it.``
+  [line]
+  (def text (string/trim (code-of line)))
+  (def out @[])
+  (when (and (not (empty? text))
+             (not (string/has-prefix? "#" text))
+             (not (note? text)))
+    (when-let [forms (peg/match grammar text)]
+      (var i 0)
+      (while (< i (length forms))
+        (def verb (forms i))
+        (++ i)
+        (def args @[])
+        (while (and (< i (length forms)) (string? (forms i)))
+          (array/push args (forms i))
+          (++ i))
+        (when (and (= verb :visualize) (not (empty? args)))
+          (array/push out (first args))))))
+  out)
+
+(defn- nested-lines
+  ``The lines of `p`'s own visualize.conf, rewritten to speak about `p`.
+
+  A NESTED PROJECT KEEPS ITS OWN LAYOUT. `(visualize lib)` reads
+  `lib/visualize.conf` and folds it into this config as though its lines had
+  been written here -- with `lib` put in front of every name they mention,
+  because a child config says `vendor` about a node this drawing calls
+  `lib.vendor`.
+
+  VERBS THAT NAME NOTHING ARE DROPPED. `lines` and `animate` are decisions
+  about the WHOLE drawing -- whether every node carries a line count,
+  whether every changed file flashes -- and a subproject does not get to
+  make them for the graph it is sitting in. Only the verbs that carry a name
+  come through, and each of those is scoped by the prefix.
+
+  Missing or unreadable is not an error. A directory with no config of its
+  own has nothing to say about how it is drawn, which is a fact rather than
+  a mistake.``
+  [root p]
+  (default root "")
+  (def dir (string/trim p "./"))
+  (when (or (empty? root) (empty? dir)) (break []))
+  (def path (string root "/" dir "/" config-name))
+  (unless (os/stat path :mode) (break []))
+  (def text (try (slurp path) ([_] nil)))
+  (unless text (break []))
+  (def prefix (normalise dir))
+  (def out @[])
+  (each line (string/split "\n" (string text))
+    (def trimmed (string/trim (code-of line)))
+    (when (and (not (empty? trimmed))
+               (not (string/has-prefix? "#" trimmed))
+               (not (note? trimmed)))
+      (when-let [forms (peg/match grammar trimmed)]
+        (var i 0)
+        (while (< i (length forms))
+          (def verb (forms i))
+          (def args @[])
+          (++ i)
+          (while (and (< i (length forms)) (string? (forms i)))
+            (array/push args (forms i))
+            (++ i))
+          # A verb with no arguments is a whole-drawing decision; see above.
+          (unless (empty? args)
+            (def spec (find |(= ($ :name) (string verb)) verb-specs))
+            (def kinds (if spec (spec :args) []))
+            # PREFIX THE NAMES AND NOTHING ELSE. `(box p color)` has a colour
+            # in its second slot and `(prefix ~ p)` an alias in its first --
+            # neither is a node name, and putting `lib.` on either would
+            # break it. The verb table already says which slot is which.
+            (def moved
+              (seq [[at arg] :pairs args]
+                (if (= (get kinds at) :name)
+                  (string prefix "." (normalise arg))
+                  arg)))
+            (array/push out
+                        (string "(" verb " " (string/join moved " ") ")")))))))
+  out)
+
 (defn run
   ``Every line, in order, against one fresh state.
 
@@ -518,7 +620,7 @@
   each pass the file still reads top to bottom, which is what `box` needs
   for its colours and what makes "the first binding of a token wins" true.
   Nothing else here is order-dependent across the two.``
-  [lines]
+  [lines &opt root]
   (def state (new-state))
   (def problems @{})
   # Pass one: the bindings. A complaint here is the prefix line's own.
@@ -531,6 +633,20 @@
       # A line whose prefix already failed keeps that complaint rather than
       # collecting a second one for the same text.
       (unless (problems i) (put problems i wrong))))
+  # PASS THREE: THE NESTED PROJECTS. `(visualize p)` brings in p's own
+  # config, and those lines are applied after this file's own so that what
+  # is written HERE about p still wins -- a parent that says `(hide lib)`
+  # means it, whatever lib's config would rather draw.
+  #
+  # Needs the root to find the file, so a caller that does not pass one --
+  # the tests, mostly -- simply gets no nesting. There is nothing to read
+  # without a directory to read it from.
+  (when root
+    (eachp [i line] lines
+      (each p (visualize-targets line)
+        (each nested (nested-lines root p)
+          (when-let [wrong (eval-line nested state)]
+            (unless (problems i) (put problems i wrong)))))))
   [state problems])
 
 # -- the config file -------------------------------------------------------
@@ -540,7 +656,6 @@
 # one -- rather than in the renderer, which was importing this module to
 # parse a file it had just read itself.
 
-(def config-name "visualize.conf")
 
 # What the panel calls itself: the file, without the extension. The panel IS
 # visualize.conf -- what you type there is what lands in it -- so naming it

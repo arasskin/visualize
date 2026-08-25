@@ -413,7 +413,7 @@
   # owns the picture, and this is where they meet.
   (defn draw []
     (def lines (config/read-config config-path))
-    (def [state problems] (config/run lines))
+    (def [state problems] (config/run lines root))
     (def [ok result] (graph/render-svg (scanned) state))
     (def [visible moved] (as-shown lines problems))
     [visible moved ok result])
@@ -510,7 +510,7 @@
     # ALWAYS RUN, RARELY DRAW. Running is what produces the per-line
     # complaints the editor writes under the rows, and every action needs
     # those. Drawing is separate and is now asked for explicitly.
-    (def [state problems] (config/run lines))
+    (def [state problems] (config/run lines root))
     # THE WATCHER OWNS THE REDRAW, and it is the only caller that sets
     # `draw`. An edit from the page SAVES and stops there: the write moves
     # the file's mtime, the watcher's next tick sees the tree changed, and

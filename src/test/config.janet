@@ -436,3 +436,56 @@
   (def pairs [["harness" "/tmp/h.sock"] ["2" "/tmp/2.sock"]])
   (t/is= pairs (config/terminals (config/remember-terminals [] pairs))))
 
+(t/test "a nested project is drawn by its own config"
+  # A directory of this test's own, so nothing here depends on the repo.
+  (def root (string (os/getenv "TMPDIR") "vz-nest-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/lib"))
+  (defn conf [dir text] (spit (string root dir "/visualize.conf") text))
+
+  (conf "/lib" "(box vendor)\n(fold vendor)\n")
+  (def [state problems] (config/run @["(visualize lib)"] root))
+  (t/is= @{} problems)
+  # THE CHILD'S NAMES WEAR THE CHILD'S PATH. `vendor` in lib's own config is
+  # `lib.vendor` in the drawing that contains it.
+  (t/is= ["lib.vendor"] (map |($ :prefix) (state :groups)))
+  (t/is= ["lib.vendor"] (state :folded))
+
+  # A VERB THAT NAMES NOTHING IS A WHOLE-DRAWING DECISION, and a subproject
+  # does not get to make it for the graph it sits in.
+  (conf "/lib" "(lines)\n(animate)\n(box vendor)\n")
+  (def [s2 _] (config/run @["(visualize lib)"] root))
+  (t/ok (not (s2 :sized)) "a nested (lines) does not size the parent")
+  (t/ok (not (s2 :animated)) "a nested (animate) does not animate the parent")
+  (t/is= ["lib.vendor"] (map |($ :prefix) (s2 :groups)))
+
+  # ONLY THE NAME SLOTS MOVE. A colour is not a node name and must survive
+  # untouched; an alias is not one either, and binding one in a child would
+  # leak a token into the parent's namespace.
+  (conf "/lib" "(box vendor red)\n(prefix v vendor)\n")
+  (def [s3 _] (config/run @["(visualize lib)"] root))
+  (t/is= [["lib.vendor" "#ff4d6d"]] (map |[($ :prefix) ($ :color)] (s3 :groups)))
+  (t/is= [] (s3 :aliases) "a child's alias does not reach the parent")
+
+  # THE PARENT STILL WINS: its own lines are applied first and the nested
+  # ones after, so both are present and nothing the parent said was lost.
+  (conf "/lib" "(fold vendor)\n")
+  (def [s4 _] (config/run @["(visualize lib)" "(hide lib.vendor)"] root))
+  (t/is= ["lib.vendor"] (s4 :hidden))
+  (t/is= ["lib.vendor"] (s4 :folded))
+
+  # A DIRECTORY WITH NOTHING TO SAY says nothing. Missing config, missing
+  # directory: both are facts rather than mistakes.
+  (def [s5 p5] (config/run @["(visualize nope)"] root))
+  (t/is= @{} p5)
+  (t/is= [] (s5 :folded))
+
+  # An empty name would read as "the project at the root", which is this one.
+  (def [_ p6] (config/run @[`(visualize "")`] root))
+  (t/ok (p6 0) "an empty nested name is a complaint")
+
+  # WITHOUT A ROOT there is no directory to read from, so nesting is simply
+  # not attempted -- which is what every caller that passes only lines gets.
+  (def [s7 p7] (config/run @["(visualize lib)"]))
+  (t/is= @{} p7)
+  (t/is= [] (s7 :folded)))
