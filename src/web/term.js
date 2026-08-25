@@ -13,7 +13,7 @@
 // the rest of this page already calls, answered by somebody else's engine.
 //
 // THE SHAPE IS OURS, DELIBERATELY. `write`, `resize(rows, cols)`, `reset`,
-// `cols`, `rows`, `mouseReporting` -- panes.js was written against these and
+// `cols` and `rows` -- panes.js was written against these and
 // none of them changes here. wterm spells two of them differently (cols
 // first, and a `WTerm` rather than a grid) and the translation belongs in one
 // file rather than at every call site.
@@ -201,13 +201,6 @@ export function makeTerminal(element, options = {}) {
 
     get rows() { return rows; },
     get cols() { return cols; },
-
-    // True when wheel events belong to the PROGRAM rather than the scrollback
-    // -- and only in SGR mode, which is the only encoding this page sends.
-    get mouseReporting() {
-      const core = term && term.bridge;
-      return !!core && core.mouseTracking() !== 0 && core.mouseSgr();
-    },
 
     // What the program has asked the tab to be called, or null.
     get title() {

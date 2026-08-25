@@ -764,84 +764,35 @@ export function makeTerminalPane(root, prefix) {
     return inputTurn;
   }
 
-  // Paste, which a harness is used with constantly.
-  screen.addEventListener('paste', (event) => {
-    event.preventDefault();
-    const text = event.clipboardData.getData('text');
-    if (text) sendInput(text);
-  });
-
-  // THE WHEEL BELONGS TO THE PROGRAM WHEN THE PROGRAM ASKED FOR IT. Claude
-  // turns on mouse tracking at startup and never scrolls the terminal -- a
-  // 358KB capture of a session held not one newline -- so its history is not
-  // in this pane's scrollback and never will be. It lives inside claude,
-  // which repaints the transcript in place when a wheel report arrives,
-  // exactly as it does in iTerm. Measured live: three SGR wheel-ups at the
-  // pty and the transcript scrolled. With tracking off (the repl, a shell)
-  // the wheel keeps scrolling the pane's own scrollback, and shift forces
-  // that path the way real terminals do under a mouse-hungry program.
-  // BATCHED, PACED BY COMPLETION, WITH A RATE FLOOR. A trackpad fires
-  // dozens of wheel events a second and momentum keeps firing them after
-  // the fingers stop. This corner has burned four designs, and the survivor
-  // is the simplest that held up in use: at most one batch in flight, the
-  // next leaving when the last one lands and never sooner than 30ms after
-  // it -- a ceiling near 260 rows/s, above any rate a person can follow.
-  // Deltas accumulate between batches (the carry keeps fractions from
-  // rounding to nothing), clamped to a screenful; excess momentum is
-  // dropped, never owed. A 2x gain tunes the per-tick feel toward iTerm.
+  // NO PASTE HANDLER HERE EITHER, for the same reason there is no key
+  // handler: wterm listens on its own textarea, and a paste event BUBBLES.
+  // One left here fired alongside wterm's and the text arrived twice.
   //
-  // The two clever successors are recorded here so they are not rebuilt.
-  // Pacing on the answering repaint (any changed, non-growing paint)
-  // flooded the pty whenever the agent was WORKING -- its ticking status
-  // line and streaming tokens are exactly such paints, and each one
-  // released a batch. Pacing on the detected row SHIFT (see term.js, which
-  // still reports it) was causally sound and still felt hung: when the
-  // detector missed -- an unmatched frame, a program that scrolls more
-  // than the probe range -- the fallback cadence crawled. A dumb bounded
-  // rate degrades gently everywhere instead of sharply somewhere.
-  // Reports go `quiet`: their answer arrives on the parked poll, so the
-  // input reply's echo wait bought nothing. Coordinates are read in the
-  // flush, off the hot path.
-  const WHEEL_GAIN = 2;
-  const WHEEL_GAP = 30;
-  let wheelCarry = 0, wheelQueued = 0, wheelFlush = null, wheelInFlight = false;
-  let wheelLastSend = 0;
-  let wheelLast = { x: 0, y: 0 };
-  function flushWheel() {
-    if (wheelInFlight || wheelQueued === 0) return;
-    const wait = wheelLastSend + WHEEL_GAP - performance.now();
-    if (wait > 0) {
-      if (wheelFlush === null) {
-        wheelFlush = setTimeout(() => { wheelFlush = null; flushWheel(); }, wait);
-      }
-      return;
-    }
-    const n = Math.max(-8, Math.min(8, wheelQueued));
-    wheelQueued -= n;
-    const box = cellSize();
-    const rect = screen.getBoundingClientRect();
-    const col = Math.max(1, Math.min(term.cols, Math.floor((wheelLast.x - rect.left) / box.w) + 1));
-    const row = Math.max(1, Math.min(term.rows, Math.floor((wheelLast.y - rect.top) / box.h) + 1));
-    wheelInFlight = true;
-    wheelLastSend = performance.now();
-    sendInput(`\x1b[<${n < 0 ? 64 : 65};${col};${row}M`.repeat(Math.abs(n)), true)
-      .finally(() => {
-        wheelInFlight = false;
-        flushWheel();
-      });
-  }
-  screen.addEventListener('wheel', (event) => {
-    if (!term.mouseReporting || event.shiftKey) return;
-    event.preventDefault();
-    // deltaMode 1 is already lines; 0 is pixels.
-    wheelCarry += WHEEL_GAIN
-      * (event.deltaMode === 1 ? event.deltaY : event.deltaY / cellSize().h);
-    const n = Math.trunc(wheelCarry);
-    wheelCarry -= n;
-    wheelQueued = Math.max(-term.rows, Math.min(term.rows, wheelQueued + n));
-    wheelLast = { x: event.clientX, y: event.clientY };
-    if (wheelQueued !== 0) flushWheel();
-  }, { passive: false });
+  // Its is the better one regardless. Ours sent the raw clipboard; wterm
+  // wraps it in `ESC [ 200~` / `ESC [ 201~` when the program has asked for
+  // bracketed paste, and strips ESC out of the payload first so a clipboard
+  // cannot close the bracket early and have the rest read as commands.
+
+  // THE WHEEL IS WTERM'S TOO, for the reason the keyboard is: it listens on
+  // the same element this pane does, so a wheel event fired both handlers
+  // and a mouse-tracking program scrolled twice. Same shape of bug as the
+  // paste above, found the same way.
+  //
+  // WHAT WENT WITH IT was a pacing loop -- batched reports, a 30ms gap, a
+  // rate ceiling, momentum dropped rather than owed -- and it is worth
+  // saying why that was there, because it was not decoration. Unpaced
+  // reports over the OLD transport flooded the pty: a round trip cost 65ms,
+  // a trackpad fires dozens of events a second, and the queue that built up
+  // froze the pane for seconds at a time. Two cleverer designs were tried
+  // and are recorded in the history: pacing on the answering repaint (which
+  // an agent's ticking status line released constantly) and pacing on the
+  // detected row shift (sound, but it crawled whenever the detector missed).
+  //
+  // That transport is gone. A keystroke round trip is ~2.5ms now, not 65ms,
+  // and wterm reports one SGR sequence per wheel event with no queue of its
+  // own. If a hard trackpad scroll ever stalls a pane again, this note is
+  // where to start -- but the condition the pacing existed for is not the
+  // condition that holds now.
 
   const termPanel = makePanel(root, {
     minWidth: 360, minHeight: 200,
