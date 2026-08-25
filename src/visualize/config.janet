@@ -46,6 +46,11 @@
   []
   @{:hidden @[]
     :groups @[]
+    # THE DIRECTORY BEING DRAWN, when the caller knew it. `(visualize p)` is
+    # the one verb that has to look at the disk -- to say so when p names no
+    # directory -- and this is how it reaches it. Nil for a caller that
+    # passed no root, in which case that check is simply not made.
+    :root nil
     # Prefixes whose colour the program named outright. They keep it; the rest
     # are reassigned around them whenever the set changes.
     :chosen @{}
@@ -319,6 +324,38 @@
         (set done true))))
   out)
 
+(defn- nested-dir
+  ``The directory `p` names, or nil when there is none.
+
+  THE DIRECTORY IS FOUND BY NAMING THE DIRECTORIES, not by turning the name
+  back into a path. A node name is the dotted form of a path and that
+  mapping is not reversible: a directory called `my.lib` is the node
+  `my.lib`, and splitting on dots would send this looking for `my/lib`.
+
+  So the tree is walked instead. At each step the real entries are named the
+  way a node is named, and the one whose name the target starts with is
+  descended into -- longest first, so `my.lib` wins over `my` when both are
+  there. What is left over after a match is what remains to find, and
+  anything left at the end means the name does not describe a directory.``
+  [root dir]
+  (var here root)
+  (var rest dir)
+  (var found true)
+  (while (and found (not (empty? rest)))
+    (set found false)
+    (def entries
+      (sorted-by |(- (length $))
+                 (filter |(= :directory (os/stat (string here "/" $) :mode))
+                         (try (os/dir here) ([_] [])))))
+    (each entry entries
+      (unless found
+        (def named (normalise entry))
+        (when (or (= rest named) (string/has-prefix? (string named ".") rest))
+          (set here (string here "/" entry))
+          (set rest (if (= rest named) "" (string/slice rest (+ 1 (length named)))))
+          (set found true)))))
+  (when (empty? rest) here))
+
 (defn- apply-verb
   "One matched form against the state. Returns nil, or a complaint."
   [state form]
@@ -402,9 +439,25 @@
     # parses, since `""` is a legal quoted name, and would otherwise read as
     # "the project at the root", which is this one.
     :visualize
-    (if (empty? (string/trim (or (first args) "") "./"))
-      "a nested project needs a directory -- (visualize p), like (visualize lib)"
-      nil)))
+    (let [named (string/trim (or (first args) "") "./")]
+      (cond
+        (empty? named)
+        "a nested project needs a directory -- (visualize p), like (visualize lib)"
+
+        # A NAME THAT IS NO DIRECTORY IS A TYPO, and worth saying so. A
+        # directory with no config of its own is different and stays silent:
+        # it has nothing to say about how it is drawn, which is a fact. But
+        # `(visualize otto)` where the directory is `otto-ios` matched
+        # nothing, drew nothing, and said nothing -- and looked exactly like
+        # a nesting that had failed.
+        #
+        # Only when a root was passed. Without one there is no disk to
+        # check against, and complaining would be guessing.
+        (and (state :root) (not (nested-dir (state :root) named)))
+        (string "there is no `" named "` here -- (visualize p) names a "
+                "directory of this project")
+
+        nil))))
 
 (defn- complain
   ``What is wrong with a line the grammar refused.
@@ -565,32 +618,8 @@
   (default root "")
   (def dir (string/trim p "./"))
   (when (or (empty? root) (empty? dir)) (break []))
-  # THE DIRECTORY IS FOUND BY NAMING THE DIRECTORIES, not by turning the
-  # name back into a path. A node name is the dotted form of a path, and
-  # that mapping is not reversible: a directory called `my.lib` is the node
-  # `my.lib`, and splitting on dots would send this looking for `my/lib`.
-  #
-  # So the tree is walked instead. At each step the real entries are named
-  # the way a node is named, and the one whose name the target starts with
-  # is descended into -- longest first, so `my.lib` wins over `my` when both
-  # are there. What is left over after a match is what remains to find.
-  (var here root)
-  (var rest dir)
-  (var found true)
-  (while (and found (not (empty? rest)))
-    (set found false)
-    (def entries
-      (sorted-by |(- (length $))
-                 (filter |(= :directory (os/stat (string here "/" $) :mode))
-                         (try (os/dir here) ([_] [])))))
-    (each entry entries
-      (unless found
-        (def named (normalise entry))
-        (when (or (= rest named) (string/has-prefix? (string named ".") rest))
-          (set here (string here "/" entry))
-          (set rest (if (= rest named) "" (string/slice rest (+ 1 (length named)))))
-          (set found true))))) 
-  (when (not (empty? rest)) (break []))
+  (def here (nested-dir root dir))
+  (unless here (break []))
   (def path (string here "/" config-name))
   (unless (os/stat path :mode) (break []))
   (def text (try (slurp path) ([_] nil)))
@@ -736,6 +765,7 @@
   # of its own.
   (def lines (if root (pasted lines root) lines))
   (def state (new-state))
+  (put state :root root)
   (def problems @{})
   # Pass one: the bindings. A complaint here is the prefix line's own.
   (eachp [i line] lines

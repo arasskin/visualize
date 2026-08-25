@@ -505,11 +505,19 @@
   (t/is= ["lib.vendor"] (s4 :hidden))
   (t/is= ["lib.vendor"] (s4 :folded))
 
-  # A DIRECTORY WITH NOTHING TO SAY says nothing. Missing config, missing
-  # directory: both are facts rather than mistakes.
-  (def [s5 p5] (config/run @["(visualize nope)"] root))
+  # A DIRECTORY WITH NOTHING TO SAY says nothing: it has no config of its
+  # own, which is a fact rather than a mistake.
+  (os/mkdir (string root "/quiet"))
+  (def [s5 p5] (config/run @["(visualize quiet)"] root))
   (t/is= @{} p5)
   (t/is= [] (s5 :folded))
+
+  # A NAME THAT IS NO DIRECTORY IS A TYPO, and the difference is worth
+  # saying. `(visualize otto)` where the directory is `otto-ios` matched
+  # nothing, drew nothing, and said nothing -- indistinguishable from a
+  # nesting that had failed.
+  (def [_ p5b] (config/run @["(visualize nope)"] root))
+  (t/ok (p5b 0) "a name that is no directory is a complaint")
 
   # An empty name would read as "the project at the root", which is this one.
   (def [_ p6] (config/run @[`(visualize "")`] root))
