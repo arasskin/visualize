@@ -938,13 +938,27 @@ function shutList() {
   compose.classList.remove('listing');
 }
 
+// WHAT WAS SELECTED BEFORE THE BAR TOOK THE SELECTION. Held so that closing
+// the bar gives it back: writing a config line is an errand, and an errand
+// should leave you where it found you rather than in the config.
+let cameFrom = null;
+
 function openCompose(seed) {
+  const already = composing();
   compose.classList.remove('shut');
   // THE CONFIG TAB IS THE SELECTED ONE WHILE THE BAR IS OPEN. What you type
   // here is a config line, so the panel it belongs to is the one that should
   // be lit -- and, more usefully, the one alt walks from and opens. Writing
   // a config line and then reaching for alt used to open whichever terminal
   // happened to be selected.
+  //
+  // Only on the way IN, and only when the bar was shut: re-opening an open
+  // bar would otherwise record the config as the place to go back to, and
+  // the way back would be lost.
+  if (!already) {
+    const was = pickedPanel();
+    cameFrom = (was && was !== configPanel) ? was : null;
+  }
   selectPane(configPanel.root);
   composeFault.textContent = '';
   composeInput.value = seed || '';
@@ -963,6 +977,15 @@ function shutCompose() {
   composeFault.textContent = '';
   shutList();
   composeInput.blur();
+  // BACK WHERE YOU WERE. The bar borrowed the selection to make alt open the
+  // config while you were writing; closing it returns what it borrowed.
+  //
+  // Unless that panel has gone in the meantime -- shut, or dropped in the
+  // bin -- in which case the config keeps the selection, which is where the
+  // bar left it and is a panel that certainly still exists.
+  const back = cameFrom;
+  cameFrom = null;
+  if (back && back.root && back.root.isConnected) selectPane(back.root);
 }
 
 // Ask the server whether these lines parse, without writing them. Returns
