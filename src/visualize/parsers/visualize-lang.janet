@@ -56,8 +56,22 @@
   (def edges @[])           # [from to], as node names
   (var current nil)
 
+  # PREFIXED BY THE FILE THEY CAME FROM, the way every scanned node is
+  # prefixed by the directory it sits in. `auth` in `docs/services.visualize`
+  # is `docs.services.visualize.auth`, so two files may both describe an
+  # `auth` without colliding, and `(box docs.services.visualize)` boxes one
+  # file's graph the way `(box src.web)` boxes a directory.
+  #
+  # THE STEM, not the file's node name: `.visualize` in the middle of every
+  # label would be a segment that says nothing, since a declared node can
+  # only have come from one kind of file. The extension is not lost -- it
+  # goes under the title, at the small size, exactly as it does on a file
+  # node (see `:extension` below and `label-markup` in layout.janet).
+  (def prefix (names/safe-name (names/stem (or path ""))))
   (defn note [label]
-    (def name (names/safe-name label))
+    (def name (if (empty? prefix)
+                (names/safe-name label)
+                (string prefix "." (names/safe-name label))))
     (unless (seen name)
       (put seen name true)
       (array/push nodes name))
@@ -96,7 +110,10 @@
   # `:edges` likewise: they are already node names on both ends, because
   # this file names its own nodes and nothing has to be resolved against a
   # tree of files.
-  {:nodes nodes :edges edges})
+  # THE EXTENSION EVERY DECLARED NODE WEARS. It is the same for all of them
+  # -- they all came from this file -- so it is reported once rather than
+  # repeated onto each name, and `build` puts it on the labels.
+  {:nodes nodes :edges edges :extension (names/extension (or path ""))})
 
 (def spec
   {:name "visualize"

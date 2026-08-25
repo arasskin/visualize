@@ -187,6 +187,7 @@
         # something is there.
         :nodes (found :nodes)
         :edges (found :edges)
+        :extension (found :extension)
         # WHAT NAMES THIS FILE DEFINES FOR OTHER FILES. An html page's
         # import map is the only source of these today; it says what
         # `@wterm/dom` resolves to for every module the page loads. Carried
@@ -457,11 +458,16 @@
   (def nodes @[])
   (each file live
     (if (describes? file)
-      # THE LABEL IS THE NAME. A declared node has no path to shorten and no
-      # extension to set small -- what it is called is all there is, and it
-      # is what a config matches on.
+      # LABELLED LIKE A FILE IS, because it reads like one: the dotted name
+      # a segment per line, and the file's extension underneath at the small
+      # size. The extension is the same for every node the file declared, so
+      # the spec reports it once (see parsers/visualize-lang.janet).
       (each name (declared file)
-        (array/push nodes {:name name :label name :ours true}))
+        (def rows (string/join (string/split "." name) ".\n"))
+        (def ext (file :extension))
+        (array/push nodes {:name name
+                           :label (if ext (string rows "\n." ext) rows)
+                           :ours true}))
       (array/push nodes {:name (node-name (file :rel))
                          :label (node-label (file :rel))
                          :ours true})))

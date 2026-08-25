@@ -294,16 +294,22 @@ auth  the login service
 database  where things are kept
     disk
 ``))
+  # PREFIXED BY THE FILE, on its stem: two files may each describe an `auth`
+  # without colliding. The extension is reported separately and drawn under
+  # the label, so it is not in the name.
+  (t/is= ["demo.auth" "demo.database" "demo.crypto" "demo.disk"] (got :nodes))
+  (t/is= "visualize" (got :extension))
   # EVERY LABEL MENTIONED IS A NODE, including one that never opens a block
   # of its own -- `disk` is named under `database` and nothing else.
-  (t/is= ["auth" "database" "crypto" "disk"] (got :nodes))
-  (t/is= [["auth" "database"] ["auth" "crypto"] ["database" "disk"]]
+  (t/is= [["demo.auth" "demo.database"]
+          ["demo.auth" "demo.crypto"]
+          ["demo.database" "demo.disk"]]
          (got :edges))
 
   # The description after a label is read but not drawn, so a label with one
   # and a label without produce the same node.
-  (t/is= ["a" "b"] ((read-it "a  some prose\n    b\n") :nodes))
-  (t/is= ["a" "b"] ((read-it "a\n    b\n") :nodes))
+  (t/is= ["demo.a" "demo.b"] ((read-it "a  some prose\n    b\n") :nodes))
+  (t/is= ["demo.a" "demo.b"] ((read-it "a\n    b\n") :nodes))
 
   # A comment is not a block, and an indented line with no block above it is
   # a dependency of nothing rather than of whatever came before the comment.
@@ -315,5 +321,14 @@ database  where things are kept
 
   # A block runs until the next heading: a blank line inside one does not
   # end it.
-  (t/is= [["a" "b"] ["a" "c"]]
-         ((read-it "a  x\n    b\n\n    c\n") :edges)))
+  (t/is= [["demo.a" "demo.b"] ["demo.a" "demo.c"]]
+         ((read-it "a  x\n    b\n\n    c\n") :edges))
+
+  # INDENTATION IS ANY LEADING SPACE OR TAB, in any amount -- and it does not
+  # NEST. A line indented further still belongs to the nearest heading above
+  # it, because the format is one level deep.
+  (t/is= [["demo.a" "demo.b"]] ((read-it "a\n\tb\n") :edges) "a tab indents")
+  (t/is= [["demo.a" "demo.b"]] ((read-it "a\n b\n") :edges) "one space indents")
+  (t/is= [["demo.a" "demo.b"] ["demo.a" "demo.c"]]
+         ((read-it "a\n    b\n        c\n") :edges)
+         "deeper indentation is not nesting"))
