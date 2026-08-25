@@ -29,6 +29,7 @@
 (import ./parsers/javascript :as javascript)
 (import ./parsers/python :as python)
 (import ./parsers/swift :as swift)
+(import ./parsers/visualize-lang :as visualize-lang)
 
 (def specs
   ``Every language this program can read, in name order.
@@ -41,7 +42,7 @@
   Adding a language is now an import and an entry here, which is the same
   amount of editing the loader was avoiding, minus the machinery.``
   [arduino/spec bash/spec css/spec go/spec html/spec janet-lang/spec
-   javascript/spec python/spec swift/spec])
+   javascript/spec python/spec swift/spec visualize-lang/spec])
 
 (defn languages
   "Their names, for the startup banner."
@@ -180,6 +181,12 @@
         :declares (found :declares)
         :imports (found :imports)
         :refs (found :refs)
+        # A FILE THAT IS ITSELF A GRAPH names its own nodes and edges rather
+        # than being one node. Absent from every ordinary spec, and absent
+        # is what keeps them ordinary: see `build`, which only looks when
+        # something is there.
+        :nodes (found :nodes)
+        :edges (found :edges)
         # WHAT NAMES THIS FILE DEFINES FOR OTHER FILES. An html page's
         # import map is the only source of these today; it says what
         # `@wterm/dom` resolves to for every module the page loads. Carried
@@ -309,8 +316,18 @@
   (eachp [name files] owners
     (when (= 1 (length files)) (put resolved name (first files))))
 
+  # A FILE THAT DESCRIBES A GRAPH stands for the nodes it named, not for
+  # itself. `.visualize` files are the case (see parsers/visualize-lang.janet):
+  # one file, as many nodes as it writes down. Every other spec reports no
+  # `:nodes` and keeps the one-file-one-node rule it always had.
+  (defn declared [file] (or (file :nodes) []))
+  (defn describes? [file] (not (empty? (declared file))))
+
   (def ours @{})
-  (each file live (put ours (node-name (file :rel)) true))
+  (each file live
+    (if (describes? file)
+      (each name (declared file) (put ours name true))
+      (put ours (node-name (file :rel)) true)))
 
   # WHAT AN IMPORT'S SPELLING MEANS. A node name keeps its extension so that
   # `visualize` and `visualize.conf` stay two nodes -- but an import rarely
@@ -355,12 +372,24 @@
   (eachp [key names] by-stem
     (when (= 1 (length names)) (put from-stem key (first names))))
 
+  # NO LINE COUNT FOR A DECLARED NODE. `auth` is a label in a file, not a
+  # file, so it has no length -- and dividing the file's own lines between
+  # the nodes it names would be inventing a number. `(lines)` simply says
+  # nothing about them, which `sizes` already handles by omission.
   (def sizes @{})
-  (each file live (put sizes (node-name (file :rel)) (file :lines)))
+  (each file live
+    (unless (describes? file)
+      (put sizes (node-name (file :rel)) (file :lines))))
 
   # Modification times, keyed like the sizes. What `animate` compares.
+  # THE FILE'S OWN MTIME, given to every node it names: editing the file is
+  # the only way any of them can change, so they all flash together. That is
+  # the honest answer -- the change really did arrive as one edit.
   (def stamps @{})
-  (each file live (put stamps (node-name (file :rel)) (file :stamp)))
+  (each file live
+    (if (describes? file)
+      (each name (declared file) (put stamps name (file :stamp)))
+      (put stamps (node-name (file :rel)) (file :stamp))))
 
   # Collected as (user, used) -- the direction the scan discovers, since it
   # walks a file and asks what that file needs -- then flipped once at the end.
@@ -378,6 +407,12 @@
 
   (def pairs @{})
   (def externals @{})
+  # EDGES A FILE WROTE DOWN ITSELF, both ends already node names -- there is
+  # no tree to resolve them against, because the file that named them also
+  # named the nodes.
+  (each file live
+    (each [from to] (or (file :edges) [])
+      (unless (= from to) (put pairs [from to] true))))
   (each file live
     (def here (node-name (file :rel)))
     (each name (or (file :refs) [])
@@ -421,9 +456,15 @@
 
   (def nodes @[])
   (each file live
-    (array/push nodes {:name (node-name (file :rel))
-                       :label (node-label (file :rel))
-                       :ours true}))
+    (if (describes? file)
+      # THE LABEL IS THE NAME. A declared node has no path to shorten and no
+      # extension to set small -- what it is called is all there is, and it
+      # is what a config matches on.
+      (each name (declared file)
+        (array/push nodes {:name name :label name :ours true}))
+      (array/push nodes {:name (node-name (file :rel))
+                         :label (node-label (file :rel))
+                         :ours true})))
   # Externals after our own files, so the generated DOT reads ours-then-theirs.
   (each name (sorted (keys externals))
     (array/push nodes {:name name :label name :ours false}))

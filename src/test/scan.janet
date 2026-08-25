@@ -13,6 +13,7 @@
 (import ../visualize/parsers/html :as html)
 (import ../visualize/parsers/css :as css)
 (import ../visualize/parsers/javascript :as js)
+(import ../visualize/parsers/visualize-lang :as vz)
 (import ./harness :as t)
 
 (defn- swift [text] (parser/run swift/spec text "T.swift"))
@@ -281,3 +282,38 @@ const fs = require('fs')
   # A COMMENTED-OUT IMPORT IS NOT ONE.
   (t/is= [] (imports `/* @import "off.css"; */`))
   (t/is= ["on"] (imports `/* off */ @import "on.css";`)))
+
+(t/test "a .visualize file is a graph, not a node"
+  (defn read-it [text] ((vz/spec :parse) text "demo.visualize"))
+
+  (def got (read-it ``
+auth  the login service
+    database
+    crypto
+
+database  where things are kept
+    disk
+``))
+  # EVERY LABEL MENTIONED IS A NODE, including one that never opens a block
+  # of its own -- `disk` is named under `database` and nothing else.
+  (t/is= ["auth" "database" "crypto" "disk"] (got :nodes))
+  (t/is= [["auth" "database"] ["auth" "crypto"] ["database" "disk"]]
+         (got :edges))
+
+  # The description after a label is read but not drawn, so a label with one
+  # and a label without produce the same node.
+  (t/is= ["a" "b"] ((read-it "a  some prose\n    b\n") :nodes))
+  (t/is= ["a" "b"] ((read-it "a\n    b\n") :nodes))
+
+  # A comment is not a block, and an indented line with no block above it is
+  # a dependency of nothing rather than of whatever came before the comment.
+  (t/is= [] ((read-it "# just a note\n") :nodes))
+  (t/is= [] ((read-it "    orphan\n") :edges))
+
+  # A label depending on itself says nothing, and is not drawn.
+  (t/is= [] ((read-it "a  x\n    a\n") :edges))
+
+  # A block runs until the next heading: a blank line inside one does not
+  # end it.
+  (t/is= [["a" "b"] ["a" "c"]]
+         ((read-it "a  x\n    b\n\n    c\n") :edges)))
