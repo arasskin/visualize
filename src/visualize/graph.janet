@@ -14,6 +14,7 @@
 # write without touching the server.
 
 (import ./select)
+(import ./names)
 (import ./layout)
 
 # THE ONE SPELLING of the file this program writes into the directory it is
@@ -84,7 +85,23 @@
                  {:nodes (map (fn [node]
                                 (if-let [short (select/alias-label (state :aliases)
                                                                    (node :name))]
-                                  (merge node {:label (string/join (string/split "." short) ".\n")})
+                                  # THE EXTENSION KEEPS ITS OWN ROW. This
+                                  # rebuilds the label from the aliased
+                                  # name, and splitting the whole thing on
+                                  # dots would turn `~.color.janet` into
+                                  # three equal segments -- putting the
+                                  # extension back into the name at full
+                                  # size, which is what it was just taken
+                                  # out of. Held aside and re-appended with
+                                  # its leading dot, the marker
+                                  # `label-markup` looks for.
+                                  (merge node
+                                         {:label
+                                          (let [cut (names/stem short)
+                                                ext (names/extension short)
+                                                rows (string/join
+                                                       (string/split "." cut) ".\n")]
+                                            (if ext (string rows "\n." ext) rows))})
                                   node))
                               (folded :nodes))})))
       # The label carries the line count when (lines) asked for it. Done

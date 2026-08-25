@@ -161,25 +161,46 @@
 # a line -- see `label-markup`.
 (def- gap-size 4)
 
-(defn- label-markup
-  ``A node's label as HTML-like markup, so its last row can be smaller.
+(defn- small-row [text]
+  (string "<BR/><FONT POINT-SIZE=\"" count-size "\">" (escaped-html text) "</FONT>"))
 
-  Returns nil when the label has no count on it -- one row, or a name that is
-  not a number -- and the caller prints the ordinary quoted label instead.``
+(defn- label-markup
+  ``A node's label as HTML-like markup, so its trailing rows can be smaller.
+
+  TWO KINDS OF SMALL ROW, and a node may carry either, both or neither. A
+  row that is all digits is the LINE COUNT; a row starting with a dot is the
+  file's EXTENSION. Both are facts ABOUT the file rather than parts of its
+  name, so both are set at the same small size and both sit below the gap.
+
+  The extension is shown because it is part of the node name now -- dropping
+  it merged `visualize` with `visualize.conf` -- and it is set small because
+  a column of `.janet` down every box is noise once it has been read once.
+
+  Returns nil when there is no small row to make, and the caller prints the
+  ordinary quoted label instead.``
   [label]
   (def rows (string/split "\n" (string label)))
-  (when (and (> (length rows) 1)
-             (peg/match ~(* (some (range "09")) -1) (last rows)))
-    (def name (slice rows 0 -2))
-    # A THIN ROW BETWEEN THE NAME AND THE COUNT. They are two different kinds
-    # of thing -- what the file is called, and a fact about it -- and pressed
-    # together they read as one more row of the name. An empty line break at a
-    # few points is the whole gap: it costs that many points of height and
+  # Taken off the end in the order they were put on: the count is last, the
+  # extension before it.
+  (var body (array ;rows))
+  (var count nil)
+  (var ext nil)
+  (when (and (> (length body) 1)
+             (peg/match ~(* (some (range "09")) -1) (last body)))
+    (set count (array/pop body)))
+  (when (and (> (length body) 1)
+             (string/has-prefix? "." (last body)))
+    (set ext (array/pop body)))
+  (when (or count ext)
+    # A THIN ROW BETWEEN THE NAME AND WHAT FOLLOWS. They are different kinds
+    # of thing -- what the file is called, and facts about it -- and pressed
+    # together they read as one more row of the name. An empty line break at
+    # a few points is the whole gap: it costs that many points of height and
     # says the two are not the same thing.
-    (string (string/join (map escaped-html name) "<BR/>")
+    (string (string/join (map escaped-html body) "<BR/>")
             "<BR/><FONT POINT-SIZE=\"" gap-size "\"> </FONT>"
-            "<BR/><FONT POINT-SIZE=\"" count-size "\">"
-            (escaped-html (last rows)) "</FONT>")))
+            (if ext (small-row ext) "")
+            (if count (small-row count) ""))))
 
 (defn- hatch-id
   ``The id of the hatch drawn in this ink. One pattern per colour, named after

@@ -249,15 +249,19 @@
   newlines and the renderer splits on them (see layout/svg.janet). The
   DOTS, MATCHING THE NODE NAME. The label used to show the path with its
   slashes while the node answered to something else entirely; now both are
-  the dotted form, so what you read is what you type into the config.``
+  the dotted form, so what you read is what you type into the config.
+
+  THE EXTENSION IS ITS OWN ROW, marked with a leading dot so the renderer
+  can spot it and set it small -- the same size as the line count, since it
+  is the same kind of thing: a fact about the file rather than part of what
+  the file is called. It has to be SHOWN because it is now part of the node
+  name (see names.janet), and it has to be QUIET because a column of `.janet`
+  repeated forty times is noise on every box.``
   [rel]
-  (def without-ext
-    (if-let [dot (last (string/find-all "." rel))]
-      (if (> dot (or (last (string/find-all "/" rel)) -1))
-        (string/slice rel 0 dot)
-        rel)
-      rel))
-  (string/join (string/split "/" without-ext) ".\n"))
+  (def cut (names/stem rel))
+  (def ext (names/extension rel))
+  (def name (string/join (string/split "/" cut) ".\n"))
+  (if ext (string name "\n." ext) name))
 
 (defn build
   ``Turn parsed files into a graph: nodes, edges, and each file's size.
@@ -302,6 +306,28 @@
   (def ours @{})
   (each file live (put ours (node-name (file :rel)) true))
 
+  # WHAT AN IMPORT'S SPELLING MEANS. A node name keeps its extension so that
+  # `visualize` and `visualize.conf` stay two nodes -- but an import rarely
+  # writes one: `./store` means store.js, `(import ./color)` means
+  # color.janet. So parsers answer with the STEM (see names.janet) and this
+  # is what joins a stem to the file it names.
+  #
+  # AMBIGUITY IS DROPPED RATHER THAN GUESSED, the same rule `resolved` uses
+  # for declared names just above. `external-src/janet/janet.c` and
+  # `janet.h` share the stem `external-src.janet.janet`, and nothing in an
+  # import that says only `janet` can choose between them -- so that stem
+  # resolves to nothing and the reference stays an external rather than
+  # picking whichever file was read first. Losing an edge says nothing
+  # false; inventing one does.
+  (def by-stem @{})
+  (each file live
+    (def full (node-name (file :rel)))
+    (def key (names/stem full))
+    (put by-stem key (array/push (or (by-stem key) @[]) full)))
+  (def from-stem @{})
+  (eachp [key names] by-stem
+    (when (= 1 (length names)) (put from-stem key (first names))))
+
   (def sizes @{})
   (each file live (put sizes (node-name (file :rel)) (file :lines)))
 
@@ -334,9 +360,11 @@
     # the real file it had failed to find. Two kinds of string, one rule,
     # and no way to tell from here which kind had arrived.
     (each name (or (file :imports) [])
+      # A stem the tree can place becomes that file; a name that IS a node
+      # (an import that wrote the extension) is taken as it stands.
+      (def target (or (from-stem name) (and (ours name) name)))
       (cond
-        # A name the tree holds is an edge to that file.
-        (ours name) (unless (= name here) (put pairs [here name] true))
+        target (unless (= target here) (put pairs [here target] true))
         # Anything else is a genuine external -- `fmt`, `Foundation`,
         # `@wterm/core` -- and becomes a node so it can be grouped and
         # hidden like any other.

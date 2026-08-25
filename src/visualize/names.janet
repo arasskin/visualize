@@ -21,6 +21,18 @@
 # graph -- a path run through a dotted-module rule, its extension read as a
 # package separator -- beside the real file it had failed to match.
 
+(defn stem
+  ``A path with its extension taken off, or unchanged if it has none.
+
+  Only a FINAL dot after the last slash counts, so `a.b/c` keeps its dot and
+  `./x.js` loses one.``
+  [rel]
+  (if-let [dot (last (string/find-all "." rel))]
+    (if (> dot (or (last (string/find-all "/" rel)) -1))
+      (string/slice rel 0 dot)
+      rel)
+    rel))
+
 (defn resolve-relative
   ``A relative import specifier, resolved against the importing file's path.
 
@@ -28,7 +40,12 @@
   node the scan already made for that file. Without this the specifier is
   flattened as written and becomes a node nothing else refers to.
 
-  Any extension on the specifier is dropped, since node names carry none.``
+  THE EXTENSION IS DROPPED, so `./a.js` and `./a` -- the two ways the same
+  import gets written -- come out identical. That makes this a STEM rather
+  than a node name, which is deliberate: node names keep their extension
+  (see `node-name`) and an import usually does not say it, so the stem is
+  the only spelling both sides can agree on. `build` in scan.janet resolves
+  it against the file list.``
   [from-rel module]
   (def parts (string/split "/" from-rel))
   # Start in the importing file's DIRECTORY, hence dropping its own name.
@@ -38,14 +55,7 @@
       (or (= piece ".") (= piece "")) nil
       (= piece "..") (when (> (length stack) 0) (array/pop stack))
       (array/push stack piece)))
-  (def joined (string/join stack "/"))
-  # Drop a trailing extension the same way `node-name` does, so `./a.js` and
-  # `./a` land on the same node.
-  (if-let [dot (last (string/find-all "." joined))]
-    (if (> dot (or (last (string/find-all "/" joined)) -1))
-      (string/slice joined 0 dot)
-      joined)
-    joined))
+  (stem (string/join stack "/")))
 
 (defn safe-name
   ``A path or module specifier as a node name: separators become dots.
@@ -82,42 +92,61 @@
     (set out (string/replace-all ".." "." out)))
   (string/trim out "."))
 
-(defn node-name
-  ``A file's path as its DOT node name.
-
-  `OttoClip/CartWebView.swift` -> `OttoClip.CartWebView`. DOT identifiers
-  cannot carry a separator unquoted, so the path is flattened to dots -- the
-  same shape the labels wear and the config is written in, which is what
-  makes `(hide OttoClip.)` a thing you can type after reading the drawing.
-
-  THE FLATTENING IS LOSSY and deliberately so: `OttoClip.Cart` could have been
-  `OttoClip/Cart.swift` or `OttoClip.Cart.swift`, and nothing in the name says
-  which. Everything that needs the real path therefore works FORWARD from the
-  file list rather than backward from a node name.``
+(defn extension
+  "A path's extension without the dot, or nil when it has none."
   [rel]
-  (def without-ext
-    (if-let [dot (last (string/find-all "." rel))]
-      (if (> dot (or (last (string/find-all "/" rel)) -1))
-        (string/slice rel 0 dot)
-        rel)
-      rel))
-  (safe-name without-ext))
+  (def cut (stem rel))
+  (when (not= cut rel) (string/slice rel (+ 1 (length cut)))))
+
+(defn node-name
+  ``A file's path as its DOT node name, EXTENSION AND ALL.
+
+  `OttoClip/CartWebView.swift` -> `OttoClip.CartWebView.swift`. DOT
+  identifiers cannot carry a separator unquoted, so the path is flattened to
+  dots -- the same shape the labels wear and the config is written in, which
+  is what makes `(hide OttoClip.)` a thing you can type after reading the
+  drawing.
+
+  THE EXTENSION STAYS because dropping it merged files that are not the same
+  file. This repo has `visualize` (the launcher) beside `visualize.conf`
+  (the drawing's own source), and they answered to one node; janet's vendored
+  source is worse, with `janet`, `janet.c` and `janet.h` collapsing to a
+  single point that claimed to be all three. A graph that silently unions
+  distinct files is lying about the thing it exists to show.
+
+  What that costs is that an import must still find its file: `./store`
+  names `store.js` and does not say so. `build` in scan.janet keeps a map
+  from stem to full name for exactly that, so the matching is done where the
+  file list is known rather than by guessing here.``
+  [rel]
+  (safe-name rel))
 
 (defn from-path
-  ``A PATH a file referenced, as the node name it means.
+  ``A PATH a file referenced, as the STEM of the node it means.
 
   `from` is the referencing file, repo-relative, so `./b` and `../c/d`
   resolve against the right directory. A path that starts at the repo root
   (`external-src/janet/janet.c`) is taken as it stands.
 
   This is what a parser whose imports are PATHS calls -- javascript, css,
-  html, janet, bash. The extension goes, the separators become dots, and
-  what comes back is the same name the file itself would be given, which is
-  what makes the two match.``
+  html, janet, bash.
+
+  A STEM, not a finished node name, and the difference matters. Node names
+  keep their extension so that `visualize` and `visualize.conf` stay two
+  nodes; an import mostly does NOT write the extension -- `./store` means
+  store.js -- so the two spellings only meet with it removed. `build` in
+  scan.janet holds the map from stem to real node and does the joining
+  there, where the file list is known.``
   [from path]
-  (if (string/has-prefix? "." path)
-    (safe-name (resolve-relative from path))
-    (node-name path)))
+  # THE EXTENSION COMES OFF WHILE SLASHES STILL MARK THE BOUNDARY. Flatten
+  # first and `src/web/graph.js` is `src.web.graph.js`, whose "extension" is
+  # `js` by the same rule that makes `graph` look like a directory -- taking
+  # it off then gives `src.web.graph`, but taking it off after another dot
+  # has been introduced eats a real segment. `resolve-relative` already
+  # returns a stem; a rooted path is stemmed here.
+  (safe-name (if (string/has-prefix? "." path)
+               (resolve-relative from path)
+               (stem path))))
 
 (defn from-module
   ``A MODULE NAME a file imported, as the node name it means.
@@ -128,7 +157,8 @@
   name is not relative to anything.
 
   This is what a parser whose imports are NAMES calls -- python, go, swift.
-  A name that matches no file in the tree stays an external, which is the
-  right answer for `fmt` and `Foundation`.``
+  A module name carries no extension to begin with, so what comes back is
+  already a stem and is looked up the same way. A name matching no file
+  stays an external, which is right for `fmt` and `Foundation`.``
   [module]
   (safe-name (string/replace-all "." "/" module)))

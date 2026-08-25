@@ -180,9 +180,9 @@ const fs = require('fs')
   # Import specifiers are the hard cases: `github.com/lib/pq`, `./store`,
   # `@scope/pkg` -- and a directory called `demo-api`, whose hyphen is part
   # of one name rather than a separator between two.
-  (t/is= "demo-api.worker" (scan/node-name "demo-api/worker.js")
+  (t/is= "demo-api.worker.js" (scan/node-name "demo-api/worker.js")
          "a hyphen is part of the name, not a separator")
-  (t/is= "OttoClip.CartWebView" (scan/node-name "OttoClip/CartWebView.swift"))
+  (t/is= "OttoClip.CartWebView.swift" (scan/node-name "OttoClip/CartWebView.swift"))
   (t/is= "github.com.lib.pq" (scan/safe-name "github.com/lib/pq"))
   (t/is= "store" (scan/safe-name "./store")
          "a leading ./ leaves no punctuation behind")

@@ -119,7 +119,7 @@
   (spit (string dir "/b.py") "x = 222222\n")
   # A FRESH SCAN is what the server now does per draw, so the edit is caught
   # by the drawing that follows it rather than by a later one.
-  (t/is= ["b"] (fresh-in (scan/scan dir)))
+  (t/is= ["b.py"] (fresh-in (scan/scan dir)))
   (t/is= [] (fresh-in (scan/scan dir)) "and is not shown twice")
   (clear))
 
@@ -154,7 +154,7 @@
 
   # A FILE THAT DID NOT EXIST is new to this drawing.
   (spit (string dir "/c.py") "import a\n")
-  (t/is= ["c"] (flashed) "a new file flashes")
+  (t/is= ["c.py"] (flashed) "a new file flashes")
 
   (t/is= [] (flashed) "and stops once it has been seen")
 
@@ -162,7 +162,7 @@
   # file and the watcher redraws a moment later. mtime counts whole seconds,
   # so the size is what catches this.
   (spit (string dir "/b.py") "x = 222222222\n")
-  (t/is= ["b"] (flashed) "an edit inside one second still flashes")
+  (t/is= ["b.py"] (flashed) "an edit inside one second still flashes")
 
   # A REMOVED FILE flashes nothing -- it is not there to flash, and the
   # nodes that remain have not moved.
