@@ -44,6 +44,10 @@ function loadCore() {
    is what the pane uses to decide whether to follow the bottom. */
 export function makeTerminal(element, options = {}) {
   const onPaint = options.onPaint || (() => {});
+  // WHAT THE KEYBOARD PRODUCED, handed straight to whoever owns the pty.
+  // See `onData` below: this is wterm's documented way of getting input out,
+  // and taking it means taking its whole key model rather than half of one.
+  const onData = options.onData || (() => {});
 
   let term = null;          // the WTerm, once its core has loaded
   let ready = false;        // ...and once its init() has finished
@@ -78,6 +82,20 @@ export function makeTerminal(element, options = {}) {
     core.init(cols, rows);
     term = new WTerm(element, {
       core, cols, rows,
+      // THE KEYBOARD IS WTERM'S, which is how the package is meant to be
+      // used. `onData` is the documented outlet: every keystroke, paste and
+      // mouse report the terminal produces arrives here as the bytes a pty
+      // expects, and this hands them on.
+      //
+      // WHAT WE WERE DOING INSTEAD was translating KeyboardEvents ourselves
+      // in a table beside this file. It was close, and close is what broke
+      // claude: a program can turn on APPLICATION CURSOR KEY MODE, after
+      // which an arrow is `\x1bOA` rather than `\x1b[A`, and only the
+      // emulator knows the mode is on. Our table could not -- it never
+      // looked at the terminal -- so it sent the wrong four bytes for every
+      // arrow press and the display came apart. The same table also had no
+      // bracketed paste, no IME composition, and no focus reporting.
+      onData,
       // NO AUTORESIZE. The pane measures its own body and tells us -- it has
       // to, because it is the thing that knows about the panel's chrome and
       // it must tell the SERVER the same number it tells the emulator, or the
@@ -143,6 +161,13 @@ export function makeTerminal(element, options = {}) {
       if (ready) { term.write('\x1bc'); paint(); }
     },
 
+    // TAKE THE KEYBOARD. wterm listens on a hidden textarea rather than on
+    // the element, so focusing the element directly is what left its input
+    // handler constructed and deaf -- which is how a key table came to live
+    // in this page at all. Routed through wterm, which knows where its own
+    // listeners are.
+    focus() { if (ready) term.focus(); else element.focus(); },
+
     get rows() { return rows; },
     get cols() { return cols; },
 
@@ -176,55 +201,23 @@ export function makeTerminal(element, options = {}) {
 }
 
 // -- keyboard ----------------------------------------------------------------
-// Turning a KeyboardEvent into the bytes a terminal program expects. Kept
-// here rather than taken from wterm's input handler: that one listens to an
-// element and owns the keyboard, and this page's keyboard is shared -- alt
-// walks the tabs, cmd-f opens the find bar, and a terminal gets what is left.
-// See the handler in panes.js, which decides that and calls this.
-
-export function keyToBytes(event) {
-  const k = event.key;
-
-  // The command key belongs to the browser, not the program: no terminal on a
-  // Mac sends Cmd-anything to the pty. Claiming these -- and the keydown
-  // handler preventDefaults whatever this claims -- is what silently ate
-  // Cmd-V, because cancelling that keydown cancels the paste it triggers.
-  if (event.metaKey) return '';
-
-  // Ctrl-letter becomes the control code, which is how Ctrl-C reaches the
-  // program as an interrupt rather than as the letter C.
-  if (event.ctrlKey && k.length === 1) {
-    const upper = k.toUpperCase();
-    if (upper >= 'A' && upper <= 'Z') {
-      return String.fromCharCode(upper.charCodeAt(0) - 64);
-    }
-  }
-
-  // ALT IS META, sent as an ESC prefix -- which is what a terminal does with
-  // it and what readline expects for alt-b, alt-f and the rest.
-  if (event.altKey && k.length === 1) return '\x1b' + k;
-
-  switch (k) {
-    case 'Enter': return '\r';
-    case 'Backspace': return '\x7f';
-    // SHIFT-TAB IS ITS OWN SEQUENCE, not a tab with a modifier: a program
-    // that completes forward on Tab walks BACKWARD on this one.
-    case 'Tab': return event.shiftKey ? '\x1b[Z' : '\t';
-    case 'Escape': return '\x1b';
-    case 'ArrowUp': return '\x1b[A';
-    case 'ArrowDown': return '\x1b[B';
-    case 'ArrowRight': return '\x1b[C';
-    case 'ArrowLeft': return '\x1b[D';
-    case 'Home': return '\x1b[H';
-    case 'End': return '\x1b[F';
-    case 'PageUp': return '\x1b[5~';
-    case 'PageDown': return '\x1b[6~';
-    case 'Delete': return '\x1b[3~';
-    case 'Insert': return '\x1b[2~';
-    default: break;
-  }
-
-  // Anything that is one character is that character; anything else is a key
-  // this page has no byte for, and sending nothing is better than guessing.
-  return k.length === 1 ? k : '';
-}
+//
+// THERE IS NO KEY TABLE HERE ANY MORE, and that is the point of this file.
+//
+// What stood here turned a KeyboardEvent into pty bytes: arrows, Home, the
+// function keys, ctrl-letter, alt-as-meta. It was written when the emulator
+// was ours and it kept working by inertia after the emulator became
+// Ghostty's -- wterm's own InputHandler was constructed all along and simply
+// never received a keystroke, because the pane focused the screen element
+// rather than the textarea wterm listens on.
+//
+// It broke claude. A full-screen program sets APPLICATION CURSOR KEY MODE
+// and from then on an arrow is `ESC O A`, not `ESC [ A`. Which one is right
+// is a fact about the TERMINAL, not about the key, and a table that never
+// asks the terminal cannot know it. Every arrow went out wrong and the
+// screen came apart. Bracketed paste, IME composition and focus reporting
+// were missing for the same reason: they are all modes the emulator tracks.
+//
+// wterm reads all of them off the bridge and reports the result through
+// `onData` (see `makeTerminal`). Using it is what the package documents, and
+// it is one fewer thing here that can be subtly wrong.

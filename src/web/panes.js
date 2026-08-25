@@ -14,7 +14,7 @@
 // than imported: the config panel is a panel, so this would import the editor
 // and the editor would import this.
 
-import { makeTerminal, keyToBytes } from './term.js';
+import { makeTerminal } from './term.js';
 import { pane, fit, isTouched } from './graph.js';
 import { changed, renders, renderNow } from './state.js';
 
@@ -309,6 +309,11 @@ export function makeTerminalPane(root, prefix) {
       paintedLines = lines;
       if (grew && following) screen.scrollTop = screen.scrollHeight;
     },
+    // EVERYTHING THE KEYBOARD PRODUCED, already in the bytes the program
+    // expects -- arrows in whichever form the current cursor-key mode calls
+    // for, a paste wrapped in its brackets, a composed character, a mouse
+    // report. `sendInput` is hoisted, and this only runs on a keystroke.
+    onData: (bytes) => { sendInput(bytes); },
   });
   // -- the stall detector ----------------------------------------------------
   // The server side was exonerated at 7,900 reports/s with 16ms worst-case
@@ -660,7 +665,7 @@ export function makeTerminalPane(root, prefix) {
       setName(out.argv);
       setState('');
       startPolling();
-      screen.focus();
+      term.focus();
     } catch (e) {
       setState('failed: ' + e.message);
     }
@@ -669,19 +674,30 @@ export function makeTerminalPane(root, prefix) {
   // Keystrokes go to the pty as bytes. The screen is focusable (tabindex in the
   // HTML) so this needs no input element -- a real one would fight the emulator
   // over what the cursor means.
-  screen.addEventListener('keydown', (event) => {
-    // Let copy through: a terminal you cannot copy out of is a terminal you
-    // cannot use. Everything else belongs to the program.
-    if ((event.metaKey || event.ctrlKey) && event.key === 'c'
-        && window.getSelection().toString()) {
-      return;
-    }
-    const bytes = keyToBytes(event);
-    if (!bytes) return;
-    event.preventDefault();
-    event.stopPropagation();
-    sendInput(bytes);
+  // A CLICK ON THE SCREEN HANDS THE KEYBOARD BACK. The element is focusable
+  // (tabindex in the HTML, so tabbing to a pane works), and focusing it is
+  // exactly what takes the keyboard AWAY from the textarea wterm listens on
+  // -- click the terminal to type in it and typing would stop. wterm does
+  // not claim mousedown for this, so the pane does.
+  //
+  // On mousedown rather than click, so the focus lands before the browser
+  // moves it, and not when a selection is being dragged out: selecting text
+  // to copy should not be typing.
+  screen.addEventListener('mousedown', () => {
+    setTimeout(() => {
+      if (!window.getSelection().toString()) term.focus();
+    }, 0);
   });
+
+  // NO KEY HANDLER HERE. wterm listens on its own hidden textarea and reports
+  // what the keyboard produced through `onData` (wired at makeTerminal
+  // below), which is how the package is meant to be used -- and the only way
+  // to get the modes right, since which bytes an arrow means depends on
+  // whether the program has turned on application cursor keys.
+  //
+  // WHAT IT COSTS is that the screen must not steal the focus wterm needs.
+  // `screen.focus()` used to be how a pane took the keyboard; it now hands
+  // focus to the terminal, which puts it on the textarea.
 
   // Type, and draw whatever came back.
   //
@@ -831,7 +847,7 @@ export function makeTerminalPane(root, prefix) {
     minWidth: 360, minHeight: 200,
     width: 'min(52rem, 94vw)', height: '24rem',
     onOpen: async () => {
-      screen.focus();
+      term.focus();
       // A beat, so the panel's first-open default size has actually been laid
       // out -- measure() in the same tick as the opening click reads a
       // half-sized body and starts the session ~30 columns wide.
@@ -1771,8 +1787,13 @@ export function openTerminal() {
 // pane focused its screen and every ctrl-t after the first went to the
 // shell -- one terminal, and no way to ask for another without clicking
 // away first. Cmd is the modifier to spend on it because the emulator
-// already refuses it outright (see keyToBytes), so nothing is taken from
-// the program that it ever had.
+// already refuses it outright (wterm's input handler returns on a bare cmd
+// without sending anything), so nothing is taken from the program that it
+// ever had.
+//
+// `activeElement` still answers this correctly now that the keyboard lives
+// on wterm's textarea: that textarea is a child of the screen, so it is
+// inside `.term` like any other part of a pane.
 document.getElementById('term-new')
   .addEventListener('click', () => { openTerminal(); });
 
