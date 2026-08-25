@@ -773,6 +773,42 @@ export function makeTerminalPane(root, prefix) {
   // bracketed paste, and strips ESC out of the payload first so a clipboard
   // cannot close the bracket early and have the rest read as commands.
 
+  // THE WHEEL ON A FULL-SCREEN PROGRAM SENDS PAGE UP AND PAGE DOWN.
+  //
+  // The alternate screen has no scrollback -- vim, less and claude paint one
+  // screen and scroll it themselves -- so there is nothing here for the
+  // wheel to move, and without this it does nothing at all. That is what
+  // happens in claude today: it asks for mouse reports with `?1003h`, which
+  // ghostty-vt does not implement (see tools/vendor-wterm), so wterm is told
+  // there is no tracking and sends nothing.
+  //
+  // PAGE KEYS, NOT ARROWS, and the difference is the whole reason this is
+  // safe. xterm's own Alternate Scroll (mode 1007) sends cursor up/down, and
+  // in claude an arrow is a SELECTION key: it walks input history, moves the
+  // highlight in a file picker, changes which permission button is chosen.
+  // A wheel roll that quietly moved a selection would be an action nobody
+  // asked for. Page Up and Page Down are viewport keys everywhere -- no
+  // program treats them as a choice -- so the worst case is that a program
+  // ignores them.
+  //
+  // ONLY WHEN THE PROGRAM IS NOT ASKING FOR THE WHEEL ITSELF. With tracking
+  // on, wterm reports the event and calls preventDefault, and this never
+  // runs: a program that wants wheel reports gets them. This is the fallback
+  // for the case where it wants them and cannot have them.
+  screen.addEventListener('wheel', (event) => {
+    // WTERM GOES FIRST -- its listener is on this same element and was added
+    // at init -- and it calls preventDefault when it has reported the event.
+    // So a cancelled event is one the program already received, and sending
+    // page keys as well would be reporting the same notch twice.
+    if (event.defaultPrevented) return;
+    if (!term.altScreen) return;          // ordinary screen: the pane scrolls
+    event.preventDefault();
+    // One page per notch, in whichever direction the wheel turned. deltaMode
+    // 1 is already lines; 0 is pixels, and either way the sign is what
+    // matters -- a page is a page however far the finger travelled.
+    sendInput(event.deltaY < 0 ? '\x1b[5~' : '\x1b[6~');
+  }, { passive: false });
+
   // THE WHEEL IS WTERM'S TOO, for the reason the keyboard is: it listens on
   // the same element this pane does, so a wheel event fired both handlers
   // and a mouse-tracking program scrolled twice. Same shape of bug as the
