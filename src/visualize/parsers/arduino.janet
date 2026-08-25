@@ -112,6 +112,7 @@
    #
    # Anchored to the line start so an include written inside a macro body or
    # a string cannot be read as one of its own.
+   :imports-are :paths
    :imports ~(* ,line-start ,space "#" ,space "include" ,space
                 (+ (* "<" (<- (some (if-not (+ ">" "\n") 1))) ">")
                    (* `"` (<- (some (if-not (+ `"` "\n") 1))) `"`)))

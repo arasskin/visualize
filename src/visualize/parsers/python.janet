@@ -41,6 +41,7 @@
    # part of `ident`, so the pattern simply fails and the line is skipped.
    # Resolving it would mean knowing the importing file's package, which is
    # the one thing a per-file scan does not have.
+   :imports-are :modules
    :imports ~(* ,line-start
                 (any (set " \t"))
                 (+ (* "from" ,space (<- ,dotted) ,space "import")

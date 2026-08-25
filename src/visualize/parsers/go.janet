@@ -39,6 +39,7 @@
    # Anchoring to the line start is what keeps a quoted string elsewhere in
    # the file from being read as an import; the noise pass has already blanked
    # those, so this is belt and braces.
+   :imports-are :modules
    :imports ~(* ,line-start ,space
                 (opt (* "import" ,space))
                 (opt (* (+ "_" "." (some (+ (range "AZ") (range "az")

@@ -14,6 +14,8 @@
 # to one. `url(#fragment)` is a reference to an SVG filter in the same
 # document and names no file at all.
 
+(import ../names)
+
 (def- inner '(some (if-not (+ (set "()\"'") -1) 1)))
 
 # A url() takes its argument quoted or bare, and whitespace either side.
@@ -30,7 +32,7 @@
                      (+ (* `"` (<- (any (if-not `"` 1))) `"`)
                         (* "'" (<- (any (if-not "'" 1))) "'"))))
 
-(defn- parse [text _path]
+(defn- parse [text path]
   # Comments out first, or a commented-out @import is a dependency. CSS has
   # only the one comment form, and it does not nest.
   (def code (peg/replace-all ~(* "/*" (any (if-not "*/" 1)) "*/") " " text))
@@ -48,7 +50,12 @@
                    (not (string/has-prefix? "data:" ref))))
             found))
 
-  {:imports (distinct
+  # NAMES, NOT PATHS. Every other spec hands `run` its captures and the
+  # engine converts them; a :parse spec answers `run`'s whole job itself, so
+  # it converts its own. What comes back is the dotted node name, which is
+  # what the graph builder compares against the tree.
+  {:imports (map |(names/from-path path $)
+                 (distinct
               (map (fn [ref]
                      # Trimmed: `url( spaced.png )` is legal, and the spaces
                      # are the syntax rather than part of the name.
@@ -69,7 +76,7 @@
                        (string/has-prefix? "/" clean) (string "./" (string/slice clean 1))
                        (string/has-prefix? "." clean) clean
                        (string "./" clean)))
-                   keep))})
+                   keep)))})
 
 (def spec
   {:name "css"

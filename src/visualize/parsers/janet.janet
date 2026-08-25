@@ -37,6 +37,7 @@
    # `(import ./x)`, `(import ./x :as y)`, `(use ./x)`. Anchored to a line
    # start with only whitespace and the open paren before it: an `import`
    # deeper in an expression is not a top-level dependency.
+   :imports-are :paths
    :imports ~(* ,line-start ,space
                 "(" ,space (+ "import" "use") (some (set " \t"))
                 (opt "\"")

@@ -19,6 +19,7 @@
 # string work on one core and is not worth splitting.
 
 (import ./parser)
+(import ./names)
 (import ./parsers/arduino :as arduino)
 (import ./parsers/visualize-bash :as bash)
 (import ./parsers/css :as css)
@@ -231,87 +232,13 @@
         (launch))
       out)))
 
-(defn resolve-relative
-  ``A relative import specifier, resolved against the importing file's path.
-
-  `test/scan.janet` importing `../visualize/color` gives `visualize/color`, which is the
-  node the scan already made for that file. Without this the specifier is
-  flattened as written and becomes a node nothing else refers to.
-
-  Any extension on the specifier is dropped, since node names carry none.``
-  [from-rel module]
-  (def parts (string/split "/" from-rel))
-  # Start in the importing file's DIRECTORY, hence dropping its own name.
-  (def stack (array ;(slice parts 0 (max 0 (- (length parts) 1)))))
-  (each piece (string/split "/" module)
-    (cond
-      (or (= piece ".") (= piece "")) nil
-      (= piece "..") (when (> (length stack) 0) (array/pop stack))
-      (array/push stack piece)))
-  (def joined (string/join stack "/"))
-  # Drop a trailing extension the same way `node-name` does, so `./a.js` and
-  # `./a` land on the same node.
-  (if-let [dot (last (string/find-all "." joined))]
-    (if (> dot (or (last (string/find-all "/" joined)) -1))
-      (string/slice joined 0 dot)
-      joined)
-    joined))
-
-(defn safe-name
-  ``A path or module specifier as a node name: separators become dots.
-
-  `src/visualize/color.janet` -> `src.visualize.color`, `github.com/lib/pq`
-  -> `github.com.lib.pq`, `./store` -> `store`.
-
-  ONE SPELLING EVERYWHERE, which is the point. This used to flatten to
-  UNDERSCORES -- `src_visualize_color` -- while the label showed
-  `src/visualize/color` and the config was written `src.visualize.color`, so
-  a path had three forms and only one of them was ever visible. The dot is
-  the one the config already used, it survives a DOT identifier as long as
-  the name is quoted (which `layout/to-dot` does), and it is what a reader
-  types after seeing the picture.
-
-  Leading and trailing dots are trimmed and runs collapsed, so `./store` and
-  `@scope/pkg` do not come back wearing punctuation they never had.
-
-  HYPHENS SURVIVE. A directory called `demo-api` is one name, not two: with
-  the hyphen swept into a dot it became `demo.api.worker`, which reads as a
-  directory `demo` that does not exist and breaks the prefix a config would
-  write. The old underscore flattening had the same bug in reverse (it made
-  `demo-api_worker`, which graphviz then rejected) -- quoting the name is
-  what lets the hyphen simply stay.``
-  [text]
-  (def dotted
-    (string
-      (peg/replace-all ~(if-not (+ (range "AZ") (range "az") (range "09") "_" "-" ".") 1)
-                       "." text)))
-  # `./store` becomes `..store` on the way through; collapse and trim so the
-  # name is the shape the config language expects.
-  (var out dotted)
-  (while (string/find ".." out)
-    (set out (string/replace-all ".." "." out)))
-  (string/trim out "."))
-
-(defn node-name
-  ``A file's path as its DOT node name.
-
-  `OttoClip/CartWebView.swift` -> `OttoClip.CartWebView`. DOT identifiers
-  cannot carry a separator unquoted, so the path is flattened to dots -- the
-  same shape the labels wear and the config is written in, which is what
-  makes `(hide OttoClip.)` a thing you can type after reading the drawing.
-
-  THE FLATTENING IS LOSSY and deliberately so: `OttoClip.Cart` could have been
-  `OttoClip/Cart.swift` or `OttoClip.Cart.swift`, and nothing in the name says
-  which. Everything that needs the real path therefore works FORWARD from the
-  file list rather than backward from a node name.``
-  [rel]
-  (def without-ext
-    (if-let [dot (last (string/find-all "." rel))]
-      (if (> dot (or (last (string/find-all "/" rel)) -1))
-        (string/slice rel 0 dot)
-        rel)
-      rel))
-  (safe-name without-ext))
+# THE NAMING RULES LIVE IN names.janet now, because the parsers need them
+# too and cannot import this file -- this one imports them. Re-exported here
+# so the many callers that already say `scan/node-name` keep working, and so
+# there is still one obvious place to look.
+(def resolve-relative names/resolve-relative)
+(def safe-name names/safe-name)
+(def node-name names/node-name)
 
 (defn node-label
   ``A file's label, wrapped a segment per line.
@@ -393,47 +320,28 @@
       (when-let [target (resolved name)]
         (unless (= target (file :rel))
           (put pairs [here (node-name target)] true))))
-    (each module (or (file :imports) [])
-      # An import naming a file we scanned is an internal edge; anything else
-      # is an external, and becomes a node so it can be grouped and hidden
-      # like any other.
-      #
-      # Both names go through `safe-name`, because an import specifier can
-      # carry anything a path can -- `github.com/lib/pq`, `./store`,
-      # `@scope/pkg` -- and a bare DOT identifier admits none of it.
-      (def as-node (safe-name module))
-      (def internal
-        (cond
-          # A RELATIVE import names a file, and which file depends on where
-          # the importing file sits. Resolved against that directory rather
-          # than flattened, or `../visualize/color` becomes the node `___visualize_color`
-          # -- a phantom external that nothing matches, instead of an edge to
-          # the visualize/color the project already has.
-          (string/has-prefix? "." module)
-          (safe-name (resolve-relative (file :rel) module))
-
-          # A SPECIFIER WITH A SLASH IN IT IS A PATH, and is named the way
-          # every other path is: extension off, separators to dots. The
-          # dotted-module rule below would read its extension as a package
-          # separator -- `external-src/janet/janet.c` becoming
-          # `external-src/janet/janet/c` -- which matches no file, so the
-          # build script's reference to janet.c invented an external that
-          # wore its extension while the real file beside it did not. That
-          # is the ONE node on this graph with a `.c` on the end, and this
-          # is why.
-          #
-          # `github.com/lib/pq` has slashes too and is not a file here; it
-          # simply matches nothing and stays an external, which is correct.
-          (string/find "/" module)
-          (node-name module)
-
-          # A DOTTED MODULE NAME: `visualize.color` is a path spelled in
-          # dots, so the dots are what separate its segments.
-          (safe-name (string/replace-all "." "/" module))))
+    # AN IMPORT IS ALREADY A NODE NAME. The parser converted it -- each one
+    # knows its own language, so the Janet spec resolved `./term/client`
+    # against this file's directory and the Python spec left `otto.store`
+    # alone (see names.janet and the :imports-are contract in parser.janet).
+    # Nothing here inspects the string.
+    #
+    # WHAT THIS REPLACES was a guess: no leading dot meant "dotted module",
+    # so every dot became a path separator. A path whose file had an
+    # extension -- `external-src/janet/janet.c`, which the build script
+    # really does name -- came out as `external-src/janet/janet/c`, matched
+    # nothing, and was invented as an external wearing its extension beside
+    # the real file it had failed to find. Two kinds of string, one rule,
+    # and no way to tell from here which kind had arrived.
+    (each name (or (file :imports) [])
       (cond
-        (ours internal) (unless (= internal here) (put pairs [here internal] true))
-        (do (put externals as-node true)
-            (unless (= as-node here) (put pairs [here as-node] true))))))
+        # A name the tree holds is an edge to that file.
+        (ours name) (unless (= name here) (put pairs [here name] true))
+        # Anything else is a genuine external -- `fmt`, `Foundation`,
+        # `@wterm/core` -- and becomes a node so it can be grouped and
+        # hidden like any other.
+        (do (put externals name true)
+            (unless (= name here) (put pairs [here name] true))))))
 
   (def nodes @[])
   (each file live

@@ -47,6 +47,7 @@
    # The `from` form skips whatever sits between the keyword and `from`
    # (braces, names, `* as ns`, `type`) without trying to understand it --
    # the graph wants the module, not the bindings.
+   :imports-are :paths
    :imports ~(+ (* ,line-start ,space
                    (+ "import" "export")
                    (+ (* (some (if-not (+ "from" "\n") 1)) "from" ,space)

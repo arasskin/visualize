@@ -20,7 +20,15 @@
 #              literal, so the :noise pass would erase the very thing the
 #              import pattern is looking for -- see `run` below.
 #   :declares  a PEG whose captures are the names this file DEFINES
-#   :imports   a PEG whose captures are the modules this file imports
+#   :imports   a PEG whose captures are what this file imports, in whatever
+#              form the language writes it
+#   :imports-are  what those captures MEAN: :paths or :modules. Required
+#              alongside :imports, and it is the whole of the difference --
+#              `./store` is a path and `otto.store` is a module name, and
+#              nothing downstream can tell them apart by looking. `run`
+#              turns either into the ONE canonical node name (see
+#              names.janet) so the graph builder receives names, never
+#              specifiers, and never has to guess which it got.
 #   :refs      a PEG whose captures are the names this file MENTIONS
 #   :parse     an escape hatch: a function (text path) -> the same struct
 #              `run` returns. When present, the PEGs above are ignored. For a
@@ -38,6 +46,33 @@
 # the general model is the harder one: a file DECLARES some names, and a file
 # that MENTIONS another's name depends on it. A language whose imports are
 # authoritative just leaves :declares and :refs out and gets the easy path.
+
+(import ./names)
+
+(defn- name-imports
+  ``Every captured import, as the canonical node name it means.
+
+  THE SPEC SAYS WHICH RULE APPLIES, because only the spec can know. `./store`
+  and `otto.store` are the same shape of string and different kinds of
+  thing; a language that writes paths says `:imports-are :paths` and one that
+  writes module names says `:imports-are :modules`.
+
+  Guessing this from the string is what this replaces, and it was wrong in
+  both directions: a path whose file had a dot in it (`janet.c`) was read as
+  a dotted module and its extension became a package separator, while the
+  reverse guess would have made a module name resolve against a directory it
+  has nothing to do with.
+
+  A spec with :imports and no :imports-are is a bug in that spec, and it
+  says so rather than picking one -- a silently wrong name is a phantom node
+  that looks like a real one.``
+  [spec found path]
+  (when (empty? found) (break found))
+  (case (spec :imports-are)
+    :paths   (map |(names/from-path (or path "") $) found)
+    :modules (map |(names/from-module $) found)
+    (errorf "parser spec '%s' has :imports but no :imports-are"
+            (or (spec :name) "?"))))
 
 (defn- captures
   ``Every capture a PEG makes across the whole text, deduplicated.
@@ -106,7 +141,11 @@
           # the distinction therefore does not arise.
           importable (blank-noise (or (spec :comments) (spec :noise)) text)]
       {:declares (captures (spec :declares) clean)
-       :imports (captures (spec :imports) importable)
+       # NAMES, NOT SPECIFIERS. Whatever the language wrote -- `./graph.js`,
+       # `otto.store`, `external-src/janet/janet.c` -- becomes the dotted
+       # node name it refers to, using the rule the SPEC declared. The graph
+       # builder then only ever compares names to names.
+       :imports (name-imports spec (captures (spec :imports) importable) path)
        :refs (captures (spec :refs) clean)})))
 
 (defn- first-line

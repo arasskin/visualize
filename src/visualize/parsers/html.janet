@@ -18,6 +18,8 @@
 # `<a>` is the one that needs the tag, then, and it is excluded by matching
 # the attribute WITH its tag rather than on its own.
 
+(import ../names)
+
 (def- attr-char '(if-not (+ (set " \t\n\"'<>") -1) 1))
 (def- value ~(some ,attr-char))
 
@@ -31,7 +33,7 @@
 # and excluded for `<a>` below; the rest are unambiguous.
 (def- fetching ~(+ "src" "href" "poster" "data" "srcset"))
 
-(defn- parse [text _path]
+(defn- parse [text path]
   # A tag is what an attribute belongs to, so the exclusion of `<a href>` is
   # done by finding the tags first and skipping the anchors -- an attribute
   # scan alone cannot tell one href from another.
@@ -75,7 +77,12 @@
   # resolve-relative in src/visualize/scan.janet. An absolute path is rooted
   # at the site rather than at the tree, and is closer to root-relative than
   # to a sibling.
-  {:imports (distinct
+  # NAMES, NOT PATHS. Every other spec hands `run` its captures and the
+  # engine converts them; a :parse spec answers `run`'s whole job itself, so
+  # it converts its own. What comes back is the dotted node name, which is
+  # what the graph builder compares against the tree.
+  {:imports (map |(names/from-path path $)
+                 (distinct
               (map (fn [ref]
                      (def clean (first (string/split "?" (first (string/split "#" ref)))))
                      (cond
@@ -92,7 +99,7 @@
                        (string/has-prefix? "/" clean) (string "./" (string/slice clean 1))
                        (string/has-prefix? "." clean) clean
                        (string "./" clean)))
-                   keep))})
+                   keep)))})
 
 (def spec
   {:name "html"

@@ -87,6 +87,7 @@
 
    # `import Foundation` and `import struct Foundation.Data`. The submodule
    # form takes the FIRST component: the node is the framework, not the symbol.
+   :imports-are :modules
    :imports ~(* ,line-start
                 "import" (some (set " \t"))
                 # The optional kind in `import struct Foundation.Data`. Only

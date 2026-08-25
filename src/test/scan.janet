@@ -97,7 +97,7 @@ import (
 
 // import "commented-out"
 `` "a.go"))
-  (t/is= ["fmt" "github.com/lib/pq" "math" "os"] (sorted (got :imports)))
+  (t/is= ["fmt" "github.com.lib.pq" "math" "os"] (sorted (got :imports)))
 
 (t/test "arduino reads every include and no commented or quoted one"
   (def got (parser/run arduino/spec ``
@@ -107,7 +107,7 @@ import (
 /* #include <Blocked.h> */
 const char *note = "#include <InAString.h>";
 `` "sketch.ino"))
-  (t/is= ["Servo.h" "pins.h"] (sorted (got :imports))))
+  (t/is= ["Servo" "pins"] (sorted (got :imports))))
 
 (t/test "arduino declares the names another tab can call"
   # A sketch's tabs are concatenated before compiling, so a second tab's
@@ -155,7 +155,7 @@ digitalWrite(LED, HIGH);
   (t/ok (not (index-of "commented-out" (got :imports)))
         "a commented import is still not an import"))
 
-(t/test "javascript takes every import shape and keeps relative paths whole"
+(t/test "javascript takes every import shape, each as the node it names"
   (def got (parser/run js/spec ``
 import React from 'react'
 import { a, b } from "./store"
@@ -165,7 +165,7 @@ export { x } from './other'
 const fs = require('fs')
 // import Fake from 'nope'
 `` "a.ts"))
-  (t/is= ["../lib/api" "./other" "./side-effect.css" "./store" "fs" "react"]
+  (t/is= ["fs" "lib.api" "other" "react" "side-effect" "store"]
          (sorted (got :imports)))
   (t/ok (not (index-of "nope" (got :imports))))
   (t/ok (not (index-of "T" (got :imports))) "the binding is not the module"))
@@ -223,20 +223,22 @@ const fs = require('fs')
          (parser/run fake "anything at all" "a.x")))
 
 (t/test "html reads what a page pulls in"
+  # NODE NAMES, not the specifiers read -- see the css test above and the
+  # :imports-are contract in parser.janet.
   (defn imports [text] (((html/spec :parse) text "page.html") :imports))
 
-  (t/is= ["./theme.css" "./app.js"]
+  (t/is= ["theme" "app"]
          (imports `<link rel="stylesheet" href="theme.css"><script src="./app.js"></script>`)
          "a stylesheet and a script")
-  (t/is= ["./logo.png"] (imports `<img src="logo.png">`) "and an image")
-  (t/is= ["./clip.mp4" "./thumb.jpg"]
+  (t/is= ["logo"] (imports `<img src="logo.png">`) "and an image")
+  (t/is= ["clip" "thumb"]
          (sort (imports `<video poster="thumb.jpg" src="clip.mp4"></video>`)))
 
   # A LINK TO ANOTHER PAGE IS NAVIGATION, not a dependency: a site whose
   # every page links every other draws a mesh saying only that a nav bar
   # exists. `href` is a file everywhere EXCEPT on an anchor.
   (t/is= [] (imports `<a href="about.html">about</a>`))
-  (t/is= ["./theme.css"]
+  (t/is= ["theme"]
          (imports `<a href="about.html">x</a><link href="theme.css">`)
          "which is decided by the tag, not the attribute")
 
@@ -249,23 +251,26 @@ const fs = require('fs')
   # serving carries {{...}} where a value will go; this one drew a node
   # called FAVICON, as though the page depended on a file by that name.
   (t/is= [] (imports `<link rel="icon" href="{{FAVICON}}">`))
-  (t/is= ["./style.css"]
+  (t/is= ["style"]
          (imports `<link rel="icon" href="{{FAVICON}}"><link href="style.css">`)
          "and the hole beside a real file does not take it with it")
 
   # A query is not part of the name, and a site-absolute path is read as a
   # sibling: the server maps / to the directory the page sits in.
-  (t/is= ["./favicon.ico"] (imports `<link rel="icon" href="/favicon.ico?v=2">`)))
+  (t/is= ["favicon"] (imports `<link rel="icon" href="/favicon.ico?v=2">`)))
 
 (t/test "css references other files three ways"
+  # A PARSER ANSWERS IN NODE NAMES, not in the specifier it read -- see the
+  # :imports-are contract in parser.janet. The stylesheet under test sits at
+  # `sheet.css`, so its siblings are named by their bare stem.
   (defn imports [text] (((css/spec :parse) text "sheet.css") :imports))
 
-  (t/is= ["./base.css"] (imports `@import "base.css";`) "another stylesheet")
-  (t/is= ["./print.css"] (imports `@import 'print.css' print;`)
+  (t/is= ["base"] (imports `@import "base.css";`) "another stylesheet")
+  (t/is= ["print"] (imports `@import 'print.css' print;`)
          "media conditions are not part of the path")
-  (t/is= ["./x.woff2"] (imports `@font-face { src: url(x.woff2); }`) "a font")
-  (t/is= ["./bg.png"] (imports `body { background: url("bg.png"); }`) "an image")
-  (t/is= ["./spaced.png"] (imports `.a { background: url( spaced.png ); }`)
+  (t/is= ["x"] (imports `@font-face { src: url(x.woff2); }`) "a font")
+  (t/is= ["bg"] (imports `body { background: url("bg.png"); }`) "an image")
+  (t/is= ["spaced"] (imports `.a { background: url( spaced.png ); }`)
          "the spaces inside url() are syntax, not name")
 
   # `url(#blur)` names an SVG filter in the same document, not a file.
@@ -275,4 +280,4 @@ const fs = require('fs')
 
   # A COMMENTED-OUT IMPORT IS NOT ONE.
   (t/is= [] (imports `/* @import "off.css"; */`))
-  (t/is= ["./on.css"] (imports `/* off */ @import "on.css";`)))
+  (t/is= ["on"] (imports `/* off */ @import "on.css";`)))

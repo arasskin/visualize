@@ -15,6 +15,8 @@
 # language with no declarations can honestly claim.
 
 (def- space '(some (set " \t")))
+(import ../names)
+
 (def- line-start '(+ (> -1 "\n") (! (> -1 1))))
 
 # A path's characters, minus what would end it in shell: whitespace, quotes,
@@ -195,7 +197,7 @@
     (++ i))
   (string out))
 
-(defn- parse [raw _path]
+(defn- parse [raw path]
   (def text (decommented raw))
   (def known (assignments text))
   # THREE SHAPES, each matched on its own rather than by one loose pattern.
@@ -251,7 +253,11 @@
                (? (* "exec" ,space))
                ,slashed-path))
 
-  {:imports (distinct found)})
+  # NAMES, NOT PATHS -- the same conversion `run` does for a PEG spec, done
+  # here because a :parse spec answers for itself. These paths are already
+  # rooted at the repo (the variable-resolution above is what makes that
+  # true), so they name their node directly.
+  {:imports (map |(names/from-path path $) (distinct found))})
 
 (def spec
   {:name "bash"
