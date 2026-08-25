@@ -360,12 +360,15 @@ database  where things are kept
   # `otto/store.py` cannot be told apart by a name that says neither, so the
   # reference stays external rather than being attributed to whichever was
   # read first. Losing an edge says nothing false; inventing one does.
+  # THE IMPORTER IS IN NEITHER, so the sibling rule cannot settle it: a file
+  # that imports `otto.store` from its own directory means the one beside
+  # it, and this one has no `otto` beside it at all.
   (def root (string (os/getenv "TMPDIR") "vz-amb-" (string (os/time))))
   (os/mkdir root)
-  (each p ["/a" "/a/otto" "/b" "/b/otto"] (os/mkdir (string root p)))
+  (each p ["/a" "/a/otto" "/b" "/b/otto" "/c"] (os/mkdir (string root p)))
   (spit (string root "/a/otto/store.py") "x = 1\n")
   (spit (string root "/b/otto/store.py") "y = 2\n")
-  (spit (string root "/a/main.py") "import otto.store\n")
+  (spit (string root "/c/main.py") "import otto.store\n")
 
   (def g (scan/scan root))
   (def ext (map |($ :name) (filter |(not ($ :ours)) (g :nodes))))
@@ -400,3 +403,25 @@ database  where things are kept
   (def g2 (scan/scan sub))
   (t/is= [] (map |($ :name) (filter |(not ($ :ours)) (g2 :nodes))))
   (t/is= [["shop.main.py" "shop.otto.texting.__init__.py"]] (g2 :edges)))
+
+(t/test "a bare import is the module beside it"
+  # THE DIRECTORY A SCRIPT RUNS FROM IS ON PYTHON'S PATH, so `import db` in
+  # `src/main.py` means the `db.py` sitting next to it. Without this the
+  # name fell through to the global fallbacks, which called it ambiguous --
+  # a tree can hold several files ending in `db`, and two of them here were
+  # `.db` DATABASES rather than modules -- and drew an external instead.
+  (def root (string (os/getenv "TMPDIR") "vz-sib-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/src"))
+  (os/mkdir (string root "/data"))
+  (spit (string root "/src/db.py") "x = 1\n")
+  (spit (string root "/src/main.py") "import db\n")
+  # A decoy with the same leaf, elsewhere, of the kind that made the global
+  # lookup give up.
+  (spit (string root "/data/db.py") "y = 2\n")
+
+  (def g (scan/scan root))
+  (t/is= [] (map |($ :name) (filter |(not ($ :ours)) (g :nodes)))
+         "the sibling resolved rather than becoming an external")
+  (t/is= [["src.main.py" "src.db.py"]] (g :edges)
+         "and it is the sibling, not the file with the same name elsewhere"))

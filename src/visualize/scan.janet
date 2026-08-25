@@ -504,8 +504,28 @@
       # which is the safe-name of the specifier, so the map is keyed both
       # ways.
       (def mapped (or (get aliases name) name))
+      # A SIBLING IS WHERE PYTHON LOOKS FIRST. `import db` in
+      # `archive/shoppingagent-mcp/src/main.py` means the `db.py` beside it
+      # -- the directory a script runs from is on the path, so a bare name
+      # is a same-directory module before it is anything else.
+      #
+      # And it has to be tried before the global fallbacks, not after: three
+      # files in this tree end in `db` (two of them `.db` DATABASES rather
+      # than modules), so the by-leaf map calls the name ambiguous and gives
+      # up -- while the file sitting next to the importer is not ambiguous
+      # at all.
+      (def beside
+        # The importer's own directory: its node name with the extension
+        # taken off (`...src.main.py` -> `...src.main`) and then the file's
+        # own segment dropped as well.
+        (let [parts (string/split "." (names/stem (node-name (file :rel))))
+              dir (string/join (slice parts 0 -2) ".")]
+          (when (not (empty? dir))
+            (def candidate (string dir "." mapped))
+            (or (from-stem candidate) (and (ours candidate) candidate)))))
       (def target (or (from-stem mapped)
                       (and (ours mapped) mapped)
+                      beside
                       # A name written from a subproject's own root -- see
                       # `by-tail` above.
                       (from-tail mapped)
