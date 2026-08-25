@@ -94,10 +94,27 @@
 (def- rows-padding 18.0)
 
 (defn- label-height
-  "How tall the ellipse for this label should be, in INCHES."
+  ``How tall the ellipse for this label should be, in INCHES.
+
+  COUNTED AS DRAWN, not as written. The extension and the line count arrive
+  on separate lines and `label-markup` puts them on ONE, so counting the raw
+  newlines reserves a row that is never filled -- every box a little too
+  tall, and the taller a box the further apart the rows of the graph. Both
+  are recognised the same way they are there.``
   [label]
-  (def rows (length (string/split "\n" (string label))))
-  (max 0.62 (/ (+ (* row-height rows) rows-padding) points-per-inch)))
+  (def rows (array ;(string/split "\n" (string label))))
+  (var drawn (length rows))
+  (var small 0)
+  (when (and (> (length rows) 1)
+             (peg/match ~(* (some (range "09")) -1) (last rows)))
+    (array/pop rows)
+    (++ small))
+  (when (and (> (length rows) 1) (string/has-prefix? "." (last rows)))
+    (array/pop rows)
+    (++ small))
+  # The two small rows became one; anything past the first costs no height.
+  (when (> small 1) (-= drawn (- small 1)))
+  (max 0.62 (/ (+ (* row-height drawn) rows-padding) points-per-inch)))
 
 (defn- label-width
   ``How wide the ellipse for this label should be, in INCHES -- the unit dot's
@@ -167,10 +184,11 @@
 (defn- label-markup
   ``A node's label as HTML-like markup, so its trailing rows can be smaller.
 
-  TWO KINDS OF SMALL ROW, and a node may carry either, both or neither. A
-  row that is all digits is the LINE COUNT; a row starting with a dot is the
-  file's EXTENSION. Both are facts ABOUT the file rather than parts of its
-  name, so both are set at the same small size and both sit below the gap.
+  ONE SMALL ROW, holding up to two things. A row that is all digits is the
+  LINE COUNT; a row starting with a dot is the file's EXTENSION. Both are
+  facts ABOUT the file rather than parts of its name, so both are set small
+  and both sit below the gap -- and since they are the same kind of thing at
+  the same size, they share a line rather than stacking into two.
 
   The extension is shown because it is part of the node name now -- dropping
   it merged `visualize` with `visualize.conf` -- and it is set small because
@@ -197,10 +215,13 @@
     # together they read as one more row of the name. An empty line break at
     # a few points is the whole gap: it costs that many points of height and
     # says the two are not the same thing.
+    # TWO SPACES BETWEEN THEM, not a dot or a slash: `.janet 213` is two
+    # facts side by side, and any punctuation between them would read as one
+    # compound thing -- a version, a ratio, a filename.
+    (def tail (string/join (filter identity [ext count]) "  "))
     (string (string/join (map escaped-html body) "<BR/>")
             "<BR/><FONT POINT-SIZE=\"" gap-size "\"> </FONT>"
-            (if ext (small-row ext) "")
-            (if count (small-row count) ""))))
+            (small-row tail))))
 
 (defn- hatch-id
   ``The id of the hatch drawn in this ink. One pattern per colour, named after
