@@ -38,6 +38,7 @@
 # is why `run` takes a list of lines rather than a file.
 
 (import ./color)
+(import ./names)
 
 (defn new-state
   ``What the config has said about the graph so far.
@@ -356,6 +357,29 @@
           (set found true)))))
   (when (empty? rest) here))
 
+(defn- holds?
+  ``Does the project at `dir` hold something called `name`?
+
+  The FIRST SEGMENT only, which is what decides whose name it is: with an
+  `otto` directory, `otto.store` is this project's; with no `urllib`,
+  `urllib.parse` is a name it merely refers to.
+
+  A FILE COUNTS, not only a directory -- `(hide tests)` may name either, and
+  a node is a file as often as it is a folder. Entries are named the way a
+  node is named, so a file's extension is not part of the comparison.``
+  [dir name]
+  (def head (first (string/split "." name)))
+  (when (empty? head) (break false))
+  (var found false)
+  (each entry (try (os/dir dir) ([_] []))
+    (unless found
+      (def named (normalise entry))
+      (when (or (= named head)
+                # `tests.py` is named `tests`; the stem is what a node wears.
+                (= (normalise (names/stem entry)) head))
+        (set found true))))
+  found)
+
 (defn- apply-verb
   "One matched form against the state. Returns nil, or a complaint."
   [state form]
@@ -620,6 +644,8 @@
   (when (or (empty? root) (empty? dir)) (break []))
   (def here (nested-dir root dir))
   (unless here (break []))
+  # The child's own directory, for deciding which of its names are places.
+  (def here-dir here)
   (def path (string here "/" config-name))
   (unless (os/stat path :mode) (break []))
   (def text (try (slurp path) ([_] nil)))
@@ -689,8 +715,30 @@
             (def moved
               (seq [[at arg] :pairs args]
                 (if (= (get kinds at) :name)
-                  (string prefix "."
-                          (normalise (expand-aliases aliases arg)))
+                  (let [full (normalise (expand-aliases aliases arg))]
+                    # A NAME FROM OUTSIDE THE TREE IS NOT A PLACE, and does
+                    # not take the prefix. `os` and `pydantic` are nodes but
+                    # not files: there is nothing under this project called
+                    # os, so `shoppingagent.os` matches nothing at all --
+                    # which is how a config with twenty-six such hides drew
+                    # every one of them anyway.
+                    #
+                    # Told apart by ASKING THE DISK: a name is the project's
+                    # own if the project HOLDS something by that name --
+                    # a directory or a file, since `(hide tests)` may mean
+                    # either. Anything else is a name the project merely
+                    # refers to, and means the same thing here as it does
+                    # to the parent.
+                    #
+                    # Only the FIRST segment is asked about, because that is
+                    # what decides whose name it is: `otto.store` is this
+                    # project's if it has an `otto`, and `urllib.parse` is
+                    # not if it has no `urllib`.
+                    #
+                    # An explicit `?.` is left alone either way.
+                    (if (or (names/external? full) (not (holds? here-dir full)))
+                      full
+                      (string prefix "." full)))
                   arg)))
             (array/push out
                         (string "(" verb " " (string/join moved " ") ")")))))))

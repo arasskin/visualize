@@ -162,3 +162,23 @@
   stays an external, which is right for `fmt` and `Foundation`.``
   [module]
   (safe-name (string/replace-all "." "/" module)))
+
+# WHAT MARKS A NODE THAT IS NOT A FILE HERE. `os`, `pydantic`, `SwiftUI` --
+# names a file referred to but that this tree does not contain. They are
+# nodes like any other so they can be boxed and hidden, but they are not
+# PLACES: there is no directory to descend into and no path to prefix.
+#
+# `?` because it is what the name is: a thing asked for and not found here.
+# The dot makes it a segment like any other, so `(hide ?.)` is every
+# external at once and prefix matching needs no special case.
+(def external-mark "?.")
+
+(defn external
+  "A name from outside this tree, marked as such."
+  [name]
+  (string external-mark name))
+
+(defn external?
+  "Whether this name is one from outside the tree."
+  [name]
+  (string/has-prefix? external-mark name))

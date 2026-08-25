@@ -441,6 +441,11 @@
   (def root (string (os/getenv "TMPDIR") "vz-nest-" (string (os/time))))
   (os/mkdir root)
   (os/mkdir (string root "/lib"))
+  # THE NAMES A NESTED CONFIG PREFIXES ARE THE ONES ITS PROJECT HOLDS, so
+  # the fixture has to hold them: `vendor` and `helper` are lib's own, and
+  # a name it does not have is a name it only refers to. See `holds?`.
+  (os/mkdir (string root "/lib/vendor"))
+  (spit (string root "/lib/helper.py") "x = 1\n")
   (defn conf [dir text] (spit (string root dir "/visualize.conf") text))
 
   (conf "/lib" "(box vendor)\n(fold vendor)\n")
@@ -512,6 +517,16 @@
   (t/is= @{} p5)
   (t/is= [] (s5 :folded))
 
+  # A NAME THE PROJECT DOES NOT HOLD IS NOT ITS OWN. `os` and `pydantic` are
+  # nodes but not files: nothing under lib is called os, so `lib.os` would
+  # match nothing at all -- which is how a real config with twenty-six such
+  # hides drew every one of them anyway. They mean the same external here as
+  # they do to the parent, and travel unprefixed.
+  (conf "/lib" "(hide os)\n(hide vendor)\n")
+  (def [s11 _] (config/run @["(visualize lib)"] root))
+  (t/is= ["os" "lib.vendor"] (s11 :hidden)
+         "an external keeps its name, a real one takes the prefix")
+
   # A NAME THAT IS NO DIRECTORY IS A TYPO, and the difference is worth
   # saying. `(visualize otto)` where the directory is `otto-ios` matched
   # nothing, drew nothing, and said nothing -- indistinguishable from a
@@ -535,6 +550,7 @@
   (os/mkdir (string root "/a"))
   (os/mkdir (string root "/a/b"))
   (spit (string root "/a/visualize.conf") "(visualize b)\n")
+  (spit (string root "/a/b/leaf.py") "x = 1\n")
   (spit (string root "/a/b/visualize.conf") "(box leaf)\n(fold leaf)\n")
 
   # A CHILD'S OWN `visualize` IS A LINE LIKE ANY OTHER. `(visualize b)` in a
@@ -559,6 +575,8 @@
   (os/mkdir root)
   (os/mkdir (string root "/my.lib"))
   (os/mkdir (string root "/my.lib/inner"))
+  (spit (string root "/my.lib/thing.py") "x = 1\n")
+  (spit (string root "/my.lib/inner/deep.py") "y = 2\n")
   (spit (string root "/my.lib/visualize.conf") "(box thing)\n(visualize inner)\n")
   (spit (string root "/my.lib/inner/visualize.conf") "(fold deep)\n")
 

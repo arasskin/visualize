@@ -24,6 +24,8 @@
   [text]
   (string/replace-all "/" "." (string/trim text "./")))
 
+(import ./names)
+
 (defn expand
   ``A config name as the node-name prefix it selects.
 
@@ -53,9 +55,20 @@
   `(only "")` would match every node, since every string starts with the
   empty string, and mean nothing at all.``
   [name prefix ours]
-  (if (empty? prefix)
-    (truthy? (ours name))
-    (string/has-prefix? prefix name)))
+  (cond
+    (empty? prefix) (truthy? (ours name))
+    (string/has-prefix? prefix name) true
+    # A NAME FROM OUTSIDE THE TREE IS WRITTEN AS ITSELF. Externals carry a
+    # `?.` so that a nested config's names can be told from places -- see
+    # `external` in names.janet -- but nobody wants to type it: `(hide os)`
+    # means the `os` everyone can see on the graph, and `(hide ?.os)` says
+    # the same thing for anyone who prefers to be explicit.
+    #
+    # Only when the prefix is not already marked, so `?.` on its own still
+    # means every external and nothing here has two meanings.
+    (not (names/external? prefix))
+    (string/has-prefix? (names/external prefix) name)
+    false))
 
 (defn- selector
   ``One config name as a predicate over node names.

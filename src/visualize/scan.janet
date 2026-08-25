@@ -452,8 +452,15 @@
         # Anything else is a genuine external -- `fmt`, `Foundation`,
         # `@wterm/core` -- and becomes a node so it can be grouped and
         # hidden like any other.
-        (do (put externals name true)
-            (unless (= name here) (put pairs [here name] true))))))
+        #
+        # MARKED AS NOT BEING HERE. An external is a name, not a place:
+        # there is no directory behind it and no path to prefix. Saying so
+        # in the name is what lets a nested config's `(hide os)` mean the
+        # external `os` rather than a file called os under that project --
+        # see `nested-lines` in config.janet.
+        (do (put externals (names/external name) true)
+            (unless (= name here)
+              (put pairs [here (names/external name)] true))))))
 
   (def nodes @[])
   (each file live
