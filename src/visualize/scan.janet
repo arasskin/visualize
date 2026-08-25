@@ -364,6 +364,41 @@
   (eachp [leaf names] by-leaf
     (when (= 1 (length names)) (put from-leaf leaf (first names))))
 
+  # AN IMPORT IS RELATIVE TO ITS OWN PROJECT, NOT TO THE SCAN ROOT. Point
+  # this at a directory of projects and every python import inside one of
+  # them is written from that project's root: `otto.retailers._shared` in
+  # gaby-stuff/shoppingagent means the file
+  # `shoppingagent/otto/retailers/_shared.py`, whose node name carries the
+  # `shoppingagent.` the import never mentions.
+  #
+  # Those names matched nothing and became externals -- a hundred and forty
+  # of them here, sitting on the graph beside `os` and `json` and
+  # indistinguishable from them until externals started saying so.
+  #
+  # So a name is also looked up by its TAIL: a file whose node name ends
+  # with `.otto.retailers._shared` answers to it. The leaf map above is the
+  # same idea for a single segment; this is the whole remainder, which is
+  # far more specific and so far less likely to be a coincidence.
+  #
+  # AMBIGUITY RESOLVES TO NOTHING, the rule every other lookup here follows:
+  # two projects that both hold `otto.retailers._shared` cannot be told
+  # apart by a name that says neither, so the reference stays external
+  # rather than being attributed to whichever was read first.
+  (def by-tail @{})
+  (each file live
+    (def full (node-name (file :rel)))
+    (def stem (names/stem full))
+    (def parts (string/split "." stem))
+    # Every suffix of the path but the whole of it -- the whole is what the
+    # exact match above already covers.
+    (for i 1 (length parts)
+      (def tail (string/join (slice parts i) "."))
+      (unless (empty? tail)
+        (put by-tail tail (array/push (or (by-tail tail) @[]) full)))))
+  (def from-tail @{})
+  (eachp [tail names] by-tail
+    (when (= 1 (length (distinct names))) (put from-tail tail (first names))))
+
   (def by-stem @{})
   (each file live
     (def full (node-name (file :rel)))
@@ -443,6 +478,9 @@
       (def mapped (or (get aliases name) name))
       (def target (or (from-stem mapped)
                       (and (ours mapped) mapped)
+                      # A name written from a subproject's own root -- see
+                      # `by-tail` above.
+                      (from-tail mapped)
                       # A path that named no file may still name one in
                       # another served directory -- matched on its last
                       # segment. See `by-leaf` above.

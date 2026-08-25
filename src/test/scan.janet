@@ -332,3 +332,41 @@ database  where things are kept
   (t/is= [["demo.a" "demo.b"] ["demo.a" "demo.c"]]
          ((read-it "a\n    b\n        c\n") :edges)
          "deeper indentation is not nesting"))
+
+(t/test "an import is relative to its own project, not to the scan root"
+  # POINTED AT A DIRECTORY OF PROJECTS, which is what a workspace is. A
+  # python import inside one of them is written from THAT project's root:
+  # `otto.store` in `shop/` means `shop/otto/store.py`, whose node name
+  # carries the `shop.` the import never mentions.
+  #
+  # Those names matched nothing and became externals, sitting on the graph
+  # beside `os` and `json`.
+  (def root (string (os/getenv "TMPDIR") "vz-sub-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/shop"))
+  (os/mkdir (string root "/shop/otto"))
+  (spit (string root "/shop/otto/store.py") "x = 1\n")
+  (spit (string root "/shop/main.py") "import otto.store\n")
+
+  (def g (scan/scan root))
+  (def names (map |($ :name) (g :nodes)))
+  (def ext (map |($ :name) (filter |(not ($ :ours)) (g :nodes))))
+  (t/ok (index-of "shop.otto.store.py" names) "the file is there")
+  (t/is= [] ext "and the import found it rather than inventing an external")
+  (t/is= [["shop.main.py" "shop.otto.store.py"]] (g :edges)))
+
+(t/test "a tail that two projects share resolves to neither"
+  # THE RULE EVERY OTHER LOOKUP HERE FOLLOWS. Two projects both holding
+  # `otto/store.py` cannot be told apart by a name that says neither, so the
+  # reference stays external rather than being attributed to whichever was
+  # read first. Losing an edge says nothing false; inventing one does.
+  (def root (string (os/getenv "TMPDIR") "vz-amb-" (string (os/time))))
+  (os/mkdir root)
+  (each p ["/a" "/a/otto" "/b" "/b/otto"] (os/mkdir (string root p)))
+  (spit (string root "/a/otto/store.py") "x = 1\n")
+  (spit (string root "/b/otto/store.py") "y = 2\n")
+  (spit (string root "/a/main.py") "import otto.store\n")
+
+  (def g (scan/scan root))
+  (def ext (map |($ :name) (filter |(not ($ :ours)) (g :nodes))))
+  (t/is= ["?.otto.store"] ext "ambiguous, so it stays a name from outside"))
