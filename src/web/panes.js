@@ -773,6 +773,23 @@ export function makeTerminalPane(root, prefix) {
   // bracketed paste, and strips ESC out of the payload first so a clipboard
   // cannot close the bracket early and have the rest read as commands.
 
+  // SHIFT SCROLLS THE PANE, WHATEVER THE PROGRAM WANTS. wterm reports every
+  // wheel event to a program that has asked for mouse tracking, and calls
+  // preventDefault doing it -- so under such a program the wheel does
+  // whatever that program does with a wheel report, and nothing else is
+  // possible. For claude that is NOTHING: it turns tracking on at startup
+  // and does not scroll on wheel reports, so the pane simply stopped
+  // scrolling.
+  //
+  // Every real terminal has the same escape and spells it the same way, so
+  // this one does too: hold shift and the wheel is the pane's own. Taken in
+  // the CAPTURE phase, which is the only way to get in front of a listener
+  // on the same element -- stopping the event here means wterm never sees
+  // it, and the browser is left to scroll the scrollback natively.
+  screen.addEventListener('wheel', (event) => {
+    if (event.shiftKey) event.stopPropagation();
+  }, { capture: true });
+
   // THE WHEEL IS WTERM'S TOO, for the reason the keyboard is: it listens on
   // the same element this pane does, so a wheel event fired both handlers
   // and a mouse-tracking program scrolled twice. Same shape of bug as the
