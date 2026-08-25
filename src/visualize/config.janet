@@ -571,6 +571,41 @@
   (unless text (break []))
   (def prefix (normalise dir))
   (def out @[])
+  # THE CHILD'S OWN BINDINGS, READ FIRST. A nested config may name a prefix
+  # for its own convenience -- `(prefix v vendor)` and then `(box v)` -- and
+  # those `v`s are not paths, so prefixing them gives `lib.v`, which matches
+  # nothing and silently does nothing.
+  #
+  # The binding cannot come through either: it would put the child's token
+  # into the parent's namespace, where it would collide with the parent's
+  # own and mean a different thing. So the alias is EXPANDED HERE, where it
+  # still means what the child said, and only the resulting path travels.
+  # `(prefix v vendor) (box v)` in lib arrives as `(box lib.vendor)`.
+  #
+  # Two passes for the same reason `run` has two: a prefix binds a token the
+  # lines above it may already use, and where the binding sits in the file
+  # should not change what the file means.
+  (def aliases @[])
+  (each line (string/split "\n" (string text))
+    (def trimmed (string/trim (code-of line)))
+    (when (and (not (empty? trimmed))
+               (not (string/has-prefix? "#" trimmed))
+               (not (note? trimmed)))
+      (when-let [forms (peg/match grammar trimmed)]
+        (var i 0)
+        (while (< i (length forms))
+          (def verb (forms i))
+          (++ i)
+          (def args @[])
+          (while (and (< i (length forms)) (string? (forms i)))
+            (array/push args (forms i))
+            (++ i))
+          (when (and (= verb :prefix) (= 2 (length args)))
+            (array/push aliases
+                        {:alias (first args) :prefix (normalise (get args 1))}))))))
+  # LONGEST TOKEN FIRST, the same order `run` keeps them in, so that with
+  # both `~` and `~~` bound the longer one is tried first.
+  (def aliases (sorted-by |(- (length ($ :alias))) aliases))
   (each line (string/split "\n" (string text))
     (def trimmed (string/trim (code-of line)))
     (when (and (not (empty? trimmed))
@@ -586,7 +621,9 @@
             (array/push args (forms i))
             (++ i))
           # A verb with no arguments is a whole-drawing decision; see above.
-          (unless (empty? args)
+          # A `prefix` line has already been read into `aliases` and must not
+          # travel: its token would land in the parent's namespace.
+          (unless (or (empty? args) (= verb :prefix))
             (def spec (find |(= ($ :name) (string verb)) verb-specs))
             (def kinds (if spec (spec :args) []))
             # PREFIX THE NAMES AND NOTHING ELSE. `(box p color)` has a colour
@@ -596,7 +633,8 @@
             (def moved
               (seq [[at arg] :pairs args]
                 (if (= (get kinds at) :name)
-                  (string prefix "." (normalise arg))
+                  (string prefix "."
+                          (normalise (expand-aliases aliases arg)))
                   arg)))
             (array/push out
                         (string "(" verb " " (string/join moved " ") ")")))))))

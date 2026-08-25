@@ -462,10 +462,41 @@
   # ONLY THE NAME SLOTS MOVE. A colour is not a node name and must survive
   # untouched; an alias is not one either, and binding one in a child would
   # leak a token into the parent's namespace.
-  (conf "/lib" "(box vendor red)\n(prefix v vendor)\n")
+  # `q` rather than a letter `vendor` starts with: with `v` bound, the name
+  # `vendor` expands to `vendorendor`, which is what a PREFIX alias means and
+  # is true of a parent config too. Not the thing under test here.
+  (conf "/lib" "(box vendor red)\n(prefix q other)\n")
   (def [s3 _] (config/run @["(visualize lib)"] root))
   (t/is= [["lib.vendor" "#ff4d6d"]] (map |[($ :prefix) ($ :color)] (s3 :groups)))
   (t/is= [] (s3 :aliases) "a child's alias does not reach the parent")
+
+  # AN ALIAS IS INLINED, NOT DROPPED. The binding cannot travel -- its token
+  # would land in the parent's namespace -- but the names that USE it have to
+  # keep meaning what the child said. Dropping the binding alone left
+  # `(box v)` arriving as `lib.v`, matching nothing and silently doing
+  # nothing.
+  (conf "/lib" "(prefix v vendor)\n(box v)\n(fold v.deep)\n(hide v)\n")
+  (def [s8 _] (config/run @["(visualize lib)"] root))
+  (t/is= ["lib.vendor"] (map |($ :prefix) (s8 :groups)))
+  (t/is= ["lib.vendor.deep"] (s8 :folded) "an alias at the head of a longer name")
+  (t/is= ["lib.vendor"] (s8 :hidden) "the bare token is the path itself")
+
+  # BOUND BELOW WHAT USES IT, which is legal in a config and stays legal in a
+  # nested one: the bindings are read in a pass of their own first, exactly
+  # as `run` does it.
+  (conf "/lib" "(box v)\n(prefix v vendor)\n")
+  (def [s9 _] (config/run @["(visualize lib)"] root))
+  (t/is= ["lib.vendor"] (map |($ :prefix) (s9 :groups)))
+
+  # THE TWO NAMESPACES DO NOT MEET. A parent and a child may bind the same
+  # token to different things; each keeps its own meaning, and the child's
+  # never reaches the parent -- where a second binding would be an error.
+  (conf "/lib" "(prefix v vendor)\n(box v)\n")
+  (def [s10 p10]
+    (config/run @["(prefix v main.thing)" "(hide v)" "(visualize lib)"] root))
+  (t/is= @{} p10)
+  (t/is= ["main.thing"] (s10 :hidden) "the parent's v is the parent's")
+  (t/is= ["lib.vendor"] (map |($ :prefix) (s10 :groups)) "the child's v is the child's")
 
   # THE PARENT STILL WINS: its own lines are applied first and the nested
   # ones after, so both are present and nothing the parent said was lost.
