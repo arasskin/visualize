@@ -508,7 +508,7 @@ button:disabled { opacity: .5; cursor: progress; }
    there all along and only now noticed. */
 #bin {
   position: fixed; left: 1.25rem; bottom: 1.25rem; z-index: 7;
-  width: 76px; height: 82px;
+  width: 108px; height: 116px;
   pointer-events: none;          /* the drag owns the pointer */
   opacity: 0; transform: translateY(30px);
   transition: opacity .18s ease-out, transform .18s ease-out;
@@ -525,6 +525,9 @@ button:disabled { opacity: .5; cursor: progress; }
    corner, so it lifts and tilts the way a lid does rather than sliding
    away. This is the whole promise of the gesture: what will happen, before
    it happens. */
+/* IN SVG USER UNITS, not screen pixels: the transform below is inside the
+   svg, whose viewBox is 48x52 whatever the box is sized to, so the lid
+   lifts the same proportion of itself at any size. */
 #bin .lid {
   transform-origin: 8px 11px;
   transition: transform .16s cubic-bezier(.34,1.4,.64,1);

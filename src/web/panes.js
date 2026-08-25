@@ -1720,14 +1720,20 @@ export function openTerminal() {
   const id = String(++paneCount);
   const pane = buildTerminal(id);
   selectPane(pane.root);
-  // SHUT, like every other panel starts. A new terminal is a tab you can
-  // open, not a window that takes the screen the moment you ask for one.
-  //
   // ON THE RAIL, at the end of the row -- the packing puts it against the
   // last tab and keeps it there however the ones before it change width.
   addToRail(pane);
   // Its terminal starts now, not when someone gets round to looking at it.
   pane.boot();
+  // AND IT OPENS. Asking for a terminal is asking to use one; leaving it
+  // shut meant every new tab took a second click before it was good for
+  // anything, and the tab you had just made was the one thing you certainly
+  // wanted to look at.
+  //
+  // AFTER `boot`, because opening measures the panel and tells the session
+  // how big it is -- see `onOpen`. A pane opened before it had a session
+  // would have nothing to size.
+  pane.open();
   return pane;
 }
 
