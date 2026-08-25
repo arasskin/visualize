@@ -801,7 +801,22 @@ export function makeTerminalPane(root, prefix) {
     // So a cancelled event is one the program already received, and sending
     // page keys as well would be reporting the same notch twice.
     if (event.defaultPrevented) return;
-    if (!term.altScreen) return;          // ordinary screen: the pane scrolls
+    // NOTHING TO SCROLL IS THE CONDITION, not "a full-screen program is
+    // running". Those usually coincide and they are not the same thing, and
+    // two claude sessions side by side proved it: both set the same mouse
+    // modes, but one had never entered the alternate screen (no `?1049h` in
+    // a megabyte of output) and so had a real transcript in the scrollback.
+    // Scrolling worked there and was broken by an `altScreen` test, which
+    // took the wheel away from a pane that had somewhere to go with it.
+    //
+    // `has-scrollback` IS THE SIGNAL, and measuring the element is not.
+    // wterm VIRTUALISES the history -- only the visible rows are in the DOM,
+    // the rest held open by spacers -- so `scrollHeight` reads barely more
+    // than one screenful even with four hundred lines behind it, and a
+    // height test says "nothing to scroll" while a scrollbar sits there.
+    // wterm sets this class from the core's own scrollback count, which is
+    // the number that actually decides whether the wheel has anywhere to go.
+    if (screen.classList.contains('has-scrollback')) return;
     event.preventDefault();
     // One page per notch, in whichever direction the wheel turned. deltaMode
     // 1 is already lines; 0 is pixels, and either way the sign is what

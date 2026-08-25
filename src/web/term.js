@@ -202,17 +202,6 @@ export function makeTerminal(element, options = {}) {
     get rows() { return rows; },
     get cols() { return cols; },
 
-    // TRUE WHILE A FULL-SCREEN PROGRAM OWNS THE VIEWPORT. The alternate
-    // screen has no scrollback by definition -- vim, less and claude paint
-    // one screen and scroll it themselves -- so there is nothing for the
-    // pane to scroll, and a wheel event has to be turned into something the
-    // PROGRAM understands or do nothing at all. See the wheel handler in
-    // panes.js.
-    get altScreen() {
-      const core = term && term.bridge;
-      return !!core && core.usingAltScreen();
-    },
-
     // What the program has asked the tab to be called, or null.
     get title() {
       const core = term && term.bridge;
