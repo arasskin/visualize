@@ -678,10 +678,13 @@ function completions() {
 // WHICH BAR THIS IS. One box, two jobs: on the config tab it writes a line
 // of the config language, on a terminal tab it types at a shell. The
 // selected tab decides, so the bar is about whatever you are working in.
-function composeTarget() {
-  const p = pickedPanel();
-  return (p && p !== configPanel && p.root.classList.contains('term')) ? p : null;
-}
+// THERE IS NO OTHER TARGET. The bar writes config lines, and opening it
+// selects the config panel (see `openCompose`), so there is nothing else it
+// could be aimed at. Kept as a named nothing rather than deleted, because
+// the places that ask are asking a real question -- "is this a config line
+// or something else" -- and the answer being permanently "config" is worth
+// reading as an answer rather than as an absence.
+function composeTarget() { return null; }
 
 // HOW SMALL THE TEXT GETS. A shell command can be long, and a bar that only
 // ever grows wider walks off the screen; letting the type shrink buys about
@@ -937,7 +940,12 @@ function shutList() {
 
 function openCompose(seed) {
   compose.classList.remove('shut');
-  compose.classList.toggle('typing', !!composeTarget());
+  // THE CONFIG TAB IS THE SELECTED ONE WHILE THE BAR IS OPEN. What you type
+  // here is a config line, so the panel it belongs to is the one that should
+  // be lit -- and, more usefully, the one alt walks from and opens. Writing
+  // a config line and then reaching for alt used to open whichever terminal
+  // happened to be selected.
+  selectPane(configPanel.root);
   composeFault.textContent = '';
   composeInput.value = seed || '';
   sizeCompose();
@@ -975,46 +983,11 @@ async function checkLines(candidate, at) {
 }
 
 async function commitCompose() {
-  // TO THE TERMINAL, if that is what is selected: what you typed is typed at
-  // the shell, with the newline that runs it. The bar goes away afterwards,
-  // the same as it does when a config line is committed -- sending is
-  // finishing, and typing anywhere brings it straight back.
-  const term = composeTarget();
-  if (term) {
-    const typed = composeInput.value;
-    if (!typed) { shutCompose(); return; }
-    // CARRIAGE RETURN, WHICH IS WHAT THE ENTER KEY IS. A shell in cooked
-    // mode cannot tell \r from \n -- the line discipline translates one to
-    // the other on input -- so sending \n worked and looked correct. A
-    // full-screen program reading keys in RAW MODE gets no such translation
-    // and the two are different keys: \r is Enter, \n is ctrl-J, which a
-    // readline-style box takes as "put a line break in what I am writing".
-    // That is why typing into Claude Code here grew the message instead of
-    // sending it.
-    //
-    // Interior newlines get the same treatment, since a multi-line paste is
-    // several Enters as far as the program is concerned.
-    // THE TEXT, THEN THE RETURN, as two separate writes.
-    //
-    // A whole line arriving in ONE write is indistinguishable from a paste,
-    // and a program that has turned bracketed paste on (mode 2004 -- claude
-    // does) treats a run of bytes that way: the return inside it becomes a
-    // line break in the message being composed rather than the key that
-    // sends it. Which is the bug -- typing into Claude Code here grew the
-    // message instead of submitting it.
-    //
-    // Split, the return arrives on its own, after the text has landed, and
-    // reads as a keystroke. \r rather than \n because that is what the Enter
-    // key is: a shell in cooked mode cannot tell them apart, but a raw-mode
-    // reader takes \n as ctrl-J, which a readline-style box inserts.
-    if (term.type) {
-      const body = typed.replace(/\r\n|\n/g, '\r');
-      if (body) term.type(body);
-      term.type('\r');
-    }
-    shutCompose();
-    return;
-  }
+  // THE BAR WRITES CONFIG AND NOTHING ELSE. It used to send to whichever
+  // panel was selected -- a config line if that was the config, a shell
+  // command if a terminal was -- and one box with two destinations is a box
+  // you have to check before pressing Enter. A terminal already has a
+  // keyboard of its own; this does not need to be a second one.
 
   const text = composeInput.value.trim();
   if (!text) { shutCompose(); return; }
