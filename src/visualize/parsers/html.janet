@@ -33,6 +33,57 @@
 # and excluded for `<a>` below; the rest are unambiguous.
 (def- fetching ~(+ "src" "href" "poster" "data" "srcset"))
 
+# THE IMPORT MAP IS A DICTIONARY FROM NAME TO PATH, and the page carries it
+# in plain sight: `<script type="importmap">` holding JSON. A module written
+# `import ... from '@wterm/dom'` names no file, and without this the scan can
+# only draw it as an external -- a bare `wterm.dom` node beside the vendored
+# file it actually loads.
+#
+# Read with a PEG rather than a JSON parser: the shape wanted is a flat
+# string-to-string table under "imports", every value of which is a URL the
+# page will fetch. Anything more elaborate (scopes, integrity) is skipped
+# rather than half-understood.
+(defn- import-map [text]
+  (def maps @{})
+  # The opening tag's attributes and the body that follows it, as a pair per
+  # script element. Captured separately because the type has to be READ --
+  # matching "importmap" inside the tag with a greedy scan to `>` swallows
+  # the word itself and finds nothing.
+  (def blocks
+    (peg/match ~(any (+ (* "<script" (<- (any (if-not ">" 1))) ">"
+                           (<- (any (if-not "</script" 1))))
+                        1))
+               text))
+  (each [attrs block] (partition 2 (or blocks []))
+    (when (string/find "importmap" (string/ascii-lower attrs))
+    (each [name target]
+      (partition 2 (or (peg/match
+                         ~(any (+ (* `"` (<- (some (if-not `"` 1))) `"`
+                                     (any (set " \t\n")) ":" (any (set " \t\n"))
+                                     `"` (<- (some (if-not `"` 1))) `"`)
+                                  1))
+                         block) []))
+      # A trailing-slash entry maps a PREFIX rather than a name, which is a
+      # different rule; only exact names are taken.
+      (unless (or (string/has-suffix? "/" name) (string/has-suffix? "/" target))
+        (put maps name target)))))
+  maps)
+
+# A URL THE PAGE FETCHES, as a path this scan can look for.
+#
+# A SITE-ABSOLUTE PATH IS ROOTED AT WHAT IS SERVED, not at the tree being
+# scanned -- this repo's page asks for `/app.js` and the file is its sibling,
+# because the server maps / to the directory holding them. There is no way to
+# read that mapping from here, and a sibling is the likelier of the two: a
+# static site is usually served from the directory its pages sit in.
+(defn- site-path [url]
+  (def clean (first (string/split "?" (first (string/split "#" url)))))
+  (cond
+    (empty? clean) clean
+    (string/has-prefix? "/" clean) (string "./" (string/slice clean 1))
+    (string/has-prefix? "." clean) clean
+    (string "./" clean)))
+
 (defn- parse [text path]
   # A tag is what an attribute belongs to, so the exclusion of `<a href>` is
   # done by finding the tags first and skipping the anchors -- an attribute
@@ -81,7 +132,20 @@
   # engine converts them; a :parse spec answers `run`'s whole job itself, so
   # it converts its own. What comes back is the dotted node name, which is
   # what the graph builder compares against the tree.
-  {:imports (map |(names/from-path path $)
+  # WHAT A NAME MEANS, for the modules this page's own scripts import. The
+  # values are URLs the server will answer, so they are named the same way a
+  # site-absolute href is -- see `site-path` above.
+  # KEYED THE WAY AN IMPORT ARRIVES. A javascript file writing
+  # `from '@wterm/dom'` is converted by its own parser before the graph sees
+  # it, so the key stored here has to be that converted form -- the raw
+  # specifier would never match. `safe-name` is the same rule the javascript
+  # spec applies to a bare package name.
+  {:aliases (let [out @{}]
+              (eachp [name target] (import-map text)
+                (put out (names/safe-name name)
+                     (names/from-path path (site-path target))))
+              out)
+   :imports (map |(names/from-path path $)
                  (distinct
               (map (fn [ref]
                      (def clean (first (string/split "?" (first (string/split "#" ref)))))

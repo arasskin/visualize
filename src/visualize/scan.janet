@@ -179,7 +179,13 @@
         :lines (length (string/split "\n" (string/trimr text "\n")))
         :declares (found :declares)
         :imports (found :imports)
-        :refs (found :refs)}))])
+        :refs (found :refs)
+        # WHAT NAMES THIS FILE DEFINES FOR OTHER FILES. An html page's
+        # import map is the only source of these today; it says what
+        # `@wterm/dom` resolves to for every module the page loads. Carried
+        # through because `build` applies it to the JAVASCRIPT files that
+        # use those names, not to the html that declares them.
+        :aliases (found :aliases)}))])
 
 (defn read-all
   ``Parse every job, across `workers` OS threads.
@@ -319,6 +325,27 @@
   # resolves to nothing and the reference stays an external rather than
   # picking whichever file was read first. Losing an edge says nothing
   # false; inventing one does.
+  # WHAT A BARE FILENAME MEANS. The page asks the server for `/wterm-dom.js`
+  # and the server looks in more than one directory to answer -- web/ first,
+  # then the vendored source (see `static-roots` in core.janet). A parser
+  # reading that URL cannot know which one holds it, so it guesses a sibling
+  # of the page, and every guess that misses draws a phantom beside the real
+  # file. So the last segment is indexed too, and a name that resolves
+  # nowhere else is looked up by it.
+  #
+  # LAST RESORT, AND ONLY WHEN UNAMBIGUOUS: two files sharing a basename
+  # resolve to neither, exactly as two files sharing a stem do. A guess that
+  # picks one of them would draw a confident edge that is wrong half the
+  # time.
+  (def by-leaf @{})
+  (each file live
+    (def full (node-name (file :rel)))
+    (def leaf (last (string/split "." (names/stem full))))
+    (put by-leaf leaf (array/push (or (by-leaf leaf) @[]) full)))
+  (def from-leaf @{})
+  (eachp [leaf names] by-leaf
+    (when (= 1 (length names)) (put from-leaf leaf (first names))))
+
   (def by-stem @{})
   (each file live
     (def full (node-name (file :rel)))
@@ -338,6 +365,17 @@
   # Collected as (user, used) -- the direction the scan discovers, since it
   # walks a file and asks what that file needs -- then flipped once at the end.
   # One flip in one place beats every reader having to remember.
+  # NAMES A PAGE GAVE TO FILES. An HTML file may carry an import map, which
+  # says what `@wterm/dom` means for every module the page loads (see the
+  # html spec). Those names appear in JAVASCRIPT files, not in the html that
+  # declares them, so the mapping is collected across the whole tree and
+  # applied wherever a name matches -- there is one page here and one map,
+  # and a project with two would want the same answer anyway.
+  (def aliases @{})
+  (each file live
+    (eachp [name target] (or (file :aliases) {})
+      (put aliases name target)))
+
   (def pairs @{})
   (def externals @{})
   (each file live
@@ -362,7 +400,17 @@
     (each name (or (file :imports) [])
       # A stem the tree can place becomes that file; a name that IS a node
       # (an import that wrote the extension) is taken as it stands.
-      (def target (or (from-stem name) (and (ours name) name)))
+      # An import map turns a package name into a path; the path is then
+      # resolved like any other. `@wterm/dom` arrives here as `wterm.dom`,
+      # which is the safe-name of the specifier, so the map is keyed both
+      # ways.
+      (def mapped (or (get aliases name) name))
+      (def target (or (from-stem mapped)
+                      (and (ours mapped) mapped)
+                      # A path that named no file may still name one in
+                      # another served directory -- matched on its last
+                      # segment. See `by-leaf` above.
+                      (from-leaf (last (string/split "." mapped)))))
       (cond
         target (unless (= target here) (put pairs [here target] true))
         # Anything else is a genuine external -- `fmt`, `Foundation`,
