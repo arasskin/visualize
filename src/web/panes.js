@@ -848,78 +848,49 @@ export function makeTerminalPane(root, prefix) {
   const termPanel = makePanel(root, {
     minWidth: 360, minHeight: 200,
     width: 'min(52rem, 94vw)', height: '24rem',
+    // OPENING IS A UI CHANGE. The session is not started here and not
+    // stopped by shutting: `boot` starts or attaches one when the pane is
+    // MADE, and `stop` ends it when the pane is destroyed. All this has to
+    // do is catch the pane up with a session that is already running --
+    // size it, draw what has happened, and start listening.
+    //
+    // IT USED TO DECIDE. It polled, chose between attaching and starting,
+    // replayed the backlog, and set the state line -- everything `boot`
+    // does, again, on every open. That is what made a fast open-then-close
+    // break: the work is asynchronous, `onShut` stopped the polling
+    // half-way through, and the rest of the sequence carried on and started
+    // it again behind a shut panel. A close during the first await landed on
+    // `disconnected`, because a request abandoned by closing looks exactly
+    // like a request that failed.
+    //
+    // Nothing here decides anything now, so there is nothing for a close to
+    // interrupt -- and the guard below means whatever is in flight simply
+    // stops mattering.
     onOpen: async () => {
       term.focus();
-      // A beat, so the panel's first-open default size has actually been laid
-      // out -- measure() in the same tick as the opening click reads a
+      // A beat, so the panel's first-open default size has actually been
+      // laid out -- measure() in the same tick as the opening click reads a
       // half-sized body and starts the session ~30 columns wide.
       //
-      // A TIMER, NOT requestAnimationFrame. rAF does not fire while the tab is
-      // hidden, so an onOpen that awaited a frame in a background tab -- the
-      // panel reopening as the machine wakes, say -- suspended here forever:
-      // no attach, no start, a state line saying nothing. The same
-      // hidden-tab trap as the emulator's paint path, and the same fix.
+      // A TIMER, NOT requestAnimationFrame. rAF does not fire while the tab
+      // is hidden, so an onOpen that awaited a frame in a background tab --
+      // the panel reopening as the machine wakes, say -- suspended here
+      // forever: no attach, no start, a state line saying nothing.
       await new Promise(r => setTimeout(r, 50));
-      // ATTACH TO A SESSION THAT IS ALREADY RUNNING, and only start one when
-      // there is none. (The old test was `generation === 0` -- a fact about
-      // THIS PAGE, not the server -- so a reload used to shoot the live agent
-      // and replace it, and the first keystroke went to a dead shell.)
-      try {
-        const now = await post('poll', { at: 0, generation: 0 });
-        // Unreachable is not "no session" -- starting here would shoot a live
-        // agent the moment the supervisor came back. But ABSENT is: no socket
-        // file means nothing has ever started, and starting is exactly what
-        // opening the panel is for. Confusing the two the other way left a
-        // fresh boot spinning at "reconnecting..." with nothing to reconnect
-        // to.
-        if (now.reachable === false && !now.absent) {
-          setState('reconnecting...');
-          startPolling();
-          return;
-        }
-        if (now.running) {
-          // REPLAY AT THE RECORDED GEOMETRY, NOT THE PANEL'S. The backlog is
-          // bytes the program drew for a specific terminal size; absolute
-          // cursor positions in it are meaningless in any other. Replaying a
-          // Claude session into a fresh differently-sized grid was scattering
-          // line fragments all over the reattached screen.
-          generation = now.generation;
-          term.reset();
-          term.resize(now.rows || 24, now.cols || 80);
-          // A TRIMMED HISTORY IS NOT REPLAYED. Once the backlog cap has eaten
-          // the front, what remains starts mid-frame -- often mid-escape --
-          // and painting it fills the scrollback with garbage the redraw
-          // nudge cannot reach, because a TUI repaints its live rows and
-          // nothing above them. Skipping the replay costs old scrollback and
-          // buys a clean screen; the nudge below fills in the current frame.
-          if (now.text && !now.trimmed) term.write(now.text);
-          at = now.at;
-          // NOW adapt to this panel: reflow the grid and tell the pty.
-          const size = measure();
-          if (term.resize(size.rows, size.cols)) {
-            await post('resize', size).catch(() => {});
-          }
-          // And ask the program for one clean frame. The recording may have
-          // been trimmed mid-frame by the backlog cap, and it may span old
-          // geometries; a full-screen program repaints itself completely on
-          // the resize nudge, painting over whatever the replay left. A
-          // line-oriented program ignores it, which is also right.
-          await post('redraw', {}).catch(() => {});
-          // A SERVER FROM BEFORE TEAR REPORTING answers without `from`, and
-          // the page then cannot tell a torn stream from an update -- the
-          // exact silent degradation that once cost a whole debugging round
-          // while every fix sat unrun on disk. Say so instead.
-          setState(now.from === undefined || now.from < 0
-            ? 'server outdated — restart ./visualize' : '');
-          startPolling();
-        } else {
-          syncSize();
-          startPolling();
-          startSession();
-        }
-      } catch (e) {
-        setState('disconnected');
-      }
+      // SHUT AGAIN ALREADY. Every step below is about a panel someone is
+      // looking at; if they have closed it in the meantime, doing any of it
+      // is at best wasted and at worst starts polling nobody asked for.
+      if (termPanel.shut) return;
+      // Tell the pty how big this panel is, and start listening. `syncSize`
+      // is debounced and `startPolling` is idempotent, so both are safe to
+      // call on an open that changed nothing.
+      syncSize();
+      startPolling();
+      // And ask the program for one clean frame, since the panel may be a
+      // different size than the last thing drawn into it. A full-screen
+      // program repaints completely; a line-oriented one ignores it, which
+      // is also right.
+      post('redraw', {}).catch(() => {});
     },
     // Collapsed, the session keeps running -- it is a window, not a switch --
     // but polling a screen nobody can see is wasted traffic.
@@ -990,6 +961,31 @@ export function makeTerminalPane(root, prefix) {
       if (now.running) {
         generation = now.generation;
         setProgram(now.program);
+        // AND SHOW WHAT IT HAS ALREADY SAID. Attaching without the backlog
+        // leaves a live session behind a blank screen until it happens to
+        // print again -- which for an agent waiting on a prompt is never.
+        // Done here rather than on open, because it belongs to attaching:
+        // the pane has a session now, and this is what that session looks
+        // like.
+        //
+        // REPLAY AT THE RECORDED GEOMETRY. The backlog is bytes the program
+        // drew for a specific terminal size, and absolute cursor positions
+        // in it mean nothing in another; replaying a claude session into a
+        // differently-sized grid scattered line fragments across the screen.
+        // The panel's own size is applied afterwards, by `syncSize` on open.
+        //
+        // A TRIMMED HISTORY IS NOT REPLAYED: once the backlog cap has eaten
+        // the front, what remains starts mid-frame, often mid-escape, and
+        // painting it fills the scrollback with garbage that no repaint
+        // reaches. The redraw nudge on open fills in the current frame.
+        term.resize(now.rows || 24, now.cols || 80);
+        if (now.text && !now.trimmed) term.write(now.text);
+        at = now.at;
+        // A SERVER FROM BEFORE TEAR REPORTING answers without `from`, and
+        // the page then cannot tell a torn stream from an update. Say so.
+        if (now.from === undefined || now.from < 0) {
+          setState('server outdated — restart ./visualize');
+        }
         return;
       }
       if (now.reachable === false && !now.absent) return;
