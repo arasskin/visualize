@@ -399,6 +399,34 @@
   (eachp [tail names] by-tail
     (when (= 1 (length (distinct names))) (put from-tail tail (first names))))
 
+  # A PACKAGE IS A DIRECTORY, AND ITS FILE IS `__init__.py`. `import
+  # otto.texting` names a directory in python, not a module file, and what
+  # runs is the `__init__.py` inside it -- so the import matched nothing and
+  # drew a node beside the very file it meant.
+  #
+  # Keyed the same two ways as everything else here: by the whole dotted
+  # path, and by every tail of it, because an import inside a subproject is
+  # written from that project's root and says nothing about where the
+  # project sits. `otto.texting` finds
+  # `shoppingagent.otto.texting.__init__.py`.
+  #
+  # AMBIGUITY RESOLVES TO NOTHING, as everywhere else in this function.
+  (def by-package @{})
+  (each file live
+    (def full (node-name (file :rel)))
+    (def stem (names/stem full))
+    (when (string/has-suffix? ".__init__" stem)
+      (def pkg (string/slice stem 0 (- (length stem) (length ".__init__"))))
+      (def parts (string/split "." pkg))
+      (for i 0 (length parts)
+        (def key (string/join (slice parts i) "."))
+        (unless (empty? key)
+          (put by-package key
+               (array/push (or (by-package key) @[]) full))))))
+  (def from-package @{})
+  (eachp [key names] by-package
+    (when (= 1 (length (distinct names))) (put from-package key (first names))))
+
   (def by-stem @{})
   (each file live
     (def full (node-name (file :rel)))
@@ -481,6 +509,9 @@
                       # A name written from a subproject's own root -- see
                       # `by-tail` above.
                       (from-tail mapped)
+                      # A python package: the directory's __init__.py. See
+                      # `by-package` above.
+                      (from-package mapped)
                       # A path that named no file may still name one in
                       # another served directory -- matched on its last
                       # segment. See `by-leaf` above.

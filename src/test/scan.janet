@@ -370,3 +370,33 @@ database  where things are kept
   (def g (scan/scan root))
   (def ext (map |($ :name) (filter |(not ($ :ours)) (g :nodes))))
   (t/is= ["?.otto.store"] ext "ambiguous, so it stays a name from outside"))
+
+(t/test "a python package is the directory's __init__.py"
+  # `import otto.texting` NAMES A DIRECTORY in python, not a module file,
+  # and what runs is the `__init__.py` inside it. Without this the import
+  # matched nothing and drew a node beside the very file it meant.
+  (def root (string (os/getenv "TMPDIR") "vz-pkg-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/otto"))
+  (os/mkdir (string root "/otto/texting"))
+  (spit (string root "/otto/texting/__init__.py") "x = 1\n")
+  (spit (string root "/otto/texting/cli.py") "import otto.texting\n")
+
+  (def g (scan/scan root))
+  (def ext (map |($ :name) (filter |(not ($ :ours)) (g :nodes))))
+  (t/is= [] ext "the package resolved rather than becoming an external")
+  (t/is= [["otto.texting.cli.py" "otto.texting.__init__.py"]] (g :edges))
+
+  # AND FROM A SUBPROJECT'S OWN ROOT, where the import says nothing about
+  # where the project sits -- the same tail rule the module lookup follows.
+  (def sub (string (os/getenv "TMPDIR") "vz-pkgsub-" (string (os/time))))
+  (os/mkdir sub)
+  (os/mkdir (string sub "/shop"))
+  (os/mkdir (string sub "/shop/otto"))
+  (os/mkdir (string sub "/shop/otto/texting"))
+  (spit (string sub "/shop/otto/texting/__init__.py") "x = 1\n")
+  (spit (string sub "/shop/main.py") "import otto.texting\n")
+
+  (def g2 (scan/scan sub))
+  (t/is= [] (map |($ :name) (filter |(not ($ :ours)) (g2 :nodes))))
+  (t/is= [["shop.main.py" "shop.otto.texting.__init__.py"]] (g2 :edges)))
