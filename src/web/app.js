@@ -73,6 +73,21 @@ async function watchSource() {
       if (out.changed && !first) {
         status.textContent = 'source changed, redrawing...';
         await send('run', -1, true);
+        // WHAT THE SERVER COUNTED WHILE WE WERE DRAWING is already in the
+        // picture we just got: the redraw reads the file at the moment it
+        // runs, not at the moment it was asked for. Parking on the number
+        // from BEFORE the draw asks to be told again about changes that
+        // drawing already included, and each of those costs another render
+        // -- three per edit, measured. Only the first carried the flash,
+        // because `animate` compares against the last drawing and the two
+        // that followed had nothing left to report; so the node one edits
+        // most, visualize.conf, was the one that never flashed.
+        const now = await fetch(`/watch?k=${encodeURIComponent(window.TOKEN)}`, {
+          method: 'POST',
+          body: JSON.stringify({ generation: -1 }),
+          signal: AbortSignal.timeout(35000),
+        }).then((x) => x.json()).catch(() => null);
+        if (now) sourceGeneration = now.generation;
       }
     } catch (e) {
       await new Promise((r) => setTimeout(r, 2000));
