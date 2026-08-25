@@ -565,10 +565,37 @@
   (default root "")
   (def dir (string/trim p "./"))
   (when (or (empty? root) (empty? dir)) (break []))
-  (def path (string root "/" dir "/" config-name))
+  # THE DIRECTORY IS FOUND BY NAMING THE DIRECTORIES, not by turning the
+  # name back into a path. A node name is the dotted form of a path, and
+  # that mapping is not reversible: a directory called `my.lib` is the node
+  # `my.lib`, and splitting on dots would send this looking for `my/lib`.
+  #
+  # So the tree is walked instead. At each step the real entries are named
+  # the way a node is named, and the one whose name the target starts with
+  # is descended into -- longest first, so `my.lib` wins over `my` when both
+  # are there. What is left over after a match is what remains to find.
+  (var here root)
+  (var rest dir)
+  (var found true)
+  (while (and found (not (empty? rest)))
+    (set found false)
+    (def entries
+      (sorted-by |(- (length $))
+                 (filter |(= :directory (os/stat (string here "/" $) :mode))
+                         (try (os/dir here) ([_] [])))))
+    (each entry entries
+      (unless found
+        (def named (normalise entry))
+        (when (or (= rest named) (string/has-prefix? (string named ".") rest))
+          (set here (string here "/" entry))
+          (set rest (if (= rest named) "" (string/slice rest (+ 1 (length named)))))
+          (set found true))))) 
+  (when (not (empty? rest)) (break []))
+  (def path (string here "/" config-name))
   (unless (os/stat path :mode) (break []))
   (def text (try (slurp path) ([_] nil)))
   (unless text (break []))
+  # The NAME prefix stays dotted: it is what the nodes are called.
   (def prefix (normalise dir))
   (def out @[])
   # THE CHILD'S OWN BINDINGS, READ FIRST. A nested config may name a prefix
@@ -640,6 +667,48 @@
                         (string "(" verb " " (string/join moved " ") ")")))))))
   out)
 
+(defn- pasted
+  ``The lines, with every `(visualize p)` replaced by p's own config.
+
+  A NESTED CONFIG IS PASTED IN, and that is the whole of the mechanism. The
+  lines that come back are ordinary lines: `run` binds and applies them like
+  any others, and a complaint about one is a complaint about the line the
+  paste put there.
+
+  DEPTH COSTS NOTHING. `nested-lines` puts p in front of the names its
+  lines mention, and `(visualize q)` inside p carries a name like every
+  other verb -- so it arrives here as `(visualize p.q)`, already pointing at
+  the right directory, and the next turn of this loop reads it. Two levels
+  or ten, the only thing that recurses is the paste.
+
+  AFTER THE LINE IT REPLACES, so a parent's own words still win: `run`
+  applies in order, and what is written here about p comes before what p
+  says about itself.
+
+  A CYCLE WOULD NOT TERMINATE -- a config naming a directory that names it
+  back -- so the walk is bounded. Any project nested a hundred deep is a
+  mistake rather than a layout, and stopping is better than hanging.``
+  [lines root]
+  (def out @[])
+  (var todo (array ;lines))
+  (var rounds 0)
+  (while (and (not (empty? todo)) (< rounds 100))
+    (++ rounds)
+    (def next @[])
+    (each line todo
+      (def targets (visualize-targets line))
+      (if (empty? targets)
+        (array/push out line)
+        (do
+          # The line itself is kept: it is what the editor draws, and its
+          # own complaints (an empty name) belong to it.
+          (array/push out line)
+          (each p targets
+            (each nested (nested-lines root p)
+              (array/push next nested))))))
+    (set todo next))
+  out)
+
 (defn run
   ``Every line, in order, against one fresh state.
 
@@ -659,6 +728,13 @@
   for its colours and what makes "the first binding of a token wins" true.
   Nothing else here is order-dependent across the two.``
   [lines &opt root]
+  # THE NESTED CONFIGS ARE PASTED IN FIRST, and then everything below runs
+  # on the result. A line that came from a subproject is a line: it binds,
+  # it applies, it complains, in the same two passes as every other -- and
+  # a `(visualize a.b)` among them is expanded by the same paste that put it
+  # there, so nesting goes as deep as the directories do with no mechanism
+  # of its own.
+  (def lines (if root (pasted lines root) lines))
   (def state (new-state))
   (def problems @{})
   # Pass one: the bindings. A complaint here is the prefix line's own.
@@ -671,20 +747,6 @@
       # A line whose prefix already failed keeps that complaint rather than
       # collecting a second one for the same text.
       (unless (problems i) (put problems i wrong))))
-  # PASS THREE: THE NESTED PROJECTS. `(visualize p)` brings in p's own
-  # config, and those lines are applied after this file's own so that what
-  # is written HERE about p still wins -- a parent that says `(hide lib)`
-  # means it, whatever lib's config would rather draw.
-  #
-  # Needs the root to find the file, so a caller that does not pass one --
-  # the tests, mostly -- simply gets no nesting. There is nothing to read
-  # without a directory to read it from.
-  (when root
-    (eachp [i line] lines
-      (each p (visualize-targets line)
-        (each nested (nested-lines root p)
-          (when-let [wrong (eval-line nested state)]
-            (unless (problems i) (put problems i wrong)))))))
   [state problems])
 
 # -- the config file -------------------------------------------------------

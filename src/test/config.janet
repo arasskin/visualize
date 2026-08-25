@@ -520,3 +520,42 @@
   (def [s7 p7] (config/run @["(visualize lib)"]))
   (t/is= @{} p7)
   (t/is= [] (s7 :folded)))
+
+(t/test "nesting goes as deep as the directories do"
+  (def root (string (os/getenv "TMPDIR") "vz-deep-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/a"))
+  (os/mkdir (string root "/a/b"))
+  (spit (string root "/a/visualize.conf") "(visualize b)\n")
+  (spit (string root "/a/b/visualize.conf") "(box leaf)\n(fold leaf)\n")
+
+  # A CHILD'S OWN `visualize` IS A LINE LIKE ANY OTHER. `(visualize b)` in a
+  # carries a name, so the paste puts a's prefix on it and it arrives as
+  # `(visualize a.b)` -- already pointing at the right directory, and read
+  # by the same paste that produced it. Nothing recurses but the paste.
+  (def [state problems] (config/run @["(visualize a)"] root))
+  (t/is= @{} problems)
+  (t/is= ["a.b.leaf"] (map |($ :prefix) (state :groups)))
+  (t/is= ["a.b.leaf"] (state :folded))
+
+  # And naming the deep one directly is the same thing said in one line.
+  (def [s2 _] (config/run @["(visualize a.b)"] root))
+  (t/is= ["a.b.leaf"] (s2 :folded)))
+
+(t/test "a directory may have a dot in its name"
+  # THE MAPPING IS NOT REVERSIBLE, which is why the directory is found by
+  # NAMING the directories rather than by turning the name back into a path.
+  # `my.lib` is one directory whose name has a dot in it, and splitting on
+  # dots would send this looking for `my/lib`.
+  (def root (string (os/getenv "TMPDIR") "vz-dot-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/my.lib"))
+  (os/mkdir (string root "/my.lib/inner"))
+  (spit (string root "/my.lib/visualize.conf") "(box thing)\n(visualize inner)\n")
+  (spit (string root "/my.lib/inner/visualize.conf") "(fold deep)\n")
+
+  (def [state problems] (config/run @["(visualize my.lib)"] root))
+  (t/is= @{} problems)
+  (t/is= ["my.lib.thing"] (map |($ :prefix) (state :groups)))
+  # ...and a second level, reached THROUGH the dotted name.
+  (t/is= ["my.lib.inner.deep"] (state :folded)))
