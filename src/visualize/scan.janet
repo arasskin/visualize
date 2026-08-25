@@ -94,14 +94,27 @@
 
   Directories are pruned as they are met rather than filtered afterwards, so
   a node_modules with fifty thousand files in it costs one `stat` instead of
-  fifty thousand.``
-  [root]
+  fifty thousand.
+
+  `extra-skips` are further directory names to prune -- what the config has
+  hidden, which cannot change a drawing it is not in.``
+  [root &opt extra-skips]
   (def found @[])
   # Each spec's own skips, merged with the global set once rather than per
   # directory.
   (def skips (merge @{} skip-dirs))
   (each spec specs
     (each dir (or (spec :skip-dirs) []) (put skips dir true)))
+  # WHAT THE DRAWING HAS NO USE FOR. A directory the config hides cannot
+  # change the picture, so walking it is work spent to be ignored -- and on
+  # a tree where the hidden part is most of the tree, it is most of the
+  # work. One project here hides an `archive/` holding 2064 of its 2283
+  # files, and paid 58ms a tick to keep noticing that they had not moved.
+  #
+  # PASSED IN RATHER THAN READ. This module does not know the config
+  # language and should not learn it; the caller that owns the config says
+  # which top-level names it has hidden. See `scanned` in core.janet.
+  (each dir (or extra-skips []) (put skips dir true))
 
   (defn walk [dir rel]
     (each entry (try (os/dir dir) ([_] []))
@@ -602,8 +615,8 @@
   graphviz draws an empty graph without complaint, so nothing here has to
   special-case it. What remains of :error is real render failures, which is
   what that channel is for.``
-  [root &opt workers]
-  (build (read-all (find-files root) workers)))
+  [root &opt workers extra-skips]
+  (build (read-all (find-files root extra-skips) workers)))
 
 # -- watching ---------------------------------------------------------------
 #
@@ -652,11 +665,23 @@
 
   Size as well as mtime because a filesystem's mtime granularity is a
   second on some systems, and an edit that lands within the same second as
-  the last one would otherwise look like nothing happened.``
-  [root]
+  the last one would otherwise look like nothing happened.
+
+  `yield?` makes the walk COOPERATIVE, which is what keeps a big tree from
+  being felt in the terminal. `os/stat` is synchronous and janet has no
+  async filesystem call, so a walk of a few thousand files holds the event
+  loop for as long as it takes -- 58ms on a 2283-file tree, every tick,
+  while every request waits behind it. Handing the loop back every so often
+  turns one long block into many short ones: the walk takes the same total
+  time and stops being a stall.
+
+  Off by default, because the walk is also called from places where nothing
+  else is waiting and a yield would only add scheduling.``
+  [root &opt yield? extra-skips]
   (var sum 0)
   (var count 0)
-  (each job (find-files root)
+  (var since 0)
+  (each job (find-files root extra-skips)
     (def stats (os/stat (job :path)))
     (when stats
       (++ count)
@@ -665,7 +690,11 @@
       (+= sum (+ (get stats :modified 0)
                  (get stats :size 0)
                  (length (job :rel)))))
-  )
+    (when yield?
+      (++ since)
+      # A few hundred stats is well under a millisecond; yielding per file
+      # would cost more in scheduling than the stats themselves.
+      (when (>= since 200) (set since 0) (ev/sleep 0))))
   [sum count])
 
 (defn watch
@@ -678,16 +707,21 @@
   The first fingerprint is taken WITHOUT firing: the tree existing is not a
   change, and a page that just loaded should not immediately be told to
   redraw what it is already showing.``
-  [root changed &opt every]
+  [root changed &opt every skips-of]
   (default every 0.7)
   (var running true)
-  (var last (fingerprint root))
+  # `skips-of` is asked EACH TICK rather than once, because what the config
+  # hides changes while the program runs -- unhiding a directory has to put
+  # it back under watch, or an edit in it would never be noticed.
+  (defn skips [] (if skips-of (skips-of) []))
+  (var last (fingerprint root false (skips)))
   (ev/go
     (fn []
       (while running
         (ev/sleep every)
         (when running
-          (def now (try (fingerprint root) ([_] nil)))
+          # YIELDING, because this is the loop everything else shares.
+          (def now (try (fingerprint root true (skips)) ([_] nil)))
           (when (and now (not= now last))
             (set last now)
             # A failure in the callback must not end the watch: the next

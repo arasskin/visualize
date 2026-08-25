@@ -197,10 +197,37 @@
   # it per draw costs a few milliseconds and removes the window entirely.
   (var tree nil)
   (var tree-print nil)
+  # WHAT THE CONFIG HAS HIDDEN, as top-level directory names. A directory
+  # the drawing does not show cannot change the drawing, so the scan skips
+  # it -- and on a tree whose hidden part is most of the tree, that is most
+  # of the work saved.
+  #
+  # TOP LEVEL ONLY, and whole names only: `(hide archive)` prunes
+  # `archive/`, while `(hide src.test)` does not prune anything, because
+  # pruning `src` would take the rest of it with it. The cheap, safe half of
+  # the idea is where nearly all the saving is anyway.
+  #
+  # READ FROM THE FILE rather than from a running config, because this is
+  # what decides whether the config can be read at all -- and a hide that
+  # has just been removed has to put its directory back, which asking each
+  # time is what gives.
+  (defn hidden-dirs []
+    (def out @[])
+    (each line (try (config/read-config config-path) ([_] []))
+      (each hit (or (peg/match ~(any (+ (* "(hide" (some (set " \t"))
+                                           (<- (some (if-not (+ (set " \t()") -1) 1))))
+                                        1))
+                               (string line)) [])
+        (def name (string/trim hit "./"))
+        (unless (or (empty? name) (string/find "." name))
+          (when (= :directory (os/stat (string root "/" name) :mode))
+            (array/push out name)))))
+    out)
+
   (defn scanned []
-    (def now (scan/fingerprint root))
+    (def now (scan/fingerprint root false (hidden-dirs)))
     (when (or (nil? tree) (not= now tree-print))
-      (set tree (scan/scan root))
+      (set tree (scan/scan root nil (hidden-dirs)))
       (set tree-print now))
     tree)
   (defn rescan [] (set tree nil))
@@ -744,7 +771,9 @@
   (scan/watch root
               (fn []
                 (rescan)
-                (++ source-generation)))
+                (++ source-generation))
+              nil
+              hidden-dirs)
   # Off the server, not off the constant: they differ whenever the first
   # choice was taken, and printing the wrong one sends you to somebody else's
   # page.
