@@ -53,6 +53,21 @@ export function makeTerminal(element, options = {}) {
   let ready = false;        // ...and once its init() has finished
   let pending = [];         // writes that arrived first
   let rows = 24, cols = 80; // what has been asked for meanwhile
+  // WHAT THE GRID IS ACTUALLY AT, which is not the same question. `rows` and
+  // `cols` are what the PANE asked for; these are what the engine was last
+  // told. They come apart whenever a resize arrives before the WASM has
+  // loaded -- the request is recorded and the grid is not touched -- and the
+  // guard in `resize` has to compare against the applied size, not the
+  // requested one, or a second request for a size already RECORDED is
+  // dropped as redundant while the grid still holds its 24-row default.
+  //
+  // That is what broke vim. Reconnecting resizes twice: once to the size the
+  // recording was made at, then to the size this panel actually is. Both
+  // landed before the engine was ready, the second was swallowed as a
+  // no-op, and the grid stayed at 30 rows while the pty was told 20 -- so
+  // vim painted 20 rows into a 30-row screen and ten rows of every frame
+  // fell into the scrollback.
+  let appliedRows = 0, appliedCols = 0;
 
   /* THE INLINE HEIGHT WTERM WRITES ONCE, AND WE DO NOT WANT.
 
@@ -114,6 +129,12 @@ export function makeTerminal(element, options = {}) {
     // replayed after them, which on screen is a line of typing coming out
     // duplicated and out of order.
     ready = true;
+    // THE SIZE THE PANE ASKED FOR WHILE WE WERE LOADING. The constructor
+    // above was given `rows`/`cols` as they stood at that moment, and they
+    // may have moved since -- a panel measured, a session reattached. This
+    // is where a request recorded before the engine existed finally lands.
+    appliedRows = rows; appliedCols = cols;
+    if (term.rows !== rows || term.cols !== cols) term.resize(cols, rows);
     for (const chunk of pending) term.write(chunk);
     pending = [];
     unlockHeight();
@@ -147,10 +168,20 @@ export function makeTerminal(element, options = {}) {
     // Answers whether anything changed, because the caller only tells the
     // server about a size that is new.
     resize(nextRows, nextCols) {
-      if (nextRows === rows && nextCols === cols) return false;
+      const known = nextRows === rows && nextCols === cols;
       rows = nextRows; cols = nextCols;
-      if (ready) { term.resize(cols, rows); unlockHeight(); paint(); }
-      return true;
+      // APPLIED IS WHAT COUNTS. A size the grid already has is nothing to do
+      // again; a size only RECORDED still has to reach the engine.
+      if (ready && (rows !== appliedRows || cols !== appliedCols)) {
+        term.resize(cols, rows);
+        appliedRows = rows; appliedCols = cols;
+        unlockHeight();
+        paint();
+      }
+      // Whether the CALLER has news -- it uses this to decide whether to
+      // tell the server -- which is still a question about what was asked
+      // for, not about what the grid was doing.
+      return !known;
     },
 
     // A SESSION THAT WENT AWAY leaves a screen that is about to be wrong. The
