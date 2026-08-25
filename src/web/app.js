@@ -56,7 +56,16 @@ window.addEventListener('resize', () => {
 // poll every second, and an edit shows up as fast as the walk notices it.
 // The chain re-parks itself; a failure backs off rather than hammering a
 // server that may be restarting.
-let sourceGeneration = 0;
+// NOT A GENERATION THE SERVER CAN EVER REPORT. The page has to tell a first
+// park -- where it is learning where the counter stands -- from a real
+// change, and it used to do that by treating 0 as "not yet known". But a
+// freshly started server's counter IS 0, so the first edit after a start
+// bumped it to 1 while the page still held 0, read that as the first park,
+// and swallowed the redraw. The second edit worked, which is what made it
+// look like the watcher was slow to wake rather than one change short.
+//
+// -1 is a number the server never counts to, so the two cannot collide.
+let sourceGeneration = -1;
 
 async function watchSource() {
   for (;;) {
@@ -67,7 +76,7 @@ async function watchSource() {
         signal: AbortSignal.timeout(35000),
       });
       const out = await r.json();
-      const first = sourceGeneration === 0;
+      const first = sourceGeneration === -1;
       sourceGeneration = out.generation;
       // `first` is the page learning where the counter started, not an edit.
       if (out.changed && !first) {
