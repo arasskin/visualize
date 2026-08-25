@@ -491,17 +491,26 @@
     # Regenerate means "the source changed and I am telling you", so the
     # tree is dropped before the edit is drawn.
     (when (= action "regenerate") (rescan))
-    # Drawn by graph, which owns what a config means. An action that changes
-    # no picture is still RUN -- the complaints are what the editor draws
-    # under the lines -- and only the drawing is skipped.
+    # ALWAYS RUN, RARELY DRAW. Running is what produces the per-line
+    # complaints the editor writes under the rows, and every action needs
+    # those. Drawing is separate and is now asked for explicitly.
     (def [state problems] (config/run lines))
-    # An action that cannot have changed the picture is still RUN -- the
-    # complaints are what the editor writes under the rows -- and only the
-    # drawing is skipped.
+    # THE WATCHER OWNS THE REDRAW, and it is the only caller that sets
+    # `draw`. An edit from the page SAVES and stops there: the write moves
+    # the file's mtime, the watcher's next tick sees the tree changed, and
+    # the page is told to redraw exactly as it is for an edit to any other
+    # file. The config used to be the one file whose editor drew its own
+    # result, which meant two paths to the same picture and a picture that
+    # could differ between them.
+    #
+    # `check` never draws whatever it says, because it does not even save.
+    (def wants-draw (and (not asking)
+                         (truthy? (get sent "draw"))
+                         (config/draws action)))
     (def [ok result]
-      (if (or asking (not (config/draws action)))
-        [true ""]
-        (graph/render-svg (scanned) state)))
+      (if wants-draw
+        (graph/render-svg (scanned) state)
+        [true ""]))
     # THE SAME LIST THE PAGE LOAD SHOWS. The browser replaces its rows with
     # what comes back here, so a reply carrying the notes would put them on
     # screen as rows -- and every index after that would be one line out.

@@ -351,16 +351,20 @@ function afterMove(i, at, to) {
 // One shape for every button: what to do, and which line to do it to. The
 // server edits the file, re-runs it, and returns both the new lines and the new
 // graph -- so the page never has to guess what the file now says.
+// `keepView` marks the WATCHER'S redraw: it means "the source moved, draw it
+// again, and do not yank the view someone chose". It is also the one call
+// that needs a picture back -- an edit made from this page saves and stops,
+// and the watcher notices the write and asks for the drawing. One redraw
+// path instead of two, so a config edit and a source edit arrive the same
+// way.
 async function send(action, index, keepView) {
   if (busy) return;
   busy = true;
   draw();
-  // Inserting only saves; saying 'drawing' would be a lie, and the request
-  // comes back too fast for the message to be read anyway.
-  // Inserting adds an empty line, which draws the same graph -- so it says
-  // "saving" rather than promising a redraw that would change nothing.
-  const draws = action !== 'insert-above' && action !== 'insert-below';
-  status.textContent = draws ? 'drawing...' : 'saving...';
+  // AN EDIT SAVES; ONLY THE WATCHER'S REDRAW DRAWS. Saying "drawing" for an
+  // edit would promise a picture this request is not going to bring back --
+  // the watcher notices the write and asks for it a moment later.
+  status.textContent = keepView ? 'drawing...' : 'saving...';
   const t0 = performance.now();
   try {
     // The token goes in the query, which is where the server looks for it
@@ -368,7 +372,10 @@ async function send(action, index, keepView) {
     // which is exactly what the panel's buttons were getting.
     const r = await fetch(`/config?k=${encodeURIComponent(window.TOKEN)}`, {
       method: 'POST',
-      body: JSON.stringify({ action, index, lines }),
+      // `draw` is what asks for an SVG. Only the watcher's own redraw sets
+      // it; an edit saves and waits to be told, like every other change to
+      // a file in the tree.
+      body: JSON.stringify({ action, index, lines, draw: !!keepView }),
     });
     const out = await r.json();
     // No `lines` back means the request never got as far as editing the file --
@@ -415,9 +422,13 @@ async function send(action, index, keepView) {
       }
       const count = Object.keys(faults).length;
       const ms = Math.round(performance.now() - t0);
+      // SAY WHAT HAPPENED, which for an edit is a save and nothing else --
+      // the drawing comes back on the watcher's own tick a moment later, and
+      // claiming to have drawn here would be claiming the picture on screen
+      // is already the new one.
       status.textContent = count
         ? `saved, ${count} line${count > 1 ? 's' : ''} failed`
-        : draws ? `saved and drawn in ${ms}ms` : 'saved';
+        : out.svg ? `drawn in ${ms}ms` : 'saved';
     }
   } catch (e) {
     problems.textContent = e.message;
