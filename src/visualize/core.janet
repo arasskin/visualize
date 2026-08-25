@@ -476,9 +476,24 @@
     # make the first edit after a restart write a file with the notes gone.
     # They are taken from the file as it is on disk and put back after the
     # edit, so an edit is an edit to the config and nothing else.
-    (def kept (config/terminals (config/read-config config-path)))
-    (def edited (config/edit (map string (get sent "lines" [])) action index))
-    (def lines (config/remember-terminals edited kept))
+    (def on-disk (config/read-config config-path))
+    (def kept (config/terminals on-disk))
+    # A REDRAW DRAWS WHAT IS ON DISK, and does not write. The watcher asks
+    # for one because the FILE moved, so the page's own copy of the lines is
+    # by definition the old one -- sending it back wrote the edit away, the
+    # file changed again, the watcher fired again, and the graph flashed
+    # through several drawings before settling. The page gets the file's
+    # lines in the reply and catches up from there.
+    #
+    # This is also why `draw` and an edit are different requests rather than
+    # one with a flag: an edit is the page telling the server what the file
+    # should say, and a redraw is the server telling the page what it does.
+    (def redrawing (and (truthy? (get sent "draw")) (= action "run")))
+    (def edited
+      (if redrawing
+        on-disk
+        (config/edit (map string (get sent "lines" [])) action index)))
+    (def lines (if redrawing edited (config/remember-terminals edited kept)))
     # `check` ASKS WITHOUT TELLING. It runs the lines and answers with what
     # was wrong, and writes nothing -- the compose bar uses it to find out
     # whether what you typed parses before that text reaches the file. Every
@@ -486,7 +501,8 @@
     #
     # Save first, for those: the file is the thing being edited, and it
     # should hold what you just did even if drawing it then fails.
-    (def asking (= action "check"))
+    # A redraw writes nothing: it has nothing new to say about the file.
+    (def asking (or (= action "check") redrawing))
     (unless asking (config/write-config config-path lines))
     # Regenerate means "the source changed and I am telling you", so the
     # tree is dropped before the edit is drawn.
@@ -504,9 +520,7 @@
     # could differ between them.
     #
     # `check` never draws whatever it says, because it does not even save.
-    (def wants-draw (and (not asking)
-                         (truthy? (get sent "draw"))
-                         (config/draws action)))
+    (def wants-draw (and (truthy? (get sent "draw")) (config/draws action)))
     (def [ok result]
       (if wants-draw
         (graph/render-svg (scanned) state)
