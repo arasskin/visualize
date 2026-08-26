@@ -551,6 +551,34 @@
                       (from-leaf (last (string/split "." mapped)))))
       (cond
         target (unless (= target here) (put pairs [here target] true))
+
+        # A NAME WHOSE OWN PREFIX RESOLVED IS A SYMBOL, NOT A MODULE, and is
+        # dropped rather than invented. Python's `from otto.models import
+        # Cart` could mean the submodule `otto/models/Cart.py` or the class
+        # `Cart` inside `otto/models.py`, and nothing in the syntax says
+        # which -- so the parser reports BOTH readings and leaves the choice
+        # to whoever can see the files. That is here.
+        #
+        # `otto.models` resolved to a real file, so `otto.models.Cart` is the
+        # class, and a class is not a dependency of its own module. Drawing
+        # it made `?.otto.models.FetchFn` a third-party package sitting
+        # beside `otto.models.py` itself -- three hundred and sixty externals
+        # on shoppingagent, most of them types.
+        #
+        # ONLY WHEN THE PREFIX RESOLVED. `from typing import cast` leaves
+        # `typing` external too, and `?.typing.cast` is no more wrong than
+        # `?.typing`; both are outside the tree and neither is checked
+        # against files that are not there.
+        (let [parts (string/split "." name)
+              prefix (string/join (slice parts 0 -2) ".")]
+          (and (> (length parts) 1)
+               (not (empty? prefix))
+               (or (from-stem prefix)
+                   (and (ours prefix) prefix)
+                   (from-tail prefix)
+                   (from-package prefix))))
+        nil
+
         # Anything else is a genuine external -- `fmt`, `Foundation`,
         # `@wterm/core` -- and becomes a node so it can be grouped and
         # hidden like any other.

@@ -80,7 +80,32 @@ from . import sibling
 `` "t.py"))
   (t/ok (index-of "os" (got :imports)))
   (t/ok (index-of "otto.store" (got :imports)) "dotted modules stay whole")
-  (t/ok (not (index-of "Cart" (got :imports))) "the symbol is not the module"))
+  # BOTH READINGS, because the syntax does not say which one it is: `Cart`
+  # here is a class, but `cart` in `from otto.mcp import cart` is a file, and
+  # the two lines are the same shape. The scan keeps whichever names a file
+  # -- see "an imported name that is a class is not a node" below.
+  (t/ok (index-of "otto.store.Cart" (got :imports)) "the symbol reading too"))
+
+(t/test "a parenthesised import list spans lines"
+  # THE FORM A LONG IMPORT IS ACTUALLY WRITTEN IN, and the line-anchored
+  # pattern this replaced could only ever see its first line -- so
+  # `store_order` and `store_retailer` below were silently dropped, and the
+  # files they name looked like nothing imported them.
+  (def got (parser/run python/spec ``
+from otto import (
+    store_cart,
+    store_order,
+    store_retailer,
+)
+`` "t.py"))
+  (t/ok (index-of "otto.store_cart" (got :imports)))
+  (t/ok (index-of "otto.store_order" (got :imports)) "past the first line")
+  (t/ok (index-of "otto.store_retailer" (got :imports)) "and the last"))
+
+(t/test "an alias names no file"
+  (def got (parser/run python/spec "from otto import store_cart as sc\n" "t.py"))
+  (t/ok (index-of "otto.store_cart" (got :imports)) "the thing renamed")
+  (t/ok (not (index-of "otto.sc" (got :imports))) "not the local name"))
 
 (t/test "an import that IS a string literal survives the noise pass"
   # THE BUG THIS EXISTS FOR: blanking string literals before reading imports
@@ -425,3 +450,35 @@ database  where things are kept
          "the sibling resolved rather than becoming an external")
   (t/is= [["src.main.py" "src.db.py"]] (g :edges)
          "and it is the sibling, not the file with the same name elsewhere"))
+
+(t/test "an imported name that is a class is not a node"
+  # `from otto.models import Cart` and `from otto.mcp import cart` ARE THE
+  # SAME LINE as far as the syntax goes: a module, `import`, a name. Python
+  # tells them apart by looking -- a submodule if one exists, an attribute
+  # otherwise -- so the parser reports both readings and the resolution here
+  # keeps whichever names a file.
+  #
+  # THE BUG THIS EXISTS FOR came in two halves. Reading only the module lost
+  # `otto/mcp/cart.py` and every store beside it, so real files looked
+  # unimported. Reading both and externalising the misses drew a `?.` node
+  # for every class and type in the tree -- three hundred and sixty of them
+  # on one project, `?.otto.models.FetchFn` sitting beside `otto.models.py`
+  # itself. A name whose own prefix resolved is a symbol, and is dropped.
+  (def root (string (os/getenv "TMPDIR") "vz-cls-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/otto"))
+  (os/mkdir (string root "/otto/mcp"))
+  (spit (string root "/otto/models.py") "class Cart: pass\n")
+  (spit (string root "/otto/mcp/__init__.py") "")
+  (spit (string root "/otto/mcp/cart.py") "x = 1\n")
+  (spit (string root "/otto/mcp/core.py")
+        "from otto.models import Cart\nfrom otto.mcp import cart\n")
+
+  (def g (scan/scan root))
+  (def edges (sorted (map |(string (first $) " -> " (get $ 1)) (g :edges))))
+  (t/ok (index-of "otto.mcp.core.py -> otto.mcp.cart.py" edges)
+        "the submodule reading won where a file backs it")
+  (t/ok (index-of "otto.mcp.core.py -> otto.models.py" edges)
+        "and the module itself is still a dependency")
+  (t/is= [] (map |($ :name) (filter |(not ($ :ours)) (g :nodes)))
+         "the class invented no external"))
