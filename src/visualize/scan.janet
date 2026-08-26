@@ -527,15 +527,32 @@
       # than modules), so the by-leaf map calls the name ambiguous and gives
       # up -- while the file sitting next to the importer is not ambiguous
       # at all.
+      # EVERY DIRECTORY ABOVE THE IMPORTER, nearest first. The immediate one
+      # is where a bare `import db` looks, and the ancestors are where a
+      # package-qualified `from otto import db` looks -- `otto.db` written
+      # inside `shoppingagent/otto/store_cart.py` means
+      # `shoppingagent/otto/db.py`, which is the name resolved against
+      # `shoppingagent/`, the importer's GRANDparent.
+      #
+      # Nearest first because the nearest is what python would find first,
+      # and because it is what makes this beat the global fallbacks: six
+      # files in this tree are called `otto.db` -- one module and three
+      # SQLITE DATABASES (`otto.db`, `otto.db-shm`, `otto.db-wal`) -- so the
+      # by-leaf map calls the name ambiguous and gives up, while the file one
+      # directory up from the importer is not ambiguous at all.
       (def beside
-        # The importer's own directory: its node name with the extension
-        # taken off (`...src.main.py` -> `...src.main`) and then the file's
-        # own segment dropped as well.
-        (let [parts (string/split "." (names/stem (node-name (file :rel))))
-              dir (string/join (slice parts 0 -2) ".")]
-          (when (not (empty? dir))
+        (let [parts (string/split "." (names/stem (node-name (file :rel))))]
+          (var found nil)
+          # From the importer's own directory up to the root, stopping at
+          # the first hit.
+          (var depth (- (length parts) 1))
+          (while (and (nil? found) (> depth 0))
+            (def dir (string/join (slice parts 0 depth) "."))
             (def candidate (string dir "." mapped))
-            (or (from-stem candidate) (and (ours candidate) candidate)))))
+            (set found (or (from-stem candidate)
+                           (and (ours candidate) candidate)))
+            (-- depth))
+          found))
       (def target (or (from-stem mapped)
                       (and (ours mapped) mapped)
                       beside

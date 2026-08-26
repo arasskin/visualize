@@ -482,3 +482,34 @@ database  where things are kept
         "and the module itself is still a dependency")
   (t/is= [] (map |($ :name) (filter |(not ($ :ours)) (g :nodes)))
          "the class invented no external"))
+
+(t/test "a package-qualified import resolves against the package root"
+  # `from otto import db` inside `otto/store_cart.py` means `otto/db.py` --
+  # the name resolved against the importer's GRANDparent, not its own
+  # directory. Checking only the immediate directory built
+  # `...otto.otto.db`, which exists nowhere, so the name fell through to the
+  # global fallbacks.
+  #
+  # AND THE FALLBACKS CANNOT ANSWER IT, which is why this matters at a scan
+  # root holding more than one project: `otto.db` also names three SQLITE
+  # DATABASES here, so the by-leaf map calls it ambiguous and gives up --
+  # correctly, since it has no way to know which was meant. The file one
+  # directory up from the importer is not ambiguous at all.
+  (def root (string (os/getenv "TMPDIR") "vz-anc-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/shop"))
+  (os/mkdir (string root "/shop/otto"))
+  (os/mkdir (string root "/shop/data"))
+  (spit (string root "/shop/otto/__init__.py") "")
+  (spit (string root "/shop/otto/db.py") "x = 1\n")
+  (spit (string root "/shop/otto/store_cart.py") "from otto import db\n")
+  # The decoys that make the global lookup ambiguous.
+  (spit (string root "/shop/data/otto.db") "")
+  (spit (string root "/shop/data/otto.db-wal") "")
+
+  (def g (scan/scan root))
+  (def edges (map |(string (first $) " -> " (get $ 1)) (g :edges)))
+  (t/ok (index-of "shop.otto.store_cart.py -> shop.otto.db.py" edges)
+        "the module beside it won, not the database")
+  (t/ok (not (some |(string/has-prefix? "?." ($ :name)) (g :nodes)))
+        "and nothing was invented as an external"))
