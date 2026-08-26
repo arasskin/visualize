@@ -671,10 +671,11 @@
         # hidden like any other.
         #
         # MARKED AS NOT BEING HERE. An external is a name, not a place:
-        # there is no directory behind it and no path to prefix. Saying so
-        # in the name is what lets a nested config's `(hide os)` mean the
-        # external `os` rather than a file called os under that project --
-        # see `nested-lines` in config.janet.
+        # there is no directory behind it and no path to prefix. The mark is
+        # what a config names it by -- `(hide ?.os)` is the external and
+        # `(hide os)` a file called os -- so a nested project's lines mean
+        # the same thing after they are prefixed as they did before. See
+        # `nested-lines` in config.janet and `matches?` in select.janet.
         (do (put externals (names/external name) true)
             (unless (= name here)
               (put pairs [here (names/external name)] true))))))

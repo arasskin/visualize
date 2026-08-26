@@ -17,8 +17,10 @@
 #     (lines)                 write each file's line count on it
 #
 # `~` IS THE PROJECT, the way a shell expands ~ to a home directory. Every
-# other name is literal, so (box SwiftUI) and (hide WebKit) work on the
-# imported frameworks exactly as they do on our own files.
+# other name is literal, and a name from outside the tree carries the `?.`
+# the drawing shows it with -- (box ?.SwiftUI), (hide ?.WebKit) -- so that
+# one name means one thing wherever it is written. See `matches?` in
+# select.janet.
 #
 # The config is real Janet, so it is not limited to the list above:
 #

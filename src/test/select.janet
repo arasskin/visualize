@@ -225,3 +225,40 @@
   (def [out] (select/fold graph ["a" "a.b"] {}))
   (t/is= ["a"] (map |($ :name) (out :nodes))
          "the wider one declared first takes everything"))
+
+(t/test "an external is named with its mark, and only with its mark"
+  # A NAME MEANS ONE THING WHEREVER IT IS WRITTEN. `(hide os)` used to match
+  # `?.os` as a fallback, so a name's meaning depended on where it sat: at the
+  # top level `pathlib` found the external, but the same line inside
+  # `(visualize shoppingagent)` did not. A nested config's names take the
+  # project's prefix unless they name something outside the tree, so an
+  # unmarked external travelled up bare and matched nothing -- which is how a
+  # child that hid uvicorn still drew it in the parent.
+  (def ours {"otto.mcp.core.py" true})
+  (t/ok (select/matches? "?.uvicorn" "?.uvicorn" ours) "marked matches")
+  (t/ok (not (select/matches? "?.uvicorn" "uvicorn" ours))
+        "and unmarked no longer does")
+
+  # THE MARK PREFIX-MATCHES like any other, so `?.` groups externals the way
+  # a directory groups files.
+  (t/ok (select/matches? "?.structlog.typing" "?.structlog" ours)
+        "a marked prefix reaches the names under it")
+  (t/ok (select/matches? "?.anything" "?." ours) "and `?.` alone is all of them")
+
+  # A REAL FILE IS STILL ITS OWN NAME. The rule takes nothing away from
+  # names that match the tree: `otto.mcp` is a directory here, not a library.
+  (t/ok (select/matches? "otto.mcp.core.py" "otto.mcp" ours))
+  (t/ok (not (select/matches? "otto.mcp.core.py" "?.otto.mcp" ours))
+        "and marking it stops it matching the file"))
+
+(t/test "an external under a name we also own is told apart by the mark"
+  # `?.archive.otto-py.ui.tailwindcss` is a name from OUTSIDE that begins
+  # with a directory we have. `(hide archive)` hides the files; the external
+  # needs `(hide ?.archive)`, and the two are separate decisions rather than
+  # one ambiguous one.
+  (def ours {"archive.otto-py.core.py" true})
+  (t/ok (select/matches? "archive.otto-py.core.py" "archive" ours))
+  (t/ok (not (select/matches? "?.archive.otto-py.ui" "archive" ours))
+        "hiding the directory leaves the external alone")
+  (t/ok (select/matches? "?.archive.otto-py.ui" "?.archive" ours)
+        "and the marked name reaches it"))

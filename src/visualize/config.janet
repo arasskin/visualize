@@ -178,7 +178,10 @@
 #
 # The captures are shaped so `apply` below reads them as [verb & args]: the
 # verb name as a keyword, then its arguments as strings.
-(def- grammar
+# EXPORTED so tooling reads a config the way the app does. `tools/mark-externals`
+# rewrites names in place and must agree with this parse exactly; a second
+# grammar written beside it would drift.
+(def grammar
   ~{:space (any (set " \t"))
     # A NAME MAY WEAR AN ALIAS, so the character set is "anything a path or
     # an alias token can hold" rather than the path characters alone: with
@@ -849,8 +852,9 @@
 (def starter
   ``# One verb per line. Press ? for the full list.
 # A name is the dotted path a node shows: (box src.parsers) draws a box
-# round that directory, (hide src.test) drops it. Any other name is
-# literal, so (box SwiftUI) boxes the framework. Comment out with '#'.
+# round that directory, (hide src.test) drops it. A name from OUTSIDE the
+# tree wears the ?. the drawing shows it with: (hide ?.os), (box ?.SwiftUI).
+# Comment out with '#'.
 (lines)
 ``)
 

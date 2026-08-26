@@ -58,16 +58,17 @@
   (cond
     (empty? prefix) (truthy? (ours name))
     (string/has-prefix? prefix name) true
-    # A NAME FROM OUTSIDE THE TREE IS WRITTEN AS ITSELF. Externals carry a
-    # `?.` so that a nested config's names can be told from places -- see
-    # `external` in names.janet -- but nobody wants to type it: `(hide os)`
-    # means the `os` everyone can see on the graph, and `(hide ?.os)` says
-    # the same thing for anyone who prefers to be explicit.
+    # A NAME FROM OUTSIDE THE TREE MUST SAY SO. `(hide os)` used to match
+    # `?.os` as a fallback, which made a name mean different things in
+    # different places: at the top level `pathlib` found the external, but
+    # the same line inside `(visualize shoppingagent)` did not -- a nested
+    # config's names are prefixed unless they name something outside, and an
+    # unmarked external came through bare and matched nothing.
     #
-    # Only when the prefix is not already marked, so `?.` on its own still
-    # means every external and nothing here has two meanings.
-    (not (names/external? prefix))
-    (string/has-prefix? (names/external prefix) name)
+    # So the mark is REQUIRED, and a name means one thing wherever it is
+    # written: `?.os` is the external, `os` is a file or directory called os.
+    # The drawing shows the `?.` on every external, so what to type is
+    # visible rather than remembered.
     false))
 
 (defn- selector
