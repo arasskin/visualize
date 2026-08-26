@@ -408,12 +408,15 @@ database  where things are kept
   (os/mkdir (string root "/otto"))
   (os/mkdir (string root "/otto/texting"))
   (spit (string root "/otto/texting/__init__.py") "x = 1\n")
-  (spit (string root "/otto/texting/cli.py") "import otto.texting\n")
+  # THE IMPORTER SITS OUTSIDE the package it names: a file's own package is
+  # not drawn as a dependency of it (see "a file's own package" below), so an
+  # importer inside `otto/texting/` would prove nothing about resolution.
+  (spit (string root "/otto/cli.py") "import otto.texting\n")
 
   (def g (scan/scan root))
   (def ext (map |($ :name) (filter |(not ($ :ours)) (g :nodes))))
   (t/is= [] ext "the package resolved rather than becoming an external")
-  (t/is= [["otto.texting.cli.py" "otto.texting.__init__.py"]] (g :edges))
+  (t/is= [["otto.cli.py" "otto.texting.__init__.py"]] (g :edges))
 
   # AND FROM A SUBPROJECT'S OWN ROOT, where the import says nothing about
   # where the project sits -- the same tail rule the module lookup follows.
@@ -567,3 +570,33 @@ database  where things are kept
   (t/ok (index-of "otto.caller.py -> otto.reads.shopify.py" edges) "the module")
   (t/ok (index-of "otto.caller.py -> otto.reads.__init__.py" edges)
         "and the package python ran to reach it"))
+
+(t/test "a file's own package is not drawn as a dependency of it"
+  # Python runs `otto/mcp/__init__.py` before `otto/mcp/core.py`, so it is a
+  # real import and pydeps reports it -- but on a DRAWING it says nothing the
+  # picture is not already saying. The two sit in the same box, and every
+  # module in a package would get the identical arrow to the box it is drawn
+  # inside: seventy seven such edges on shoppingagent, all noise.
+  #
+  # A DIFFERENT PACKAGE'S `__init__.py` IS A REAL EDGE and stays. It crosses
+  # from one box to another, which is what the drawing exists to show.
+  (def root (string (os/getenv "TMPDIR") "vz-own-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/otto"))
+  (os/mkdir (string root "/otto/mcp"))
+  (os/mkdir (string root "/otto/reads"))
+  (spit (string root "/otto/__init__.py") "")
+  (spit (string root "/otto/mcp/__init__.py") "")
+  (spit (string root "/otto/reads/__init__.py") "")
+  (spit (string root "/otto/mcp/core.py")
+        "from otto.mcp import helper\nfrom otto.reads import shopify\n")
+  (spit (string root "/otto/mcp/helper.py") "x = 1\n")
+
+  (def g (scan/scan root))
+  (def edges (map |(string (first $) " -> " (get $ 1)) (g :edges)))
+  (t/ok (not (index-of "otto.mcp.core.py -> otto.mcp.__init__.py" edges))
+        "its own package is not an arrow")
+  (t/ok (index-of "otto.mcp.core.py -> otto.reads.__init__.py" edges)
+        "but another package's is")
+  (t/ok (index-of "otto.mcp.core.py -> otto.mcp.helper.py" edges)
+        "and a sibling module is untouched"))

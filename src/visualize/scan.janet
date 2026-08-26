@@ -440,6 +440,24 @@
   (eachp [key names] by-package
     (when (= 1 (length (distinct names))) (put from-package key (first names))))
 
+  # A FILE'S OWN PACKAGE IS NOT A DEPENDENCY OF IT. Python runs
+  # `otto/mcp/__init__.py` before `otto/mcp/core.py`, so the parser reports
+  # it and pydeps agrees -- but on a DRAWING it says nothing the picture is
+  # not already saying: the two sit in the same box, and every module in a
+  # package gets the identical arrow to the box it is drawn inside. Seventy
+  # seven of them on shoppingagent, all noise.
+  #
+  # ONLY THE FILE'S OWN PACKAGE. An edge into a DIFFERENT package's
+  # `__init__.py` is a real dependency and stays -- `otto/mcp/core.py`
+  # importing `otto.product_reads` crosses from one box to another, which is
+  # exactly what the drawing exists to show.
+  (defn- own-package? [here target]
+    (and (string/has-suffix? ".__init__.py" target)
+         (string/has-prefix?
+           (string (string/slice target 0 (- (length target)
+                                             (length ".__init__.py"))) ".")
+           here)))
+
   # THE SAME MAP WITHOUT THE SUFFIX KEYS: a package under its WHOLE name
   # only. `otto/mcp/__init__.py` is registered above under both `otto.mcp`
   # and the bare `mcp`, so a project holding an `otto/mcp/` answers to a
@@ -614,7 +632,8 @@
                           # segment. See `by-leaf` above.
                           (from-leaf (last (string/split "." mapped)))))))
       (cond
-        target (unless (= target here) (put pairs [here target] true))
+        target (unless (or (= target here) (own-package? here target))
+                 (put pairs [here target] true))
 
         # A NAME WHOSE OWN PREFIX RESOLVED IS A SYMBOL, NOT A MODULE, and is
         # dropped rather than invented. Python's `from otto.models import
