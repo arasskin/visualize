@@ -72,7 +72,26 @@
       # `import a, b` -- each is a module in its own right.
       (each name (listed (first hit))
         (array/push out name))))
-  {:imports (distinct out)})
+
+  # EVERY PACKAGE ALONG THE WAY, marked so the scan can tell them from what
+  # the file actually wrote. Importing `otto.product_reads.shopify` runs
+  # `otto/product_reads/__init__.py` first -- python cannot reach a submodule
+  # without importing its parents -- so each is a real dependency, and
+  # reporting only the leaf lost the edge to `otto.product_reads` from every
+  # retailer reading through it.
+  #
+  # A PREFIX IS INFERRED, NOT WRITTEN: the source never says `otto` in
+  # `import otto.mcp.cart`. So one that matches no file must not become
+  # `?.otto` -- a node on the drawing that nothing in the tree asked for.
+  # Marked with a trailing "." (a name no python module can have), the scan
+  # drops it when it resolves to nothing; see `speculative?` in scan.janet.
+  (def whole @[])
+  (each name out
+    (array/push whole name)
+    (def parts (string/split "." name))
+    (for i 1 (length parts)
+      (array/push whole (string (string/join (slice parts 0 i) ".") "."))))
+  {:imports (distinct whole)})
 
 (def spec
   {:name "python"

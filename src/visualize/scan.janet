@@ -516,6 +516,14 @@
       # resolved like any other. `@wterm/dom` arrives here as `wterm.dom`,
       # which is the safe-name of the specifier, so the map is keyed both
       # ways.
+      # A TRAILING DOT MARKS AN INFERRED NAME. Python's parser reports the
+      # packages above each import (`otto` and `otto.mcp` for
+      # `otto.mcp.cart`), because importing a submodule runs its parents --
+      # but the source never wrote those names, so one that matches no file
+      # must not be invented as an external. The mark is a character no
+      # module name can contain; it comes off before anything is looked up.
+      (def speculative? (string/has-suffix? "." name))
+      (def name (if speculative? (slice name 0 -2) name))
       (def mapped (or (get aliases name) name))
       # A SIBLING IS WHERE PYTHON LOOKS FIRST. `import db` in
       # `archive/shoppingagent-mcp/src/main.py` means the `db.py` beside it
@@ -586,6 +594,10 @@
         # `typing` external too, and `?.typing.cast` is no more wrong than
         # `?.typing`; both are outside the tree and neither is checked
         # against files that are not there.
+        # An inferred package that named no file: nothing wrote it, so
+        # nothing is drawn for it.
+        speculative? nil
+
         (let [parts (string/split "." name)
               prefix (string/join (slice parts 0 -2) ".")]
           (and (> (length parts) 1)
