@@ -513,3 +513,57 @@ database  where things are kept
         "the module beside it won, not the database")
   (t/ok (not (some |(string/has-prefix? "?." ($ :name)) (g :nodes)))
         "and nothing was invented as an external"))
+
+(t/test "a third-party package does not collide with a local one"
+  # `from mcp.server.fastmcp import FastMCP` means the INSTALLED mcp
+  # library. A project that happens to hold an `otto/mcp/` package must not
+  # capture it -- and the graph was disagreeing with itself about the one
+  # import, keeping `?.mcp.server.fastmcp` external while drawing an edge to
+  # the local `otto/mcp/` for the bare prefix `mcp`.
+  #
+  # TWO LOOSE MATCHES DID IT. The package map indexes every suffix of a
+  # package's name, so `otto/mcp/__init__.py` answers to a bare `mcp`; and
+  # the sibling walk climbed past the package root, which python has not
+  # done since PEP 328 removed implicit relative imports -- from inside a
+  # package `import json` is the stdlib, never the file beside it. Both are
+  # right for a name a file actually wrote, and wrong for a prefix nobody
+  # wrote.
+  (def root (string (os/getenv "TMPDIR") "vz-coll-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/otto"))
+  (os/mkdir (string root "/otto/mcp"))
+  (os/mkdir (string root "/otto/onboarding"))
+  (spit (string root "/otto/__init__.py") "")
+  (spit (string root "/otto/mcp/__init__.py") "")
+  (spit (string root "/otto/onboarding/__init__.py") "")
+  (spit (string root "/otto/onboarding/server.py")
+        "from mcp.server.fastmcp import FastMCP\n")
+
+  (def g (scan/scan root))
+  (def edges (map |(string (first $) " -> " (get $ 1)) (g :edges)))
+  (t/ok (not (index-of "otto.onboarding.server.py -> otto.mcp.__init__.py" edges))
+        "the local package did not capture the library's name")
+  (t/ok (some |(string/find "?.mcp" $) edges)
+        "and the library stayed external"))
+
+(t/test "a package-qualified import still reaches its parent package"
+  # The restriction above must not cost the parent edges: `from
+  # otto.product_reads.shopify import read` depends on
+  # `otto/product_reads/__init__.py`, because python runs it on the way.
+  # That name is inferred too, so it resolves by the EXACT package map --
+  # matched on the whole path rather than on a suffix of it.
+  (def root (string (os/getenv "TMPDIR") "vz-par-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/otto"))
+  (os/mkdir (string root "/otto/reads"))
+  (spit (string root "/otto/__init__.py") "")
+  (spit (string root "/otto/reads/__init__.py") "")
+  (spit (string root "/otto/reads/shopify.py") "x = 1\n")
+  (spit (string root "/otto/caller.py")
+        "from otto.reads.shopify import read\n")
+
+  (def g (scan/scan root))
+  (def edges (map |(string (first $) " -> " (get $ 1)) (g :edges)))
+  (t/ok (index-of "otto.caller.py -> otto.reads.shopify.py" edges) "the module")
+  (t/ok (index-of "otto.caller.py -> otto.reads.__init__.py" edges)
+        "and the package python ran to reach it"))

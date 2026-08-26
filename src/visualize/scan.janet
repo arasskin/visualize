@@ -440,6 +440,21 @@
   (eachp [key names] by-package
     (when (= 1 (length (distinct names))) (put from-package key (first names))))
 
+  # THE SAME MAP WITHOUT THE SUFFIX KEYS: a package under its WHOLE name
+  # only. `otto/mcp/__init__.py` is registered above under both `otto.mcp`
+  # and the bare `mcp`, so a project holding an `otto/mcp/` answers to a
+  # name meaning the installed `mcp` library. That suffix matching is what
+  # lets an import written from a subproject's own root resolve, so it stays
+  # -- but a name NOBODY WROTE gets the exact key alone. See the note on
+  # `speculative?` below.
+  (def from-package-exact @{})
+  (each file live
+    (def full (node-name (file :rel)))
+    (def stem (names/stem full))
+    (when (string/has-suffix? ".__init__" stem)
+      (put from-package-exact
+           (string/slice stem 0 (- (length stem) (length ".__init__"))) full)))
+
   (def by-stem @{})
   (each file live
     (def full (node-name (file :rel)))
@@ -535,45 +550,69 @@
       # than modules), so the by-leaf map calls the name ambiguous and gives
       # up -- while the file sitting next to the importer is not ambiguous
       # at all.
-      # EVERY DIRECTORY ABOVE THE IMPORTER, nearest first. The immediate one
-      # is where a bare `import db` looks, and the ancestors are where a
-      # package-qualified `from otto import db` looks -- `otto.db` written
-      # inside `shoppingagent/otto/store_cart.py` means
-      # `shoppingagent/otto/db.py`, which is the name resolved against
-      # `shoppingagent/`, the importer's GRANDparent.
+      # THE DIRECTORY A SCRIPT RUNS FROM IS ON PYTHON'S PATH, so `import db`
+      # in `src/main.py` means the `db.py` beside it. The walk goes up from
+      # the importer, because a package-qualified name is written from the
+      # package ROOT: `from otto import db` inside
+      # `shoppingagent/otto/store_cart.py` means `shoppingagent/otto/db.py`,
+      # which is the name resolved against `shoppingagent/`.
       #
-      # Nearest first because the nearest is what python would find first,
-      # and because it is what makes this beat the global fallbacks: six
-      # files in this tree are called `otto.db` -- one module and three
-      # SQLITE DATABASES (`otto.db`, `otto.db-shm`, `otto.db-wal`) -- so the
-      # by-leaf map calls the name ambiguous and gives up, while the file one
-      # directory up from the importer is not ambiguous at all.
+      # IT STOPS AT THE FIRST DIRECTORY THAT IS NOT A PACKAGE, because that
+      # is where python stops. PEP 328 removed implicit relative imports in
+      # python 3: from inside a package, `import json` is the STDLIB json,
+      # never the `json.py` sitting beside it, and only a directory ON
+      # sys.path -- a script's own, or a package root -- answers a bare name.
+      #
+      # WITHOUT THAT STOP the walk climbed out of the package and kept
+      # matching: `from mcp.server.fastmcp import FastMCP` in
+      # `otto/retailer_onboarding/page_tools_server.py` found the local
+      # `otto/mcp/` and drew an edge to it, when the name means the INSTALLED
+      # mcp library. A directory holding `__init__.py` is a package, and the
+      # first one without it is the root the imports are written against.
       (def beside
         (let [parts (string/split "." (names/stem (node-name (file :rel))))]
           (var found nil)
-          # From the importer's own directory up to the root, stopping at
-          # the first hit.
           (var depth (- (length parts) 1))
-          (while (and (nil? found) (> depth 0))
+          (var climbing true)
+          (while (and climbing (nil? found) (> depth 0))
             (def dir (string/join (slice parts 0 depth) "."))
             (def candidate (string dir "." mapped))
             (set found (or (from-stem candidate)
                            (and (ours candidate) candidate)))
+            # Having just looked in `dir`, stop if `dir` is not itself a
+            # package -- anything above it is not on the path.
+            (unless (from-package dir) (set climbing false))
             (-- depth))
           found))
+      # AN INFERRED NAME GETS ONLY THE EXACT LOOKUPS. The fallbacks below
+      # match a name ANYWHERE in the tree, which is right for a name a file
+      # actually wrote -- it was written from some root, and the root is what
+      # they recover. It is wrong for a prefix nobody wrote: `from
+      # mcp.server.fastmcp import FastMCP` yields the prefix `mcp`, and
+      # `from-package` matched the local `otto/mcp/` for it, drawing an edge
+      # to this project from a name meaning the INSTALLED mcp library. The
+      # leaf `mcp.server.fastmcp` stayed external, as it should, so the graph
+      # disagreed with itself about the same import.
       (def target (or (from-stem mapped)
                       (and (ours mapped) mapped)
                       beside
-                      # A name written from a subproject's own root -- see
-                      # `by-tail` above.
-                      (from-tail mapped)
-                      # A python package: the directory's __init__.py. See
-                      # `by-package` above.
-                      (from-package mapped)
-                      # A path that named no file may still name one in
-                      # another served directory -- matched on its last
-                      # segment. See `by-leaf` above.
-                      (from-leaf (last (string/split "." mapped)))))
+                      # A python package: the directory's __init__.py. An
+                      # inferred name gets the EXACT map -- matched on the
+                      # whole path, not on a suffix of it -- because a parent
+                      # package is what an inferred name usually is, while a
+                      # suffix match on one is how `mcp` found `otto/mcp/`.
+                      (if speculative?
+                        (from-package-exact mapped)
+                        (from-package mapped))
+                      (when (not speculative?)
+                        (or
+                          # A name written from a subproject's own root --
+                          # see `by-tail` above.
+                          (from-tail mapped)
+                          # A path that named no file may still name one in
+                          # another served directory -- matched on its last
+                          # segment. See `by-leaf` above.
+                          (from-leaf (last (string/split "." mapped)))))))
       (cond
         target (unless (= target here) (put pairs [here target] true))
 
