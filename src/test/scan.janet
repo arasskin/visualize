@@ -600,3 +600,44 @@ database  where things are kept
         "but another package's is")
   (t/ok (index-of "otto.mcp.core.py -> otto.mcp.helper.py" edges)
         "and a sibling module is untouched"))
+
+(t/test "an import resolves only to a file its language could load"
+  # `otto.sh` is a bash launcher sitting beside the `otto/` package. Stripping
+  # its extension leaves the stem `otto`, the same stem the package has, so
+  # `from otto import db` resolved to the SHELL SCRIPT -- and every python
+  # file in the project drew an edge to it. Ninety one of them on
+  # shoppingagent.
+  #
+  # A stem match is not enough: an import names a file its own language can
+  # LOAD, and python loads .py files. Checked once where the target is
+  # decided, so every route to it -- stem, sibling, package, tail, leaf --
+  # obeys the same rule, and a rejected target falls through to the external
+  # branch exactly as an unmatched name does.
+  (def root (string (os/getenv "TMPDIR") "vz-lang-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/otto"))
+  (spit (string root "/otto.sh") "#!/bin/bash\necho hi\n")
+  (spit (string root "/otto/__init__.py") "")
+  (spit (string root "/otto/db.py") "x = 1\n")
+  (spit (string root "/caller.py") "from otto import db\n")
+
+  (def g (scan/scan root))
+  (def edges (map |(string (first $) " -> " (get $ 1)) (g :edges)))
+  (t/ok (not (some |(string/find "otto.sh" $) edges))
+        "the shell script is not a python import")
+  (t/ok (index-of "caller.py -> otto.db.py" edges)
+        "and the module it actually meant still resolves")
+
+  # A LANGUAGE THAT SAYS NOTHING KEEPS THE OLD BEHAVIOUR. Only python
+  # declares a restriction, because it is the one whose imports are modules
+  # rather than paths; a stylesheet naming a font and a page naming a script
+  # are cross-kind on purpose and are not made to enumerate the web.
+  (def web (string (os/getenv "TMPDIR") "vz-web-" (string (os/time))))
+  (os/mkdir web)
+  (spit (string web "/page.html")
+        "<link rel=\"stylesheet\" href=\"./style.css\">")
+  (spit (string web "/style.css") "body { color: red }\n")
+  (def g2 (scan/scan web))
+  (t/ok (index-of "page.html -> style.css"
+                  (map |(string (first $) " -> " (get $ 1)) (g2 :edges)))
+        "html still reaches a stylesheet"))

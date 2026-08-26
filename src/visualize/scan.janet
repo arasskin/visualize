@@ -188,6 +188,11 @@
      (let [found (parser/run (job :spec) text (job :rel))]
        {:rel (job :rel)
         :stamp stamp
+        # WHICH LANGUAGE READ THIS FILE. `build` needs it to decide what an
+        # import may resolve TO: a python import names a python file, and
+        # `otto.sh` is a bash script that happens to share a stem with the
+        # `otto/` package. See `importable?` there.
+        :lang ((job :spec) :name)
         # Counted the way `wc -l` counts: a trailing newline ends the last
         # line rather than starting an empty one.
         :lines (length (string/split "\n" (string/trimr text "\n")))
@@ -473,6 +478,29 @@
       (put from-package-exact
            (string/slice stem 0 (- (length stem) (length ".__init__"))) full)))
 
+  # WHAT A LANGUAGE MAY IMPORT. An import names a file its own language can
+  # load, and a stem match alone does not check that: `otto.sh` is a bash
+  # launcher whose stem is `shoppingagent.otto`, the same stem the `otto/`
+  # package has, so `from otto import db` resolved to the SHELL SCRIPT and
+  # every python file in the project drew an edge to it -- ninety one of
+  # them.
+  #
+  # Kept as "what this language will not take" rather than a list of what it
+  # will: a spec that says nothing keeps the old behaviour, and a language
+  # whose imports really are cross-kind (a stylesheet naming a font, an HTML
+  # page naming a script) is not made to enumerate the web.
+  #
+  # PYTHON IS THE STRICT CASE because it is the one that collides: an
+  # `import` names a module, and a module is a .py file or a directory
+  # holding one. Nothing else is importable, whatever its stem.
+  (def importable-by
+    {"python" {"py" true}})
+
+  (defn importable? [lang target]
+    (def allowed (get importable-by lang))
+    (or (nil? allowed)
+        (truthy? (get allowed (names/extension target)))))
+
   (def by-stem @{})
   (each file live
     (def full (node-name (file :rel)))
@@ -631,6 +659,12 @@
                           # another served directory -- matched on its last
                           # segment. See `by-leaf` above.
                           (from-leaf (last (string/split "." mapped)))))))
+      # AND IT HAS TO BE A FILE THIS LANGUAGE COULD IMPORT. Filtered once,
+      # here, rather than inside each lookup above: every route to a target
+      # -- stem, sibling, package, tail, leaf -- is subject to the same rule,
+      # and a target rejected here falls through to the external branch
+      # exactly as a name that matched nothing does.
+      (def target (and target (importable? (file :lang) target) target))
       (cond
         target (unless (or (= target here) (own-package? here target))
                  (put pairs [here target] true))
