@@ -652,17 +652,65 @@
       # first one without it is the root the imports are written against.
       (def beside
         (let [parts (string/split "." (names/stem (node-name (file :rel))))]
+          # HOW FAR UP TO LOOK. The importer's own directory is where a bare
+          # `import db` finds the module beside it. Above that, each
+          # directory holding `__init__.py` is part of the package the file
+          # sits in, and the first one WITHOUT is the root its imports are
+          # written against -- sys.path starts there, which is what pytest
+          # arranges by putting rootdir on the path, and what makes
+          # `from otto import ...` inside `shoppingagent/tests/` mean
+          # `shoppingagent/otto/`.
+          #
+          # So the walk climbs while the directory it is leaving is a
+          # package, and then searches one more: the root. Nothing above the
+          # root is on the path, which is what keeps `from mcp.server...` in
+          # a nested project from finding a local `otto/mcp/`.
+          (def floor
+            (do
+              (var d (- (length parts) 1))
+              (while (and (> d 1)
+                          (from-package (string/join (slice parts 0 d) ".")))
+                (-- d))
+              # One past the last package is the root; below 1 there is
+              # nothing left to search.
+              (max 1 (- d 1))))
           (var found nil)
           (var depth (- (length parts) 1))
-          (var climbing true)
-          (while (and climbing (nil? found) (> depth 0))
-            (def dir (string/join (slice parts 0 depth) "."))
-            (def candidate (string dir "." mapped))
-            (set found (or (from-stem candidate)
-                           (and (ours candidate) candidate)))
-            # Having just looked in `dir`, stop if `dir` is not itself a
-            # package -- anything above it is not on the path.
-            (unless (from-package dir) (set climbing false))
+          (while (and (nil? found) (>= depth floor) (> depth 0))
+            (def candidate (string (string/join (slice parts 0 depth) ".")
+                                   "." mapped))
+            # EACH CANDIDATE IS FILTERED AS IT IS FOUND, not after the walk
+            # has settled on one. `otto.sh` has the stem `shoppingagent.otto`
+            # and was found first, so the walk stopped there and the language
+            # check then rejected it -- turning the whole lookup into a miss
+            # and drawing `?.otto` for thirty five test files, while the
+            # `otto/` package the next line would have found sat unexamined.
+            # A candidate this language cannot load is not a match, so the
+            # search continues past it.
+            (defn ok [t] (and t (importable? (file :lang) t) t))
+            (set found (or (ok (from-stem candidate))
+                           (ok (and (ours candidate) candidate))
+                           # A PACKAGE IS A DIRECTORY, not a file stem, so
+                           # one sitting beside the importer was invisible to
+                           # a lookup that only knew about files. The bare
+                           # key `otto` is ambiguous across this tree -- two
+                           # projects have one -- so the global package map
+                           # gives up and drew `?.otto` for thirty five test
+                           # files. Asked with the WHOLE path, which is what
+                           # makes it unambiguous.
+                           # A PACKAGE, BUT NOT FOR AN INFERRED NAME. `from
+                           # otto import ...` in `shoppingagent/tests/` means
+                           # the `shoppingagent/otto/` package, and a lookup
+                           # that knew only file stems could not see it. But
+                           # `from mcp.server.fastmcp import FastMCP` yields
+                           # the inferred prefix `mcp`, and letting that walk
+                           # into a sibling package captures the local
+                           # `otto/mcp/` for a name meaning the INSTALLED
+                           # library -- which is the collision the mark rule
+                           # exists to prevent. A name the file wrote gets
+                           # the package; one nobody wrote does not.
+                           (and (not speculative?)
+                                (ok (from-package-exact candidate)))))
             (-- depth))
           found))
       # AN INFERRED NAME GETS ONLY THE EXACT LOOKUPS. The fallbacks below
@@ -674,32 +722,31 @@
       # to this project from a name meaning the INSTALLED mcp library. The
       # leaf `mcp.server.fastmcp` stayed external, as it should, so the graph
       # disagreed with itself about the same import.
-      (def target (or (from-stem mapped)
-                      (and (ours mapped) mapped)
+      # FILTERED AS EACH IS FOUND, for the reason spelled out in `beside`
+      # above: a candidate this language cannot load is not a match, and
+      # rejecting it after the chain has settled turns a resolvable name into
+      # a miss rather than letting the next lookup answer.
+      (defn ok [t] (and t (importable? (file :lang) t) t))
+      (def target (or (ok (from-stem mapped))
+                      (ok (and (ours mapped) mapped))
                       beside
                       # A python package: the directory's __init__.py. An
                       # inferred name gets the EXACT map -- matched on the
                       # whole path, not on a suffix of it -- because a parent
                       # package is what an inferred name usually is, while a
                       # suffix match on one is how `mcp` found `otto/mcp/`.
-                      (if speculative?
-                        (from-package-exact mapped)
-                        (from-package mapped))
+                      (ok (if speculative?
+                            (from-package-exact mapped)
+                            (from-package mapped)))
                       (when (not speculative?)
                         (or
                           # A name written from a subproject's own root --
                           # see `by-tail` above.
-                          (from-tail mapped)
+                          (ok (from-tail mapped))
                           # A path that named no file may still name one in
                           # another served directory -- matched on its last
                           # segment. See `by-leaf` above.
-                          (from-leaf (last (string/split "." mapped)))))))
-      # AND IT HAS TO BE A FILE THIS LANGUAGE COULD IMPORT. Filtered once,
-      # here, rather than inside each lookup above: every route to a target
-      # -- stem, sibling, package, tail, leaf -- is subject to the same rule,
-      # and a target rejected here falls through to the external branch
-      # exactly as a name that matched nothing does.
-      (def target (and target (importable? (file :lang) target) target))
+                          (ok (from-leaf (last (string/split "." mapped))))))))
       (cond
         target (unless (or (= target here) (own-package? here target))
                  (put pairs [here target] true))

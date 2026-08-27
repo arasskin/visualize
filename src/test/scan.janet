@@ -718,3 +718,52 @@ database  where things are kept
   (t/is= [] (map |($ :name) (filter |(not ($ :ours)) (g :nodes)))
          "the dotfile invented no external")
   (t/is= [] (g :edges)))
+
+(t/test "a package beside the importer resolves, and a library still does not"
+  # `from otto import ...` in `shoppingagent/tests/` means the
+  # `shoppingagent/otto/` package. The sibling walk only ever asked about
+  # file STEMS, so a package -- which is a directory -- was invisible to it,
+  # and the bare key `otto` is ambiguous across a tree where two projects
+  # have one. Thirty five test files drew `?.otto` for a package sitting one
+  # directory up.
+  #
+  # AND THE CANDIDATE HAS TO BE FILTERED AS IT IS FOUND. `otto.sh` has the
+  # stem `shoppingagent.otto`, so the stem lookup answered first, the walk
+  # stopped, and the language check then rejected the shell script -- turning
+  # the whole lookup into a miss while the package the next line would have
+  # found sat unexamined.
+  (def root (string (os/getenv "TMPDIR") "vz-sib-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/otto"))
+  (os/mkdir (string root "/tests"))
+  (spit (string root "/otto.sh") "#!/bin/bash\n")
+  (spit (string root "/otto/__init__.py") "")
+  (spit (string root "/tests/test_x.py") "from otto import thing\n")
+
+  (def g (scan/scan root))
+  (def edges (map |(string (first $) " -> " (get $ 1)) (g :edges)))
+  (t/ok (index-of "tests.test_x.py -> otto.__init__.py" edges)
+        "the package one directory up resolved")
+  (t/ok (not (some |(string/find "otto.sh" $) edges))
+        "and the shell script sharing its stem did not win")
+
+  # THE LIBRARY CASE MUST STILL FAIL. `from mcp.server.fastmcp import X`
+  # yields the INFERRED prefix `mcp`, which nobody wrote; letting that reach
+  # a sibling package captures a local `otto/mcp/` for a name meaning the
+  # installed library. A name the file wrote gets the package lookup; one
+  # nobody wrote does not.
+  (def lib (string (os/getenv "TMPDIR") "vz-lib-" (string (os/time))))
+  (os/mkdir lib)
+  (os/mkdir (string lib "/otto"))
+  (os/mkdir (string lib "/otto/mcp"))
+  (os/mkdir (string lib "/otto/onboarding"))
+  (spit (string lib "/otto/__init__.py") "")
+  (spit (string lib "/otto/mcp/__init__.py") "")
+  (spit (string lib "/otto/onboarding/__init__.py") "")
+  (spit (string lib "/otto/onboarding/server.py")
+        "from mcp.server.fastmcp import FastMCP\n")
+
+  (def g2 (scan/scan lib))
+  (def edges2 (map |(string (first $) " -> " (get $ 1)) (g2 :edges)))
+  (t/ok (not (index-of "otto.onboarding.server.py -> otto.mcp.__init__.py" edges2))
+        "the local package did not capture the library's name"))
