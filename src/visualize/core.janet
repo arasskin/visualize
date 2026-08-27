@@ -805,60 +805,56 @@
   # ctrl-c ends visualize: the server, every supervisor, every session. The
   # supervisors ignore the terminal's SIGINT (see `host` in term/host.janet),
   # so their ending is the deliberate shutdown op below, not a signal that
-  # happens to reach them. ctrl-r ends ONLY the server: the supervisors keep
+  # happens to reach them. ctrl-d ends ONLY the server: the supervisors keep
   # their sessions, and the next run finds them by the same derived socket
   # names -- the restart gesture for picking up changed code without losing
   # a terminal.
   #
-  # CTRL-R IS READ OFF THE TERMINAL, because there is no signal for it: the
-  # tty is taken out of canonical mode and read a byte at a time from a
-  # thread. Only when this process is the FOREGROUND job on a tty (`ps`
-  # shows `+`): a backgrounded process that reads its terminal is stopped
-  # cold by SIGTTIN, and a harness piping stdin has no keys to send.
-  (def restore-tty
+  # CTRL-D NEEDS NO RAW MODE, which is why it is the key. In the terminal's
+  # ordinary canonical mode the line discipline turns it into END OF FILE on
+  # stdin -- a real kernel-delivered event, where catching any other chord
+  # would mean putting the tty into raw mode and reading keys by hand. A
+  # thread blocks on stdin and announces the EOF; typed lines are read and
+  # dropped on the way.
+  #
+  # ONLY WHEN THERE IS A KEYBOARD TO READ. The reader wants two facts: this
+  # process is the foreground job (`ps` shows `+` -- a backgrounded process
+  # reading its terminal is stopped cold by SIGTTIN), and stdin is actually
+  # a terminal (`stty -g` succeeds only on one -- a harness piping /dev/null
+  # would hand the reader an instant EOF and stop the server at boot).
+  (os/sigaction :int
+    (fn []
+      (print)
+      (each client (values panes) (try (:shutdown client) ([_] nil)))
+      (os/exit 0)))
+
+  (def keyboard?
     (try
       (let [stat-proc (os/spawn ["ps" "-o" "stat=" "-p" (string (os/getpid))]
                                 :px {:out :pipe})
             stat (string/trim (or (:read (stat-proc :out) :all) ""))]
         (os/proc-wait stat-proc)
-        (when (string/find "+" stat)
-          (let [save-proc (os/spawn ["stty" "-g"] :px {:out :pipe})
-                saved (string/trim (or (:read (save-proc :out) :all) ""))]
-            (os/proc-wait save-proc)
-            (when (not (empty? saved))
-              (os/execute ["stty" "-icanon" "-echo" "min" "1" "time" "0"] :px)
-              # What undoes the mode change, for every exit path. `stty -g`
-              # answers a single token that restores the whole state.
-              (fn [] (try (os/execute ["stty" saved] :px) ([_] nil)))))))
-      ([_] nil)))
-
-  (os/sigaction :int
-    (fn []
-      (print)
-      (each client (values panes) (try (:shutdown client) ([_] nil)))
-      (when restore-tty (restore-tty))
-      (os/exit 0)))
-
-  (when restore-tty
-    (def keys-chan (ev/thread-chan 64))
+        (and (truthy? (string/find "+" stat))
+             (let [tty-proc (os/spawn ["stty" "-g"] :p {:out :pipe})]
+               (:read (tty-proc :out) :all)
+               (zero? (os/proc-wait tty-proc)))))
+      ([_] false)))
+  (when keyboard?
+    (def eof-chan (ev/thread-chan 2))
     (ev/thread
       (fn [ch]
         (forever
           (def b (file/read stdin 1))
-          (if (and b (pos? (length b)))
-            (ev/give ch (get b 0))
-            (break)))
+          (unless (and b (pos? (length b))) (break)))
+        (ev/give ch true)
         :done)
-      keys-chan
+      eof-chan
       :nt (ev/thread-chan 2))
     (ev/go
       (fn []
-        (forever
-          (def byte (ev/take keys-chan))
-          (when (= byte 18)   # ctrl-r
-            (print "server stopped; terminals kept -- run visualize again to reattach")
-            (restore-tty)
-            (os/exit 0))))))
+        (ev/take eof-chan)
+        (print "server stopped; terminals kept -- run visualize again to reattach")
+        (os/exit 0))))
 
   (defn align-word
     [word to]
@@ -867,7 +863,7 @@
   (print "visualize: " root " on " url)
   (print (align-word "config: " "visualize: ") config-path)
   (print (align-word "parsers: " "visualize: ") (string/join (scan/languages) ", "))
-  (print "ctrl-c stops everything; ctrl-r stops only the server, keeping its terminals")
+  (print "ctrl-c stops everything; ctrl-d stops only the server, keeping its terminals")
   # WATCH THE SOURCE. An edit anywhere under the root drops the scan cache
   # and bumps the generation; the page is parked on /watch and redraws. This
   # is what the Regenerate button used to do by hand, and the reason it is
