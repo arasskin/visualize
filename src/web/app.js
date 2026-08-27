@@ -1196,6 +1196,8 @@ let altAt = 0;
 // were typing in -- and a modifier you held for a moment should not cost you
 // your place in a half-written line.
 let altCaret = null;
+// The tab this press walked to, if it walked at all -- see altWalk.
+let altWalked = null;
 // The panel this press is driving -- read once on the way down, so a keyup
 // puts away exactly what the keydown put up even if the selection moved.
 let altPanel = null;
@@ -1341,6 +1343,7 @@ document.addEventListener('keydown', (e) => {
   if (altDown) return;
   altDown = true;
   altUsed = false;
+  altWalked = null;
   altAt = performance.now();
   // The COMPOSE BAR only. A config row is not somewhere to return to: its
   // focus handler selects that row, so restoring into one would undo the
@@ -1412,6 +1415,11 @@ function altWalk(by) {
     altOpened = false;
   }
   selectPane(next.root);
+  // WALKING IS CHOOSING. A press that only peeked goes back to whatever you
+  // were typing in, but one that walked to another tab has picked that tab --
+  // so the release focuses it rather than the compose bar behind it. See the
+  // keyup handler, which asks `altWalked`.
+  altWalked = next;
   // The panel the keyup will act on is the one we are on NOW.
   altPanel = next;
   if (next.shut) {
@@ -1439,7 +1447,22 @@ document.addEventListener('keyup', (e) => {
   // is still on the page: a redraw replaces the inputs.
   const caret = altCaret;
   altCaret = null;
+  // A PRESS THAT WALKED HAS CHOSEN A TAB, and typing should land in it. Only
+  // a press that merely peeked goes back to the bar it came from: walking to
+  // a tab and then typing into something else is the move nobody meant.
+  //
+  // The panel focuses ITSELF rather than this reaching into it -- what to
+  // focus is the panel's business (a terminal takes the keyboard, the config
+  // puts the caret in the selected row), and `focus()` is `onOpen` without
+  // the opening.
+  const walked = altWalked;
+  altWalked = null;
   const restore = () => {
+    // A TAB THE WALK OPENED IS ABOUT TO BE SHUT AGAIN -- walking is looking,
+    // and a peek does not survive the release. There is nothing to focus in
+    // a panel that is closing, so the caret goes back where it was, which is
+    // what a peek has always done.
+    if (walked && !walked.shut) { walked.focus(); return; }
     if (!caret || !caret.el.isConnected) return;
     caret.el.focus();
     if (typeof caret.el.setSelectionRange === 'function') {

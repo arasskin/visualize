@@ -172,6 +172,15 @@ export function makePanel(root, options = {}) {
       const box = root.getBoundingClientRect();
       if (options.onResize) options.onResize(box.width, box.height);
     },
+    // TAKE THE KEYBOARD without opening or closing anything. `onOpen` is what
+    // puts the caret where this panel wants it -- the terminal, or the config
+    // row that is selected -- and walking to a tab that is ALREADY open needs
+    // exactly that and nothing else. Shut panels have nowhere to put a caret,
+    // so this is a no-op on one; the open() path calls onOpen itself.
+    focus() {
+      if (root.classList.contains('shut')) return;
+      if (options.onOpen) options.onOpen(panel);
+    },
   };
   panelsByRoot.set(root, panel);
 
