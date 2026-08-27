@@ -549,11 +549,27 @@
       # queue behind. A quiet input returns at once; whatever repaint it
       # provokes reaches the page on the parked poll, which is faster than
       # this wait ever was.
-      (var waited (if (truthy? (get message "quiet")) 24 0))
-      (while (and (< waited 24) (= (length backlog) before))
-        (++ waited)
-        (ev/sleep 0.002)
-        (drain))
+      # THE WAIT IS PACED BY THE CLOCK, NOT BY A QUANTUM. This used to sleep
+      # a fixed 2ms per check, so every keystroke paid at least one full tick
+      # -- ~2.4ms measured -- for an echo the shell turns around in a few
+      # hundred microseconds. The event loop resolves far finer than that
+      # (ev/sleep 0.0002 wakes in ~20us), so the first few milliseconds are
+      # checked at that grain and the echo is caught at its actual latency.
+      #
+      # COARSE AFTER 4ms, because a reply that has not come by then is not
+      # an echo -- a password prompt, an agent mid-thought -- and burning
+      # 20us wakeups for the rest of the budget would spin the supervisor
+      # for nothing. The budget itself is unchanged: 48ms, then the ordinary
+      # poll picks up whatever comes later.
+      (def wait-start (os/clock :monotonic))
+      (unless (truthy? (get message "quiet"))
+        (while (and (= (length backlog) before)
+                    (< (- (os/clock :monotonic) wait-start) 0.048))
+          (drain)
+          (when (= (length backlog) before)
+            (ev/sleep (if (< (- (os/clock :monotonic) wait-start) 0.004)
+                        0.0002
+                        0.002)))))
       (if (neg? at)
         # An older page that does not send `at` gets the old answer.
         [{"ok" true} false]

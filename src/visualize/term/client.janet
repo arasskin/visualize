@@ -30,11 +30,6 @@
 
 # -- the client --------------------------------------------------------------
 
-# WHICH LINE EACH PARSED REPLY CAME FROM. Weak on the key, so a reply the
-# caller has finished with takes its line with it rather than holding a
-# megabyte of terminal output alive until the next poll.
-(def- raw-lines (table/weak-keys 8))
-
 (defn- talk
   ``One request and its reply over an open connection, or nil on EOF.
 
@@ -83,18 +78,13 @@
   # Kept as a field on the parsed table rather than a second return value, so
   # every existing caller reads unchanged and only the poll path looks for
   # it. See `raw-poll` below and `poll-answer` in core.janet.
-  # THE RAW LINE TRAVELS BESIDE THE PARSED ONE, in a weak-keyed table rather
-  # than as a field on it. A poll's reply is mostly terminal output and the
+  # THE LINE, NOT A TABLE. A poll reply is mostly terminal output, and the
   # server's only use for it is to send it to the browser as JSON -- which it
-  # already is -- so relaying the line skips a decode and an encode on the
-  # shared thread: 142ms per megabyte that every keystroke was waiting behind.
-  #
-  # NOT A KEY ON THE TABLE. A reply is encoded and sent as it stands in more
-  # than one place, and a field holding a copy of the whole reply would
-  # silently double every one of them.
-  (def parsed (json/decode line))
-  (when (dictionary? parsed) (put raw-lines parsed line))
-  parsed)
+  # already is. Decoding it here cost 86ms per megabyte on the one thread
+  # every keystroke waits behind, and the caller that only relays never
+  # needed the table at all. The few callers that do read fields decode for
+  # themselves, and their replies are tiny.
+  line)
 
 (defn- client-state
   ``A `state` reply as this side's callers expect it: keyword keys, and a
@@ -329,6 +319,12 @@
   # `start` is the only op that may bring a supervisor into being. Everything
   # else talks to one that is already there -- polling a terminal nobody
   # started should answer "not running", not silently spawn a process.
+  # A LINE AS A TABLE, for the callers that read fields rather than relay.
+  # Their replies are tiny -- state, a keystroke's echo -- so decoding them
+  # costs nothing; the megabyte case is the poll, which stays a line.
+  (defn asked [message &opt start?]
+    (when-let [line (ask message start?)] (json/decode line)))
+
   # ONE FETCH FOR BOTH POLL METHODS. `:poll` parses the reply into the shape
   # its callers expect; `:raw-poll` relays the supervisor's own line. They
   # differ only in what they do with the answer, so the asking -- including
@@ -349,9 +345,18 @@
         # Park only on a quiet, LIVE session: text in hand answers now, and a
         # dead session's "exited" must reach the page promptly, not after a
         # park that can learn nothing.
+        #
+        # DECIDED BY BYTE PROBES, NOT BY DECODING. `quick` is the
+        # supervisor's own line, and decoding a streaming burst's megabyte
+        # just to ask "is the text empty" cost 86ms of the shared thread.
+        # The encoder is this repository's own -- sorted keys, no spaces --
+        # so an empty text is exactly `"text":""` and a live session exactly
+        # `"running":true`, and probing for those bytes is the whole
+        # question. See `escape` in json.janet for the writer these bytes
+        # come from.
         (if (or (nil? quick)
-                (not (empty? (get quick "text" "")))
-                (not (truthy? (get quick "running"))))
+                (not (string/find `"text":""` quick))
+                (not (string/find `"running":true` quick)))
           quick
           (do
             (put message "wait" wait)
@@ -360,18 +365,18 @@
 
   {# This side's ask timings, and the supervisor's own table over the wire.
    :stats (fn [_] ask-stats)
-   :remote-stats (fn [_] (ask {"op" "stats"}))
+   :remote-stats (fn [_] (asked {"op" "stats"}))
 
    :start
    (fn [_ run-argv root &opt rows cols]
      (default rows 24)
      (default cols 100)
-     (client-state (ask {"op" "start" "argv" run-argv "root" root
+     (client-state (asked {"op" "start" "argv" run-argv "root" root
                          "rows" rows "cols" cols}
                         true)))
 
    :stop
-   (fn [_] (client-state (ask {"op" "stop"})))
+   (fn [_] (client-state (asked {"op" "stop"})))
 
    # With `at`, the reply carries the ECHO -- everything the program printed
    # in response, in the same round trip. That is what makes typing feel
@@ -379,12 +384,24 @@
    # round trip even when the delay between polls is zero, because the page
    # has to wait for this request to return before it can ask what happened.
    # Without `at` it answers nil as it always did.
+   # A KEYSTROKE'S REPLY AS THE SUPERVISOR WROTE IT, for the route -- the
+   # same relay the poll does, and for the same reason: during a streaming
+   # burst the echo reply carries everything printed since `at`, and decoding
+   # a megabyte to re-encode it is the shared thread's time. "null" when
+   # nothing answered, which the page already reads as "no echo came back".
+   :raw-send
+   (fn [_ text &opt at quiet]
+     (def message @{"op" "input" "text" text})
+     (when at (put message "at" at))
+     (when quiet (put message "quiet" true))
+     (or (ask message) "null"))
+
    :send
    (fn [_ text &opt at quiet]
      (def message @{"op" "input" "text" text})
      (when at (put message "at" at))
      (when quiet (put message "quiet" true))
-     (def reply (ask message))
+     (def reply (asked message))
      (when (and reply (get reply "text"))
        {"text" (get reply "text")
         "at" (or (get reply "at") at)
@@ -403,14 +420,14 @@
      nil)
 
    :state
-   (fn [_] (client-state (ask {"op" "state"})))
+   (fn [_] (client-state (asked {"op" "state"})))
 
    # Everything printed since chunk `at`, as [text next]. With no supervisor
    # running this is ["" at] -- nothing new rather than an error, which is
    # exactly what a page polling an unstarted terminal should see.
    :since
    (fn [_ at]
-     (def reply (ask {"op" "since" "at" at}))
+     (def reply (asked {"op" "since" "at" at}))
      (if reply
        [(or (get reply "text") "") (or (get reply "at") at)]
        ["" at]))
@@ -448,8 +465,8 @@
    # older shape is not a thing that happens.
    :raw-poll
    (fn [self at &opt generation wait]
-     (def reply (fetch-poll at generation wait))
-     (if-let [line (and (dictionary? reply) (get raw-lines reply))]
+     (def line (fetch-poll at generation wait))
+     (if line
        line
        # NOTHING ANSWERED, so this side writes the reply -- the same table
        # `:poll` invents, encoded here so the route has one kind of thing to
@@ -474,9 +491,9 @@
    # but no reply.
    :poll
    (fn [_ at &opt generation wait]
-     (def reply (fetch-poll at generation wait))
-     (if reply
-       (merge reply {"reachable" true})
+     (def line (fetch-poll at generation wait))
+     (if line
+       (merge (json/decode line) {"reachable" true})
        # UNREACHABLE IS NOT DEAD. This used to say running=false,
        # generation=0 -- and the page, taking it as truth, blanked its screen
        # for the generation change, showed "exited", and stopped polling. All

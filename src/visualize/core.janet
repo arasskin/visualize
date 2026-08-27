@@ -767,9 +767,16 @@
             # `at` turns this into "type, and tell me what came back" -- one
             # round trip for a keystroke and its echo.
             "input"
+            # RELAYED, like the poll: during a streaming burst the echo
+            # reply carries everything printed since `at`, and rebuilding it
+            # is the shared thread's time. `quiet` skips the supervisor's
+            # echo wait -- mouse reports, where the program often answers
+            # with nothing; the page has always sent it, and this route was
+            # dropping it.
             ["200 OK" "application/json"
-             (json/encode (:send client (string (get sent "text" ""))
-                                 (when-let [a (get sent "at")] (math/floor a))))]
+             (:raw-send client (string (get sent "text" ""))
+                        (when-let [a (get sent "at")] (math/floor a))
+                        (truthy? (get sent "quiet")))]
 
             "redraw"
             (do (:redraw client)
