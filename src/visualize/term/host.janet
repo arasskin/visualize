@@ -646,7 +646,14 @@
           # so anything added to `session-state` has to be added here too --
           # which is how `program` was computed correctly and never arrived.
           "program" (now "program")
-          "waited" (pos? wait)}
+          "waited" (pos? wait)
+          # ALWAYS TRUE FROM HERE -- this reply exists, so the supervisor was
+          # reached. The field is the client's way of saying the opposite
+          # when it could not reach one at all, and it is written here so
+          # that this reply is exactly what the browser expects: the server
+          # can then relay the line without taking it apart and putting it
+          # back together. See `raw-poll` in client.janet.
+          "reachable" true}
          false]))
 
     (= op "state") [(session-state) false]

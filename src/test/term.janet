@@ -12,6 +12,7 @@
 # are spawning, framing and reconnection, and all three live on the wire
 # between the two processes.
 
+(import ../visualize/json)
 (import ../visualize/term/client :as term)
 (import ../visualize/term/host :as term-host)
 (import ./harness :as check)
@@ -539,3 +540,34 @@
       (set gone (not (os/stat socket :mode)))))
   (check/ok gone "the socket file is cleaned up, so the next run binds")
   (check/ok (not ((state) :running)) "and nothing answers on it"))
+
+(check/test "a poll reply carries the supervisor's own line, for relaying"
+  # A poll is mostly terminal output, and the server's only use for it is to
+  # send that to the browser as JSON -- which the supervisor already produced.
+  # Taking it apart and putting it back together cost 142ms per megabyte on
+  # the one thread every keystroke waits behind, so the raw line travels with
+  # the parsed reply and the route sends it as it stands.
+  (start ["/bin/sh" "-c" "echo RELAY_MARK; sleep 30"] ".")
+  (var text "")
+  (var tries 0)
+  (while (and (< tries 60) (not (string/find "RELAY_MARK" text)))
+    (ev/sleep 0.05)
+    (++ tries)
+    (set text (get (poll 0) "text" "")))
+  (check/ok (string/find "RELAY_MARK" text) "the program's output arrived")
+
+  (def [raw parsed] (:raw-poll client 0))
+  (check/ok (truthy? raw) "a current supervisor answers with a relayable line")
+  (check/ok (string/has-prefix? "{" raw) "which is a JSON object")
+  (check/ok (string/find "RELAY_MARK" raw) "carrying the same output")
+  # ONE FETCH SERVES BOTH. Asking twice would advance `at` past output the
+  # page never saw, so the parsed reply comes back from the same call.
+  (check/ok (dictionary? parsed) "the parsed reply comes back with it")
+
+  # EVERY FIELD THE PAGE READS, which is what makes relaying safe: a missing
+  # one is what makes `raw-poll` answer nil and fall back to the parsed path.
+  (def decoded (json/decode raw))
+  (each k ["text" "at" "from" "running" "generation" "rows" "cols"
+           "trimmed" "waited" "stamp" "program" "reachable"]
+    (check/ok (has-key? decoded k) (string "the line carries " k)))
+  (stop))

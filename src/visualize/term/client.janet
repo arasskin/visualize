@@ -69,7 +69,18 @@
   # what makes reuse impossible; returning nil would let a standing
   # connection carry the damage forward.
   (unless line (error "incomplete reply -- connection unusable"))
-  (json/decode line))
+  # THE RAW LINE TRAVELS WITH THE PARSED ONE. A poll's reply is mostly
+  # terminal output, and the server's only use for it is to send it to the
+  # browser as JSON -- which it already is. Decoding it here and encoding it
+  # again there costs 113ms per megabyte ON THE SHARED THREAD (86 to decode,
+  # 27 to encode), and every keystroke from every pane waits behind that.
+  #
+  # Kept as a field on the parsed table rather than a second return value, so
+  # every existing caller reads unchanged and only the poll path looks for
+  # it. See `raw-poll` below and `poll-answer` in core.janet.
+  (def parsed (json/decode line))
+  (when (dictionary? parsed) (put parsed :raw line))
+  parsed)
 
 (defn- client-state
   ``A `state` reply as this side's callers expect it: keyword keys, and a
@@ -304,6 +315,35 @@
   # `start` is the only op that may bring a supervisor into being. Everything
   # else talks to one that is already there -- polling a terminal nobody
   # started should answer "not running", not silently spawn a process.
+  # ONE FETCH FOR BOTH POLL METHODS. `:poll` parses the reply into the shape
+  # its callers expect; `:raw-poll` relays the supervisor's own line. They
+  # differ only in what they do with the answer, so the asking -- including
+  # the parking rules below, which are the delicate part -- lives here once.
+  (defn fetch-poll [at &opt generation wait]
+    (def message @{"op" "since" "at" at})
+    (when generation (put message "generation" generation))
+    (if (and wait (pos? wait))
+      # A waiting poll must not hold the pinned connection's turn: input and
+      # resize share it, and a keystroke queued behind a 20-second park is a
+      # frozen keyboard. So ask the cheap question over the pinned path first
+      # -- during a streaming burst there is already output, and this answers
+      # without opening anything -- and only a quiet session parks, on a
+      # PRIVATE connection whose lifetime is the park. That keeps connection
+      # churn to one per quiet period rather than the one-per-poll that used
+      # to feed the macOS fd race.
+      (let [quick (ask message)]
+        # Park only on a quiet, LIVE session: text in hand answers now, and a
+        # dead session's "exited" must reach the page promptly, not after a
+        # park that can learn nothing.
+        (if (or (nil? quick)
+                (not (empty? (get quick "text" "")))
+                (not (truthy? (get quick "running"))))
+          quick
+          (do
+            (put message "wait" wait)
+            (or (park-talk message (+ 10 (/ wait 1000))) quick))))
+      (ask message)))
+
   {# This side's ask timings, and the supervisor's own table over the wire.
    :stats (fn [_] ask-stats)
    :remote-stats (fn [_] (ask {"op" "stats"}))
@@ -370,32 +410,40 @@
    # replays from the beginning when it does not match the running session,
    # which is what stops a page from sitting blank in front of a restarted
    # agent.
+   # THE POLL REPLY AS THE SUPERVISOR WROTE IT, or nil when it cannot be used
+   # as it stands. A poll is mostly terminal output, and the server's only use
+   # for it is to send that to the browser as JSON -- which the supervisor has
+   # already produced. Relaying its line skips a decode and an encode on the
+   # shared thread: 113ms per megabyte that every keystroke was waiting behind.
+   #
+   # ONLY WHEN IT IS ALREADY THE RIGHT SHAPE. `:poll` fills in a default for
+   # every field, which is what lets an OLDER SUPERVISOR keep working -- so
+   # the line is relayed only when the supervisor sent all of them itself.
+   # One missing field and this answers nil, and the caller falls back to the
+   # parsed path, which has not changed.
+   # ONE FETCH, EITHER ANSWER. Returns [raw parsed]: `raw` is the
+   # supervisor's own line when it is already the shape the page expects, and
+   # nil otherwise; `parsed` is always the reply, so a caller that cannot use
+   # the raw line does NOT poll again.
+   #
+   # That second poll is the trap this shape exists to avoid. `at` advances
+   # with every reply, so asking twice means the first reply's output is
+   # gone -- output the page would never see, for a shape check that failed.
+   :raw-poll
+   (fn [self at &opt generation wait]
+     (def reply (fetch-poll at generation wait))
+     (var raw nil)
+     (when (and (dictionary? reply) (reply :raw))
+       (var whole true)
+       (each k ["text" "at" "from" "running" "generation" "rows" "cols"
+                "trimmed" "waited" "stamp" "program" "reachable"]
+         (unless (has-key? reply k) (set whole false)))
+       (when whole (set raw (reply :raw))))
+     [raw reply])
+
    :poll
    (fn [_ at &opt generation wait]
-     (def message @{"op" "since" "at" at})
-     (when generation (put message "generation" generation))
-     (def reply
-       (if (and wait (pos? wait))
-         # A waiting poll must not hold the pinned connection's turn: input
-         # and resize share it, and a keystroke queued behind a 20-second
-         # park is a frozen keyboard. So ask the cheap question over the
-         # pinned path first -- during a streaming burst there is already
-         # output, and this answers without opening anything -- and only a
-         # quiet session parks, on a PRIVATE connection whose lifetime is
-         # the park. That keeps connection churn to one per quiet period
-         # rather than the one-per-poll that used to feed the macOS fd race.
-         (let [quick (ask message)]
-           # Park only on a quiet, LIVE session: text in hand answers now,
-           # and a dead session's "exited" must reach the page promptly, not
-           # after a park that can learn nothing.
-           (if (or (nil? quick)
-                   (not (empty? (get quick "text" "")))
-                   (not (truthy? (get quick "running"))))
-             quick
-             (do
-               (put message "wait" wait)
-               (or (park-talk message (+ 10 (/ wait 1000))) quick))))
-         (ask message)))
+     (def reply (fetch-poll at generation wait))
      (if reply
        {"text" (or (get reply "text") "")
         "at" (or (get reply "at") at)
