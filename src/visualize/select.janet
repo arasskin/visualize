@@ -135,7 +135,33 @@
   (if (empty? hidden)
     graph
     (let [ours (graph :ours)
-          tests (map |(selector $ ours) hidden)
+          # AN EXTERNAL HIDDEN BY A NESTED PROJECT IS SCOPED TO IT. A
+          # nested config's `(hide ?.)` means "the externals THIS project
+          # pulls in" -- an external has no place of its own, so it cannot
+          # take a path prefix, and passing the name up unchanged made one
+          # subproject's hide erase every other subproject's libraries too.
+          #
+          # `nested-lines` in config.janet writes the project after an `@`,
+          # and the scope is resolved HERE because this is where the edges
+          # are: an external belongs to a project when that project has a
+          # file pointing at it.
+          scoped (fn [name]
+                   (def at (string/find "@" name))
+                   (when at
+                     [(string/slice name 0 at) (string/slice name (+ at 1))]))
+          reaches (fn [project node]
+                    (var hit false)
+                    (each [a b] (graph :edges)
+                      (when (and (= b node)
+                                 (string/has-prefix? (string project ".") a))
+                        (set hit true)))
+                    hit)
+          tests (map (fn [name]
+                       (if-let [[bare project] (scoped name)]
+                         (let [test (selector bare ours)]
+                           (fn [node] (and (test node) (reaches project node))))
+                         (selector name ours)))
+                     hidden)
           hidden? (fn [node] (some |($ node) tests))]
       (merge graph
              {:nodes (filter |(not (hidden? ($ :name))) (graph :nodes))

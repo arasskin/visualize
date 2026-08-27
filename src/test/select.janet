@@ -262,3 +262,25 @@
         "hiding the directory leaves the external alone")
   (t/ok (select/matches? "?.archive.otto-py.ui" "?.archive" ours)
         "and the marked name reaches it"))
+
+(t/test "a scoped external hide reaches only that project's externals"
+  # `?@childA` means "the externals childA pulls in". An external has no
+  # place, so the scope cannot be a path prefix on the name -- it is resolved
+  # against the EDGES, since an external belongs to a project when that
+  # project has a file pointing at it.
+  (def g {:nodes [{:name "childA.a.py" :ours true}
+                  {:name "childB.b.py" :ours true}
+                  {:name "?.libA" :ours false}
+                  {:name "?.libB" :ours false}]
+          :edges [["childA.a.py" "?.libA"] ["childB.b.py" "?.libB"]]
+          :ours {"childA.a.py" true "childB.b.py" true}})
+  (def out (select/drop-nodes g ["?@childA"]))
+  (def left (sorted (map |($ :name) (out :nodes))))
+  (t/ok (not (index-of "?.libA" left)) "childA's external went")
+  (t/ok (index-of "?.libB" left) "childB's stayed")
+
+  # UNSCOPED STILL MEANS EVERY MATCH, which is what a hide written at the top
+  # level relies on.
+  (def all (select/drop-nodes g ["?"]))
+  (t/is= ["childA.a.py" "childB.b.py"] (sorted (map |($ :name) (all :nodes)))
+         "an unscoped mark takes them all"))

@@ -718,7 +718,25 @@
             (def moved
               (seq [[at arg] :pairs args]
                 (if (= (get kinds at) :name)
-                  (let [full (normalise (expand-aliases aliases arg))]
+                  # THE MARK IS READ BEFORE `normalise` TRIMS IT. `?.` on its
+                  # own means every external, and normalise trims dots from
+                  # both ends -- so the bare mark arrived here as `?`, which
+                  # `names/external?` does not recognise. Asked of the raw
+                  # argument instead.
+                  # THE MARK IS READ BEFORE `normalise` TRIMS IT. `?.` on
+                  # its own means every external, and normalise trims dots
+                  # from both ends -- so the bare mark arrived here as `?`,
+                  # which `names/external?` does not recognise.
+                  #
+                  # A BARE `?` IS THE SAME REQUEST. Someone hiding every
+                  # external types the mark, and whether they finish it with
+                  # the dot is not a distinction worth having: `(hide ?)` and
+                  # `(hide ?.)` both mean "the externals this project pulls
+                  # in", and one of them silently meaning "every external in
+                  # the drawing" is how a subproject erased its siblings'.
+                  (let [raw (string/trim (expand-aliases aliases arg))
+                        marked (or (names/external? raw) (= raw "?"))
+                        full (normalise raw)]
                     # A NAME FROM OUTSIDE THE TREE IS NOT A PLACE, and does
                     # not take the prefix. `os` and `pydantic` are nodes but
                     # not files: there is nothing under this project called
@@ -738,10 +756,27 @@
                     # project's if it has an `otto`, and `urllib.parse` is
                     # not if it has no `urllib`.
                     #
-                    # An explicit `?.` is left alone either way.
-                    (if (or (names/external? full) (not (holds? here-dir full)))
-                      full
-                      (string prefix "." full)))
+                    # AN EXTERNAL IS SCOPED TO THE PROJECT THAT NAMED IT.
+                    # An external has no place -- that is what the mark says
+                    # -- so it cannot take a path prefix. But a nested
+                    # config's `(hide ?.)` means "the externals THIS project
+                    # pulls in", and passing it up unchanged made it mean
+                    # every external in the whole drawing: one subproject
+                    # hiding its libraries erased every other subproject's
+                    # too.
+                    #
+                    # So the project travels with the name, after an `@`.
+                    # `?.` from `shoppingagent` arrives as `?.@shoppingagent`
+                    # and `?.uvicorn` as `?.uvicorn@shoppingagent`, which
+                    # `drop-nodes` reads by asking which nodes that project
+                    # actually references. A name written at the TOP level
+                    # carries no scope and still means every match, which is
+                    # what `(hide ?.archive)` in the parent relies on.
+                    (if marked
+                      (string full "@" prefix)
+                      (if (not (holds? here-dir full))
+                        full
+                        (string prefix "." full))))
                   arg)))
             (array/push out
                         (string "(" verb " " (string/join moved " ") ")")))))))

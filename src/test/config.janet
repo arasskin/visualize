@@ -585,3 +585,38 @@
   (t/is= ["my.lib.thing"] (map |($ :prefix) (state :groups)))
   # ...and a second level, reached THROUGH the dotted name.
   (t/is= ["my.lib.inner.deep"] (state :folded)))
+
+(t/test "an external hidden by a nested project stays that project's"
+  # An external has no place of its own -- that is what the mark says -- so a
+  # nested config's name for one cannot take a path prefix, and passing it up
+  # unchanged made `(hide ?.)` in ONE subproject erase every other
+  # subproject's libraries too.
+  #
+  # The project travels with the name after an `@`, and `drop-nodes` resolves
+  # it against the edges: an external belongs to a project when that project
+  # has a file pointing at it.
+  (def root (string (os/getenv "TMPDIR") "vz-scope-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/childA"))
+  (os/mkdir (string root "/childB"))
+  (spit (string root "/visualize.conf")
+        "(visualize childA) (visualize childB)\n")
+  (spit (string root "/childA/visualize.conf") "(hide ?.)\n")
+  (spit (string root "/childB/visualize.conf") "# nothing hidden\n")
+  (spit (string root "/childA/a.py") "import zzz_libA\n")
+  (spit (string root "/childB/b.py") "import zzz_libB\n")
+
+  (def [state problems] (config/run (config/read-config
+                                      (string root "/visualize.conf")) root))
+  (t/is= 0 (length problems) "the nested configs ran cleanly")
+  (t/ok (some |(string/find "@childA" $) (state :hidden))
+        "the hide carries the project that wrote it")
+
+  # A BARE `?` IS THE SAME REQUEST as `?.`. Whether the mark is finished with
+  # its dot is not a distinction worth having, and one of them silently
+  # meaning "every external in the drawing" is the bug.
+  (spit (string root "/childA/visualize.conf") "(hide ?)\n")
+  (def [state2 _] (config/run (config/read-config
+                                (string root "/visualize.conf")) root))
+  (t/ok (some |(string/find "@childA" $) (state2 :hidden))
+        "written without the trailing dot, it is still scoped"))

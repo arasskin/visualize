@@ -527,6 +527,13 @@ document.addEventListener('keydown', (e) => {
   // text like any other character: the compose handler below runs only
   // while composing, this one only while not.
   if (composing()) return;
+  // A KEYSTROKE INSIDE A FIELD BELONGS TO THE FIELD. `composing()` says the
+  // bar is open, not where the caret is -- so a `?` typed into any other
+  // input or textarea reached this handler and opened the help instead of
+  // going into the text. F1 is a named key no field wants and stays.
+  if (e.key === '?' &&
+      (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' ||
+       e.target.isContentEditable)) return;
   if (e.key === '?' || e.key === 'F1') {
     e.preventDefault();
     // The same key closes it. Reading about the verbs and then pressing the
