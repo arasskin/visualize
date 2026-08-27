@@ -177,5 +177,11 @@
 (def spec
   {:name "html"
    :ext [".html" ".htm"]
-   :skip-dirs ["node_modules" "dist" "build" "coverage" "_site" "public"]
+   # NOT `public`, though a generated site often has one. Skip lists are
+   # merged across every spec and applied to the whole walk, so this one
+   # entry hid `otto/resources/public/app.css` -- a served stylesheet the
+   # page beside it depends on, and a CSS file the css spec never asked to
+   # skip. A directory named for what it SERVES holds sources as often as
+   # output; `dist` and `_site` name the output itself and stay.
+   :skip-dirs ["node_modules" "dist" "build" "coverage" "_site"]
    :parse parse})

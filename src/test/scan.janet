@@ -650,10 +650,14 @@ database  where things are kept
   # AND drawing nodes for what it holds is the worst of both.
   (def root (string (os/getenv "TMPDIR") "vz-prune-" (string (os/time))))
   (os/mkdir root)
-  (os/mkdir (string root "/public"))
-  (spit (string root "/public/app.css") "body{}\n")
+  # `dist` rather than `public`: a directory named for what it SERVES holds
+  # sources as often as output, and `public` was taken off the skip list
+  # when it turned out to be hiding a served stylesheet. `dist` names the
+  # output itself and is skipped by every spec that has an opinion.
+  (os/mkdir (string root "/dist"))
+  (spit (string root "/dist/app.css") "body{}\n")
   (spit (string root "/page.html")
-        "<link rel=\"stylesheet\" href=\"/public/app.css\">")
+        "<link rel=\"stylesheet\" href=\"/dist/app.css\">")
 
   (def g (scan/scan root))
   (t/is= [] (map |($ :name) (filter |(not ($ :ours)) (g :nodes)))
