@@ -241,23 +241,18 @@
   (drain)
   (and session (not exited) (pty/alive? session)))
 
-(defn- foreground
-  ``What the terminal is actually running, or nil.
+# THE LAST ANSWER AND WHEN IT WAS FETCHED. `foreground` forks a `ps`, which
+# measures 2-5ms -- "fine once a poll" when polling meant four asks a second,
+# and the single largest share of typing latency once polling became
+# streaming: every parked poll's answer named the program on its way out, so
+# every keystroke's repaint waited on a fork. The name changes when a human
+# runs a different program, which is an event on the scale of seconds; it is
+# refreshed at most once a second and remembered in between.
+(var- foreground-cache nil)
+(var- foreground-at 0)
 
-  THE ARGV IS WHAT WAS LAUNCHED, which stops being the answer the moment the
-  shell runs anything: a pane running `vim` is a pane whose argv still says
-  zsh. The kernel knows better -- a terminal has a FOREGROUND PROCESS GROUP,
-  the one allowed to read from it, and that is the definition of the program
-  the terminal is running.
-
-  `ps` rather than a syscall, for the reason `resize` shells out to `stty`:
-  tcgetpgrp is reachable through the FFI but naming the process behind the
-  pid is not, and the answer wanted here is a name. The `+` in STAT is the
-  flag for that group; the LAST such line is the innermost program, since a
-  shell running a program has both in its own group.
-
-  Nil when it cannot tell, which the caller treats as "say nothing" rather
-  than as an answer.``
+(defn- foreground-fresh
+  "The `ps` behind `foreground`; see the cache note there."
   []
   (when-let [device (and session (session :device))
              short (when (string/has-prefix? "/dev/" device)
@@ -285,6 +280,34 @@
                 (set found leaf)))))
         found)
       ([_] nil))))
+
+(defn- foreground
+  ``What the terminal is actually running, or nil.
+
+  THE ARGV IS WHAT WAS LAUNCHED, which stops being the answer the moment the
+  shell runs anything: a pane running `vim` is a pane whose argv still says
+  zsh. The kernel knows better -- a terminal has a FOREGROUND PROCESS GROUP,
+  the one allowed to read from it, and that is the definition of the program
+  the terminal is running.
+
+  `ps` rather than a syscall, for the reason `resize` shells out to `stty`:
+  tcgetpgrp is reachable through the FFI but naming the process behind the
+  pid is not, and the answer wanted here is a name. The `+` in STAT is the
+  flag for that group; the LAST such line is the innermost program, since a
+  shell running a program has both in its own group.
+
+  Nil when it cannot tell, which the caller treats as "say nothing" rather
+  than as an answer.``
+  []
+  (def now (os/clock :monotonic))
+  # REFRESHED IN THE BACKGROUND. The reply that notices the name is stale
+  # hands out the old one and kicks a fiber to fetch the new -- so no reply,
+  # ever, waits on the fork. Setting the stamp before the fiber runs is what
+  # keeps a burst of replies from each spawning their own ps.
+  (when (>= (- now foreground-at) 1)
+    (set foreground-at now)
+    (ev/go (fn [] (set foreground-cache (foreground-fresh)))))
+  foreground-cache)
 
 (defn- session-state
   ``What the page needs to know about the session, without its output.
@@ -610,7 +633,7 @@
     # what turned the transport from polling into streaming: instead of the
     # page asking four times a second and output waiting up to 250ms for the
     # next ask, the ask is already here when the output arrives and leaves
-    # ~10ms later. Parking is safe because every connection is answered in
+    # about a millisecond later. Parking is safe because every connection is answered in
     # its own fiber -- a held since blocks nobody -- and bounded because a
     # deadline is not optional on localhost either: the page's fetch has its
     # own timeout, and a park that outlived it would answer a closed socket.
@@ -623,7 +646,7 @@
     (let [asked (number-at "generation" -1)
           wait (min 25000 (number-at "wait" 0))]
       (when (pos? wait)
-        # NO PROGRAM NAME WHILE PARKED. This loop runs every 10ms for as long
+        # NO PROGRAM NAME WHILE PARKED. This loop ticks every millisecond for as long
         # as the park lasts and compares only `running` and `generation` --
         # asking for the name would fork `ps` a hundred times a second, per
         # pane, to build a string the loop never reads. The reply below still
@@ -644,7 +667,14 @@
             # The session's liveness flipped mid-park: answer now.
             (not= (now "running") (entry "running")) (set parked false)
             (>= (os/clock :monotonic) deadline) (set parked false)
-            (ev/sleep 0.01))))
+            # ONE MILLISECOND, NOT TEN. This tick is the whole latency of the
+            # streaming transport: a TUI answers a keystroke through the
+            # parked poll, and a 10ms tick put up to 10ms between its repaint
+            # existing and the page hearing about it -- the largest single
+            # share of felt typing latency, sitting in a constant. A 1ms tick
+            # costs the supervisor ~a thousand cheap wakeups a second while
+            # parked, in its own process, and nothing else.
+            (ev/sleep 0.001))))
       (let [now (session-state)
             stale (and (>= asked 0) (not= asked (now "generation")))
             [text next from] (session-since (if stale 0 (number-at "at" 0)))]
