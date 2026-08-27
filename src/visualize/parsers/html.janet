@@ -121,7 +121,16 @@
                    (not (string/has-prefix? "data:" ref))
                    (not (string/has-prefix? "mailto:" ref))
                    (not (string/has-prefix? "tel:" ref))
-                   (not (string/find "{{" ref))))
+                   (not (string/find "{{" ref))
+                   # AND A HOLE THE PAGE'S OWN JAVASCRIPT FILLS. `src="${esc
+                   # (t.image)}"` is a template literal evaluated in the
+                   # browser, and reading it as a path invented `esc/t` -- a
+                   # node named after the escaping helper that happened to sit
+                   # inside the braces. `<%` and `{%` are the same promise in
+                   # the other template dialects a page may be written in.
+                   (not (string/find "${" ref))
+                   (not (string/find "<%" ref))
+                   (not (string/find "{%" ref))))
             found))
 
   # Relative, so the scanner resolves against the importing file -- see

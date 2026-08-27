@@ -251,6 +251,14 @@
   (collect ~(* (+ ,line-start (set ";&|("))
                (any (set " \t"))
                (? (* "exec" ,space))
+               # NOT AN ASSIGNMENT. `css=otto/resources/public/app.css` opens
+               # a line with something that looks exactly like a slashed path
+               # in command position, and reading it as one made `css` a
+               # directory: the value became `css/otto/resources/public/app`,
+               # a node for a path that exists nowhere. An assignment names a
+               # variable; `assignments` above has already read it, and what
+               # it holds is resolved wherever the variable is USED.
+               (! (* (some (+ (range "AZ") (range "az") (range "09") "_")) "="))
                ,slashed-path))
 
   # NAMES, NOT PATHS -- the same conversion `run` does for a PEG spec, done

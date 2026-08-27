@@ -69,6 +69,21 @@
   (def reported (when (dyn 'os/cpu-count) (os/cpu-count)))
   (max 1 (min 32 (or reported 8))))
 
+(defn pruned-dirs
+  ``Every directory name this scan will not walk into.
+
+  The global set plus each spec's own. `build` needs it to tell a name that
+  matched nothing because it is somewhere else from one that matched nothing
+  because the walk deliberately did not look -- a page asking for
+  `/public/app.css` in a tree where `public/` is pruned should draw no edge
+  rather than invent an external for a file that is right there.``
+  [&opt extra-skips]
+  (def skips (merge @{} skip-dirs))
+  (each spec specs
+    (each dir (or (spec :skip-dirs) []) (put skips dir true)))
+  (each dir (or extra-skips []) (put skips dir true))
+  skips)
+
 (defn find-files
   ``EVERY file under `root`, each with the spec that claims it or nil.
 
@@ -105,6 +120,7 @@
   (def skips (merge @{} skip-dirs))
   (each spec specs
     (each dir (or (spec :skip-dirs) []) (put skips dir true)))
+
   # WHAT THE DRAWING HAS NO USE FOR. A directory the config hides cannot
   # change the picture, so walking it is work spent to be ignored -- and on
   # a tree where the hidden part is most of the tree, it is most of the
@@ -114,8 +130,6 @@
   # PASSED IN RATHER THAN READ. This module does not know the config
   # language and should not learn it; the caller that owns the config says
   # which top-level names it has hidden. See `scanned` in core.janet.
-  (each dir (or extra-skips []) (put skips dir true))
-
   (defn walk [dir rel]
     (each entry (try (os/dir dir) ([_] []))
       (def full (string dir "/" entry))
@@ -496,6 +510,27 @@
   (def importable-by
     {"python" {"py" true}})
 
+  # A NAME THAT LANDS IN A DIRECTORY THE WALK NEVER ENTERED. The scan prunes
+  # `public/`, `.venv/`, `dist/` and the rest, so a file inside one is not in
+  # the tree -- and a reference to it matched nothing and was invented as an
+  # EXTERNAL, which says the opposite of what is true: the file is right
+  # there, and the scan chose not to look. `otto/resources/fulfill.html` asks
+  # for `/public/app.css` and got `?.shoppingagent.otto.resources.public.app`
+  # drawn beside it; `otto.sh` runs `.venv/bin/python` and got another.
+  #
+  # Skipping a directory AND inventing nodes for what it holds is the worst
+  # of both. Nothing is drawn instead.
+  (def pruned (pruned-dirs))
+  (defn pruned? [name]
+    (var hit false)
+    (each part (string/split "." name)
+      # The walk prunes `.venv` and `.git`; `safe-name` has already taken the
+      # leading dot off by the time a reference gets here, so both spellings
+      # are asked about.
+      (when (or (get pruned part) (get pruned (string "." part)))
+        (set hit true)))
+    hit)
+
   (defn importable? [lang target]
     (def allowed (get importable-by lang))
     (or (nil? allowed)
@@ -689,6 +724,23 @@
         # An inferred package that named no file: nothing wrote it, so
         # nothing is drawn for it.
         speculative? nil
+
+        # A reference into a directory this scan pruned. See `pruned?`.
+        (pruned? mapped) nil
+
+        # A HIDDEN FILE LEAVES NOTHING BEHIND. `. ./.env` in a shell script
+        # names a dotfile the walk skips, and `.env` has no stem at all --
+        # `stem` reads the whole name as an extension and returns "". What
+        # survives is the DIRECTORY the reference was resolved against, so
+        # the name collapsed to the importing file's own parent and drew
+        # `?.shoppingagent`: an external named after the folder the script
+        # is sitting in.
+        #
+        # Recognised as "a name the importer is already inside": no file can
+        # be its own ancestor, so a reference that resolves to one resolved
+        # to nothing.
+        (or (empty? mapped)
+            (string/has-prefix? (string mapped ".") here)) nil
 
         (let [parts (string/split "." name)
               prefix (string/join (slice parts 0 -2) ".")]

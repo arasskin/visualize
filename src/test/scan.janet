@@ -641,3 +641,76 @@ database  where things are kept
   (t/ok (index-of "page.html -> style.css"
                   (map |(string (first $) " -> " (get $ 1)) (g2 :edges)))
         "html still reaches a stylesheet"))
+
+(t/test "a reference into a pruned directory draws nothing"
+  # The walk prunes `public/`, `.venv/`, `dist/` and the rest, so a file
+  # inside one is not in the tree. A reference to it matched nothing and was
+  # invented as an EXTERNAL -- which says the opposite of what is true: the
+  # file is right there, and the scan chose not to look. Skipping a directory
+  # AND drawing nodes for what it holds is the worst of both.
+  (def root (string (os/getenv "TMPDIR") "vz-prune-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/public"))
+  (spit (string root "/public/app.css") "body{}\n")
+  (spit (string root "/page.html")
+        "<link rel=\"stylesheet\" href=\"/public/app.css\">")
+
+  (def g (scan/scan root))
+  (t/is= [] (map |($ :name) (filter |(not ($ :ours)) (g :nodes)))
+         "the pruned file invented no external")
+  (t/is= [] (g :edges) "and no edge was drawn to it"))
+
+(t/test "a url the page computes at runtime is not a path"
+  # `src="${esc(t.image)}"` is a template literal the browser fills in, and
+  # reading it as a path invented `esc/t` -- a node named after the escaping
+  # helper that happened to sit inside the braces.
+  (def root (string (os/getenv "TMPDIR") "vz-tmpl-" (string (os/time))))
+  (os/mkdir root)
+  (spit (string root "/page.html")
+        (string "<img src=\"${esc(t.image)}\">"
+                "<img src=\"{{FAVICON}}\">"
+                "<img src=\"<%= asset %>\">"
+                "<link rel=\"stylesheet\" href=\"./real.css\">"))
+  (spit (string root "/real.css") "body{}\n")
+
+  (def g (scan/scan root))
+  (t/is= [] (map |($ :name) (filter |(not ($ :ours)) (g :nodes)))
+         "no template hole became a node")
+  (t/is= [["page.html" "real.css"]] (g :edges)
+         "and the one real reference still resolves"))
+
+(t/test "a shell assignment is not a command"
+  # `css=otto/resources/public/app.css` opens a line with something that
+  # looks exactly like a slashed path in command position, and reading it as
+  # one made `css` a DIRECTORY: the value became
+  # `css.otto.resources.public.app`, a node for a path that exists nowhere.
+  (def root (string (os/getenv "TMPDIR") "vz-assign-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/lib"))
+  (spit (string root "/lib/util.sh") "echo hi\n")
+  (spit (string root "/run.sh")
+        "css=some/generated/app.css\nsource lib/util.sh\n")
+
+  (def g (scan/scan root))
+  (def edges (map |(string (first $) " -> " (get $ 1)) (g :edges)))
+  (t/ok (not (some |(string/find "css." $) edges))
+        "the assignment named no directory")
+  (t/ok (index-of "run.sh -> lib.util.sh" edges)
+        "and a real source line still resolves"))
+
+(t/test "a reference that resolves to no name draws nothing"
+  # `. ./.env` names a dotfile the walk skips, and `.env` has no stem at all
+  # -- `stem` reads the whole name as an extension and returns "". What
+  # survived was the DIRECTORY it was resolved against, so the reference
+  # collapsed to the importing file's own parent and drew an external named
+  # after the folder the script is sitting in.
+  (def root (string (os/getenv "TMPDIR") "vz-dot-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/proj"))
+  (spit (string root "/proj/.env") "X=1\n")
+  (spit (string root "/proj/run.sh") "[ -f .env ] && . ./.env\n")
+
+  (def g (scan/scan root))
+  (t/is= [] (map |($ :name) (filter |(not ($ :ours)) (g :nodes)))
+         "the dotfile invented no external")
+  (t/is= [] (g :edges)))
