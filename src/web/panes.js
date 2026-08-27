@@ -56,6 +56,15 @@ export function makePanel(root, options = {}) {
   function grab(handle, onMove, onDrop) {
     handle.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
+      // THE LABEL WINS. A press on the note is a press meant for the text --
+      // putting a caret in it -- and this handler would take it for the start
+      // of a drag. `preventDefault` here is what stops the caret being placed
+      // at all, so no amount of stopping the LATER events (mousedown, click)
+      // helps: pointerdown comes first and has already refused the focus.
+      //
+      // Checked here rather than raced from the label, because a drag handle
+      // that has already prevented the default cannot be talked out of it.
+      if (e.target.closest && e.target.closest('.label')) return;
       e.preventDefault();
       e.stopPropagation();
       // Whichever panel you touched comes to the front. Without this the one
@@ -203,9 +212,28 @@ export function makePanel(root, options = {}) {
     // ENTER ENDS IT rather than adding a line: a tab is one line tall, and a
     // note that wrapped would push the row apart. Escape abandons the edit
     // the way it does everywhere else on the page.
+    // SAVED WHEN YOU LEAVE IT, not on every keystroke: the write goes through
+    // the config file, and a file rewritten per character is a file the
+    // watcher is redrawing from while you are still typing into it.
+    //
+    // ITS OWN FUNCTION, because `blur` is not the only way to be done: Enter
+    // ends the edit too, and a shut panel is a hidden subtree where calling
+    // `blur()` moves no focus and fires no event -- so committing through the
+    // blur handler saved nothing for exactly the tabs most worth labelling,
+    // the ones you have not opened.
+    const commit = () => {
+      const text = label.textContent.replace(/\s+/g, ' ').trim();
+      label.textContent = text;
+      if (text === (label.dataset.saved || '')) return;
+      label.dataset.saved = text;
+      if (options.onLabel) options.onLabel(text);
+    };
+    // ENTER ENDS IT rather than adding a line: a tab is one line tall, and a
+    // note that wrapped would push the row apart. Escape abandons the edit
+    // the way it does everywhere else on the page.
     label.addEventListener('keydown', (e) => {
       e.stopPropagation();
-      if (e.key === 'Enter') { e.preventDefault(); label.blur(); }
+      if (e.key === 'Enter') { e.preventDefault(); commit(); label.blur(); }
       if (e.key === 'Escape') {
         e.preventDefault();
         label.textContent = label.dataset.saved || '';
@@ -215,15 +243,8 @@ export function makePanel(root, options = {}) {
     label.addEventListener('focus', () => {
       label.dataset.saved = label.textContent;
     });
-    // SAVED WHEN YOU LEAVE, not on every keystroke: the write goes through
-    // the config file, and a file rewritten per character is a file the
-    // watcher is redrawing from while you are still typing into it.
     label.addEventListener('blur', () => {
-      const text = label.textContent.replace(/\s+/g, ' ').trim();
-      label.textContent = text;
-      if (text === (label.dataset.saved || '')) return;
-      label.dataset.saved = text;
-      if (options.onLabel) options.onLabel(text);
+      commit();
     });
   }
   panel.label = label;
@@ -234,9 +255,13 @@ export function makePanel(root, options = {}) {
     label.dataset.saved = label.textContent;
   };
 
-  bar.addEventListener('click', () => {
+  bar.addEventListener('click', (e) => {
     // A drag that ended on the bar is not a click asking to collapse it.
     if (bar.dragged) { bar.dragged = false; return; }
+    // NOR IS A CLICK ON THE NOTE. The label stops this event on its way past,
+    // but the same check is made here rather than trusted from there: the
+    // whole bug was a handler relying on another one to have intervened first.
+    if (e.target.closest && e.target.closest('.label')) return;
     const opening = root.classList.contains('shut');
     root.classList.toggle('shut', !opening);
     if (opening) {
