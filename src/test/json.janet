@@ -53,3 +53,47 @@
                  "error" ""
                  "svg" "<svg><path d=\"M0,0\"/></svg>"})
   (t/is= original (json/decode (json/encode original))))
+
+(t/test "escaping is byte-exact for every byte and every pair"
+  # THE RUN-COPYING VERSION HAS TO AGREE WITH THE BYTE-AT-A-TIME ONE it
+  # replaced, exactly -- a JSON string the browser cannot parse is a terminal
+  # that stops, and a `<` that slips through unescaped is a `</script>` that
+  # closes the block the page embeds this in.
+  #
+  # Pairs as well as singles, because runs have BOUNDARIES: the bug a
+  # rewrite like this makes is a byte dropped or duplicated where a plain run
+  # meets a special one, and that needs two bytes to show.
+  (defn reference [text]
+    (def out @"\"")
+    (each byte text
+      (cond
+        (= byte (chr "\"")) (buffer/push-string out "\\\"")
+        (= byte (chr "\\")) (buffer/push-string out "\\\\")
+        (= byte (chr "\n")) (buffer/push-string out "\\n")
+        (= byte (chr "\r")) (buffer/push-string out "\\r")
+        (= byte (chr "\t")) (buffer/push-string out "\\t")
+        (= byte (chr "<")) (buffer/push-string out "\\u003c")
+        (= byte (chr ">")) (buffer/push-string out "\\u003e")
+        (= byte (chr "&")) (buffer/push-string out "\\u0026")
+        (< byte 0x20) (buffer/push-string out (string/format "\\u%04x" byte))
+        (buffer/push-byte out byte)))
+    (buffer/push-string out "\"")
+    (string out))
+
+  (var singles 0)
+  (for b 0 256
+    (def s (string/from-bytes b))
+    (unless (= (reference s) (json/encode s)) (++ singles)))
+  (t/is= 0 singles "all 256 bytes encode identically")
+
+  (var pairs 0)
+  (for a 0 256
+    (for b 0 256
+      (def s (string/from-bytes a b))
+      (unless (= (reference s) (json/encode s)) (++ pairs))))
+  (t/is= 0 pairs "and all 65536 adjacent pairs, so no run boundary is wrong")
+
+  # AND IT STILL ROUND-TRIPS, which is the point of the escaping.
+  (def hairy (string "plain " (string/from-bytes 0x1b) "[0m <script>&\"\\ "
+                     (string/from-bytes 0) "end"))
+  (t/is= hairy (json/decode (json/encode hairy))))

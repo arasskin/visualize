@@ -10,27 +10,69 @@
 # would end that block early and drop the rest of the file into the document
 # as HTML. `<` is escaped for exactly that reason -- see `escape` below.
 
+# WHICH BYTES CANNOT BE WRITTEN AS THEMSELVES, as a lookup rather than a
+# chain of comparisons. Indexed by byte, so asking is one array read.
+#
+#   `"` and `\`  end the string, or start an escape
+#   `<` `>` `&`  would let `</script>` close the block the page embeds this
+#                in, and everything after it would parse as HTML
+#   under 0x20   control characters are not legal raw in a JSON string, and
+#                this is most of a terminal's traffic: every ANSI sequence
+#                starts with ESC (0x1b)
+(def- special
+  (let [t (array/new-filled 256 false)]
+    (each b [(chr `"`) (chr "\\") (chr "<") (chr ">") (chr "&")] (put t b true))
+    (for b 0 0x20 (put t b true))
+    (freeze t)))
+
+# What each one is written as. A table rather than a `cond`, so the answer is
+# a lookup too; the `\uXXXX` forms are precomputed rather than formatted per
+# occurrence, which is what `string/format` was doing on every ESC byte.
+(def- escaped
+  (let [t (array/new-filled 256 nil)]
+    (put t (chr `"`) `\"`)
+    (put t (chr "\\") "\\\\")
+    (put t (chr "\n") "\\n")
+    (put t (chr "\r") "\\r")
+    (put t (chr "\t") "\\t")
+    (put t (chr "<") "\\u003c")
+    (put t (chr ">") "\\u003e")
+    (put t (chr "&") "\\u0026")
+    (for b 0 0x20
+      (unless (get t b) (put t b (string/format "\\u%04x" b))))
+    (freeze t)))
+
 (defn- escape
-  "One string as a JSON string literal, safe to embed in a <script> block."
+  ``One string as a JSON string literal, safe to embed in a <script> block.
+
+  COPIED IN RUNS, not byte by byte. The old version tested every byte against
+  nine conditions before copying it -- and an ordinary letter matched none of
+  them, so it fell through all nine to reach the common case. That is ~9
+  million interpreted comparisons per megabyte, on the one thread every
+  keystroke waits behind: 64ms per megabyte of terminal output, which is what
+  a keystroke arriving mid-drain was queueing behind.
+
+  Between eight and fifteen per cent of real terminal output needs escaping
+  at all -- the rest is plain text between occasional ANSI sequences. So the
+  scan looks for the next byte that needs work and hands the whole run before
+  it to one `buffer/push-string`, which copies it without the interpreter
+  seeing the bytes individually.``
   [text]
-  (def out @"\"")
-  (each byte text
-    (cond
-      (= byte (chr "\"")) (buffer/push-string out "\\\"")
-      (= byte (chr "\\")) (buffer/push-string out "\\\\")
-      (= byte (chr "\n")) (buffer/push-string out "\\n")
-      (= byte (chr "\r")) (buffer/push-string out "\\r")
-      (= byte (chr "\t")) (buffer/push-string out "\\t")
-      # `</script>` inside a string would close the block the page embeds this
-      # in, and everything after it would be parsed as HTML. Escaping `<` costs
-      # nothing and closes that hole wherever the string ends up.
-      (= byte (chr "<")) (buffer/push-string out "\\u003c")
-      (= byte (chr ">")) (buffer/push-string out "\\u003e")
-      (= byte (chr "&")) (buffer/push-string out "\\u0026")
-      # Control characters are not legal raw in a JSON string.
-      (< byte 0x20) (buffer/push-string out (string/format "\\u%04x" byte))
-      (buffer/push-byte out byte)))
-  (buffer/push-string out "\"")
+  (def out @`"`)
+  (def n (length text))
+  (var start 0)   # first byte of the run not yet copied
+  (var i 0)
+  (while (< i n)
+    (if (get special (get text i))
+      (do
+        # The plain run before this byte, in one copy.
+        (when (> i start) (buffer/push-string out (string/slice text start i)))
+        (buffer/push-string out (get escaped (get text i)))
+        (++ i)
+        (set start i))
+      (++ i)))
+  (when (> n start) (buffer/push-string out (string/slice text start n)))
+  (buffer/push-string out `"`)
   (string out))
 
 (defn encode
