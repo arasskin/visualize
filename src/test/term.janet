@@ -527,20 +527,6 @@
   (os/setenv "VISUALIZE_BACKLOG" nil)
   (ev/sleep 0.3))
 
-(check/test "shutdown ends the supervisor and takes the socket with it"
-  # What ctrl-c does. Also this suite's teardown: leaving a supervisor behind
-  # would make the next run adopt a session it did not start, and the tests
-  # that count generations would start failing for reasons of their own.
-  (start ["/bin/sh" "-c" "sleep 30"] (os/cwd) 24 80)
-  (shutdown)
-  (var gone false)
-  (for _ 0 40
-    (unless gone
-      (ev/sleep 0.05)
-      (set gone (not (os/stat socket :mode)))))
-  (check/ok gone "the socket file is cleaned up, so the next run binds")
-  (check/ok (not ((state) :running)) "and nothing answers on it"))
-
 (check/test "a poll reply carries the supervisor's own line, for relaying"
   # A poll is mostly terminal output, and the server's only use for it is to
   # send that to the browser as JSON -- which the supervisor already produced.
@@ -556,18 +542,29 @@
     (set text (get (poll 0) "text" "")))
   (check/ok (string/find "RELAY_MARK" text) "the program's output arrived")
 
-  (def [raw parsed] (:raw-poll client 0))
-  (check/ok (truthy? raw) "a current supervisor answers with a relayable line")
+  (def raw (:raw-poll client 0))
+  (check/ok (string? raw) "the reply comes back as a line, ready to send")
   (check/ok (string/has-prefix? "{" raw) "which is a JSON object")
-  (check/ok (string/find "RELAY_MARK" raw) "carrying the same output")
-  # ONE FETCH SERVES BOTH. Asking twice would advance `at` past output the
-  # page never saw, so the parsed reply comes back from the same call.
-  (check/ok (dictionary? parsed) "the parsed reply comes back with it")
+  (check/ok (string/find "RELAY_MARK" raw) "carrying the output")
 
-  # EVERY FIELD THE PAGE READS, which is what makes relaying safe: a missing
-  # one is what makes `raw-poll` answer nil and fall back to the parsed path.
+  # EVERY FIELD THE PAGE READS, because this line IS the response -- nothing
+  # downstream fills anything in.
   (def decoded (json/decode raw))
   (each k ["text" "at" "from" "running" "generation" "rows" "cols"
            "trimmed" "waited" "stamp" "program" "reachable"]
     (check/ok (has-key? decoded k) (string "the line carries " k)))
   (stop))
+
+(check/test "shutdown ends the supervisor and takes the socket with it"
+  # What ctrl-c does. Also this suite's teardown: leaving a supervisor behind
+  # would make the next run adopt a session it did not start, and the tests
+  # that count generations would start failing for reasons of their own.
+  (start ["/bin/sh" "-c" "sleep 30"] (os/cwd) 24 80)
+  (shutdown)
+  (var gone false)
+  (for _ 0 40
+    (unless gone
+      (ev/sleep 0.05)
+      (set gone (not (os/stat socket :mode)))))
+  (check/ok gone "the socket file is cleaned up, so the next run binds")
+  (check/ok (not ((state) :running)) "and nothing answers on it"))

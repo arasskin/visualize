@@ -30,6 +30,11 @@
 
 # -- the client --------------------------------------------------------------
 
+# WHICH LINE EACH PARSED REPLY CAME FROM. Weak on the key, so a reply the
+# caller has finished with takes its line with it rather than holding a
+# megabyte of terminal output alive until the next poll.
+(def- raw-lines (table/weak-keys 8))
+
 (defn- talk
   ``One request and its reply over an open connection, or nil on EOF.
 
@@ -78,8 +83,17 @@
   # Kept as a field on the parsed table rather than a second return value, so
   # every existing caller reads unchanged and only the poll path looks for
   # it. See `raw-poll` below and `poll-answer` in core.janet.
+  # THE RAW LINE TRAVELS BESIDE THE PARSED ONE, in a weak-keyed table rather
+  # than as a field on it. A poll's reply is mostly terminal output and the
+  # server's only use for it is to send it to the browser as JSON -- which it
+  # already is -- so relaying the line skips a decode and an encode on the
+  # shared thread: 142ms per megabyte that every keystroke was waiting behind.
+  #
+  # NOT A KEY ON THE TABLE. A reply is encoded and sent as it stands in more
+  # than one place, and a field holding a copy of the whole reply would
+  # silently double every one of them.
   (def parsed (json/decode line))
-  (when (dictionary? parsed) (put parsed :raw line))
+  (when (dictionary? parsed) (put raw-lines parsed line))
   parsed)
 
 (defn- client-state
@@ -421,57 +435,55 @@
    # the line is relayed only when the supervisor sent all of them itself.
    # One missing field and this answers nil, and the caller falls back to the
    # parsed path, which has not changed.
-   # ONE FETCH, EITHER ANSWER. Returns [raw parsed]: `raw` is the
-   # supervisor's own line when it is already the shape the page expects, and
-   # nil otherwise; `parsed` is always the reply, so a caller that cannot use
-   # the raw line does NOT poll again.
+   # THE SUPERVISOR'S OWN LINE, for the route to send as it stands. A poll
+   # reply is mostly terminal output, and the server's only use for it is to
+   # write it to the browser as JSON -- which the supervisor already did.
+   # Decoding it here and encoding it again there cost 142ms per megabyte on
+   # the one thread every keystroke waits behind.
    #
-   # That second poll is the trap this shape exists to avoid. `at` advances
-   # with every reply, so asking twice means the first reply's output is
-   # gone -- output the page would never see, for a shape check that failed.
+   # Nil when there is no line to relay: an unreachable supervisor, which
+   # `:poll` answers for with a table this side invents. There is no version
+   # check, because the supervisor is this repository -- it is started by the
+   # server that talks to it, from the same source tree, so a reply in an
+   # older shape is not a thing that happens.
    :raw-poll
    (fn [self at &opt generation wait]
      (def reply (fetch-poll at generation wait))
-     (var raw nil)
-     (when (and (dictionary? reply) (reply :raw))
-       (var whole true)
-       (each k ["text" "at" "from" "running" "generation" "rows" "cols"
-                "trimmed" "waited" "stamp" "program" "reachable"]
-         (unless (has-key? reply k) (set whole false)))
-       (when whole (set raw (reply :raw))))
-     [raw reply])
+     (if-let [line (and (dictionary? reply) (get raw-lines reply))]
+       line
+       # NOTHING ANSWERED, so this side writes the reply -- the same table
+       # `:poll` invents, encoded here so the route has one kind of thing to
+       # send. See the note there on why unreachable is not dead.
+       (json/encode
+         {"text" "" "at" at "from" -1 "running" false "generation" 0
+          "rows" 24 "cols" 80 "trimmed" false "waited" false
+          "stamp" "" "program" "" "reachable" false
+          "absent" (if (and path (os/stat path :mode))
+                     (if-let [probe (try (net/connect :unix path) ([_] nil))]
+                       (do (try (:close probe) ([_] nil)) false)
+                       true)
+                     true)})))
 
+   # THE PARSED REPLY, for the callers that read fields rather than relay the
+   # line: `dump` and the tests. The route uses `:raw-poll`.
+   #
+   # NO PER-FIELD DEFAULTS. They existed to tolerate a supervisor older than
+   # the field being read, and there is no such thing: the supervisor is this
+   # repository, started by the server that talks to it, from the same source
+   # tree. What is left is the unreachable case, which is not an old reply
+   # but no reply.
    :poll
    (fn [_ at &opt generation wait]
      (def reply (fetch-poll at generation wait))
      (if reply
-       {"text" (or (get reply "text") "")
-        "at" (or (get reply "at") at)
-        # Where the reply's text actually starts. -1 from a supervisor that
-        # predates tear reporting; the page then skips tear detection.
-        "from" (or (get reply "from") -1)
-        "running" (truthy? (get reply "running"))
-        "generation" (or (get reply "generation") 0)
-        # The geometry the recording was made for. A reattaching page replays
-        # into a grid of THIS size, not the panel's -- see the attach path.
-        "rows" (or (get reply "rows") 24)
-        "cols" (or (get reply "cols") 80)
-        "trimmed" (truthy? (get reply "trimmed"))
-        # Whether the supervisor understood `wait` -- the page's signal that
-        # it may chain polls with no timer instead of pacing them.
-        "waited" (truthy? (get reply "waited"))
-        "stamp" (or (get reply "stamp") "")
-        # What the terminal is running now, for the tab's title. Empty from
-        # a supervisor that predates it, which the page reads as "no answer"
-        # and leaves the title alone.
-        "program" (or (get reply "program") "")
-        "reachable" true}
-       # UNREACHABLE IS NOT DEAD. This fallback used to say running=false,
+       (merge reply {"reachable" true})
+       # UNREACHABLE IS NOT DEAD. This used to say running=false,
        # generation=0 -- and the page, taking it as truth, blanked its screen
        # for the generation change, showed "exited", and stopped polling. All
        # of that for one supervisor blip: a deadline expiring while the
        # machine woke from sleep. The flag lets the page treat this as the
        # failed request it is, and keep both its screen and its session.
+       #
        # `absent` separates "safe to start a fresh session" from "wait, one
        # is coming back". No socket file: nothing ever started, or a clean
        # shutdown -- start away. File present: probe it. A unix connect with

@@ -608,39 +608,25 @@
 
       One call rather than `since` plus `state`: this is the hot path, and
       each one is a round trip to the supervisor.``
-      [ask body &opt ask-raw]
+      [ask body]
       (def sent (json/decode body))
-      (def at (math/floor (or (get sent "at") 0)))
-      (def gen (when-let [g (get sent "generation")] (math/floor g)))
-      (def wait (when-let [w (get sent "wait")] (math/floor w)))
       # THE SUPERVISOR'S OWN LINE, SENT AS IT STANDS. A poll reply is mostly
       # terminal output, and this route's only job with it is to write it out
       # as JSON -- which the supervisor already did. Taking it apart and
-      # putting it back together costs 113ms per megabyte (86 to decode, 27
-      # to encode) on the one thread every keystroke waits behind, and with
-      # several panes streaming that is what a keystroke was queueing behind.
+      # putting it back together cost 142ms per megabyte on the one thread
+      # every keystroke waits behind, and with several panes streaming that
+      # is what a keystroke was queueing behind.
       #
-      # `raw-poll` answers nil unless the reply is already exactly the shape
-      # the page expects, so an older supervisor -- one that predates the
-      # `reachable` field -- falls through to the parsed path below.
-      # ONE POLL, whichever path answers. `raw-poll` hands back both the raw
-      # line and the parsed reply, so a shape check that fails costs nothing
-      # -- asking twice would advance `at` past output the page never saw.
-      (def [raw parsed]
-        (if ask-raw (ask-raw at gen wait) [nil (ask at gen wait)]))
-      (if raw
-        ["200 OK" "application/json" raw]
-        ["200 OK" "application/json"
-       (json/encode
-         (merge
-          parsed
-          # The server's own stamp beside the supervisor's, so the page can
-          # tell WHICH of its three parties is running old code -- see
-          # stamp.janet for the two rounds that question once cost. And how
-          # many faults the server has recorded since this page loaded, so
-          # the pane can say so rather than leaving them on a stderr nobody
-          # is watching.
-          {}))]))
+      # Always a line: when no supervisor answers, the client writes the
+      # reply this side sends in its place.
+      (def raw
+        (ask (math/floor (or (get sent "at") 0))
+             # Which session the page's `at` belongs to.
+             (when-let [g (get sent "generation")] (math/floor g))
+             # How long the page is willing to have this request PARK for
+             # output -- the streaming transport.
+             (when-let [w (get sent "wait")] (math/floor w))))
+      ["200 OK" "application/json" raw])
 
     (cond
       (and (= method "GET") (= path "/"))
@@ -794,9 +780,8 @@
                 ["200 OK" "application/json" (json/encode {"ok" true})])
 
             "poll"
-            (poll-answer (fn [at gen wait] (:poll client at gen wait))
-                         (request :body)
-                         (fn [at gen wait] (:raw-poll client at gen wait)))
+            (poll-answer (fn [at gen wait] (:raw-poll client at gen wait))
+                         (request :body))
 
             ["404 Not Found" "application/json"
              (json/encode {"error" (string "no such pane op '" op "'")})])))
