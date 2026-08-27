@@ -939,6 +939,64 @@
                    (get words 1) (get words 3))]
     [(get words 1) (get words 3)]))
 
+(defn labels
+  ``What each pane has been called by hand, as a table of id to text.
+
+  A LABEL IS THE ONE THING ON A TAB THE TOOL DID NOT DECIDE. The name is the
+  program running there and the state is how it is doing; a label is the
+  person saying what this pane is FOR -- `the failing test`, `prod logs` --
+  and nothing else in the file records that.
+
+  Written as its own note rather than more words on the terminal line,
+  because the two have different lifetimes: a socket dies with its
+  supervisor and a label is meant to outlive one. A pane whose session has
+  gone keeps its label for the next one to reclaim.
+
+      @visualize label 3 the failing test
+
+  The text is the rest of the line, spaces and all, so a label reads the way
+  it was typed.``
+  [lines]
+  (def out @{})
+  (each line lines
+    (when (note? line)
+      (def rest (string/trim (string/slice (string/trim line) (length marker))))
+      (when (string/has-prefix? "label " rest)
+        (def body (string/slice rest (length "label ")))
+        (def at (string/find " " body))
+        (when at
+          (def id (string/slice body 0 at))
+          (def text (string/trim (string/slice body (+ at 1))))
+          (unless (or (empty? id) (empty? text)) (put out id text))))))
+  out)
+
+(defn remember-labels
+  ``The lines, with their label notes replaced by `named`.
+
+  Rewritten whole for the reason `remember-terminals` is: a label that has
+  been cleared has to leave the file, and editing one in place would mean
+  finding it first. An EMPTY label is not written at all -- a pane nobody has
+  named should leave no trace, which is what makes the row look untouched
+  until someone types in it.``
+  [lines named]
+  (def kept (array ;(filter |(not (and (note? $)
+                                       (string/has-prefix?
+                                         "label "
+                                         (string/trim
+                                           (string/slice (string/trim $)
+                                                         (length marker))))))
+                            lines)))
+  (def written (seq [id :in (sorted (keys named))
+                     :let [text (string/trim (or (get named id) ""))]
+                     :when (not (empty? text))]
+                 (string marker " label " id " " text)))
+  (if (empty? written)
+    kept
+    (array ;kept ;(if (or (empty? kept) (empty? (string/trim (last kept))))
+                    []
+                    [""])
+           ;written)))
+
 (defn remember-terminals
   ``The lines, with their terminal notes replaced by `pairs`.
 

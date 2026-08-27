@@ -277,7 +277,12 @@
     (def pairs (seq [id :in (sorted (keys pane-sockets))]
                  [id (get pane-sockets id)]))
     (def lines (config/read-config config-path))
-    (config/write-config config-path (config/remember-terminals lines pairs)))
+    # Labels are read back and rewritten so that remembering a socket does
+    # not drop the name someone gave the pane.
+    (def named (config/labels lines))
+    (config/write-config
+      config-path
+      (config/remember-labels (config/remember-terminals lines pairs) named)))
 
   (defn pane-for [id]
     (or (get panes id)
@@ -469,6 +474,16 @@
                                   (escaped (last (string/split "/" (first (harness-argv))))))
                   (string/replace "{{CONFIG_LINES}}" (json/encode lines))
                   (string/replace "{{CONFIG_PROBLEMS}}" (json/encode problems))
+                  # What each pane has been called by hand, so a reload
+                  # brings the labels back with the tabs. READ FROM DISK
+                  # rather than from `lines`: the lines handed to the page
+                  # are the ones the EDITOR shows, and `as-shown` has already
+                  # taken the notes out of those -- which is the whole point
+                  # of a note. See `labels` in config.janet.
+                  (string/replace "{{PANE_LABELS}}"
+                                  (json/encode
+                                    (config/labels
+                                      (config/read-config config-path))))
                   # The help panel's content, generated from the grammar's
                   # own verb table -- so the list cannot describe a verb the
                   # parser does not have, or miss one it does.
@@ -507,6 +522,9 @@
     # edit, so an edit is an edit to the config and nothing else.
     (def on-disk (config/read-config config-path))
     (def kept (config/terminals on-disk))
+    # The same for labels, and for the same reason: they are the page's
+    # notes about its panes, not lines anybody edited.
+    (def kept-labels (config/labels on-disk))
     # A REDRAW DRAWS WHAT IS ON DISK, and does not write. The watcher asks
     # for one because the FILE moved, so the page's own copy of the lines is
     # by definition the old one -- sending it back wrote the edit away, the
@@ -522,7 +540,10 @@
       (if redrawing
         on-disk
         (config/edit (map string (get sent "lines" [])) action index)))
-    (def lines (if redrawing edited (config/remember-terminals edited kept)))
+    (def lines (if redrawing
+                 edited
+                 (config/remember-labels
+                   (config/remember-terminals edited kept) kept-labels)))
     # `check` ASKS WITHOUT TELLING. It runs the lines and answers with what
     # was wrong, and writes nothing -- the compose bar uses it to find out
     # whether what you typed parses before that text reaches the file. Every
@@ -685,6 +706,24 @@
       (and (= (request :method) "POST") (= path "/config"))
       ["200 OK" "application/json"
        (json/encode (config-edit (request :body)))]
+
+      # WHAT A PANE HAS BEEN CALLED BY HAND. Its own route rather than a
+      # config edit, because it is not one: nobody typed a line, the graph
+      # does not change, and a redraw for a label being typed would flash the
+      # drawing on every keystroke. See `labels` in config.janet.
+      (and (= method "POST") (= path "/label"))
+      (do
+        (def sent (or (json/decode (or (request :body) "")) {}))
+        (def id (string (or (get sent "id") "")))
+        (def text (string (or (get sent "text") "")))
+        (if (empty? id)
+          ["400 Bad Request" "application/json" (json/encode {:ok false})]
+          (do
+            (def lines (config/read-config config-path))
+            (def named (config/labels lines))
+            (put named id text)
+            (config/write-config config-path (config/remember-labels lines named))
+            ["200 OK" "application/json" (json/encode {:ok true})])))
 
       # -- the terminal pane ------------------------------------------------
       # Every one of these drives a session this process does not own. They

@@ -184,6 +184,56 @@ export function makePanel(root, options = {}) {
   };
   panelsByRoot.set(root, panel);
 
+  // -- the label ------------------------------------------------------------
+  //
+  // WHAT THIS PANE IS FOR, in your words. Click it and type; leave it and it
+  // saves. Empty, it is not there at all -- see `.label` in style.css.
+  const label = bar.querySelector('.label');
+  if (label) {
+    // THE BAR IS A DRAG HANDLE AND A COLLAPSE BUTTON, and the label is
+    // neither. A mousedown that reaches the bar starts a drag, and the click
+    // that follows shuts the panel -- so a click meant to put a caret in the
+    // text would have moved the window and closed it instead. Stopped at the
+    // label, where the gesture means something else.
+    label.addEventListener('mousedown', (e) => e.stopPropagation());
+    label.addEventListener('click', (e) => e.stopPropagation());
+    // `user-select: none` on the bar stops the caret from landing; the label
+    // opts back in.
+    label.style.userSelect = 'text';
+    // ENTER ENDS IT rather than adding a line: a tab is one line tall, and a
+    // note that wrapped would push the row apart. Escape abandons the edit
+    // the way it does everywhere else on the page.
+    label.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter') { e.preventDefault(); label.blur(); }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        label.textContent = label.dataset.saved || '';
+        label.blur();
+      }
+    });
+    label.addEventListener('focus', () => {
+      label.dataset.saved = label.textContent;
+    });
+    // SAVED WHEN YOU LEAVE, not on every keystroke: the write goes through
+    // the config file, and a file rewritten per character is a file the
+    // watcher is redrawing from while you are still typing into it.
+    label.addEventListener('blur', () => {
+      const text = label.textContent.replace(/\s+/g, ' ').trim();
+      label.textContent = text;
+      if (text === (label.dataset.saved || '')) return;
+      label.dataset.saved = text;
+      if (options.onLabel) options.onLabel(text);
+    });
+  }
+  panel.label = label;
+  // The text as it stands, and a way to put one back after a reload.
+  panel.setLabel = (text) => {
+    if (!label) return;
+    label.textContent = text || '';
+    label.dataset.saved = label.textContent;
+  };
+
   bar.addEventListener('click', () => {
     // A drag that ended on the bar is not a click asking to collapse it.
     if (bar.dragged) { bar.dragged = false; return; }
@@ -222,7 +272,11 @@ export function raise(root) { root.style.zIndex = ++topmost; }
 // element, and what to focus when it opens.
 export let configPanel = null;
 export function makeConfigPanel(root, onOpen) {
-  configPanel = makePanel(root, { minWidth: 240, minHeight: 120, onOpen });
+  configPanel = makePanel(root, {
+    minWidth: 240, minHeight: 120, onOpen,
+    onLabel: (text) => saveLabel('config', text),
+  });
+  configPanel.setLabel((window.PANE_LABELS || {}).config || '');
   return configPanel;
 }
 
@@ -857,6 +911,7 @@ export function makeTerminalPane(root, prefix) {
   const termPanel = makePanel(root, {
     minWidth: 360, minHeight: 200,
     width: 'min(52rem, 94vw)', height: '24rem',
+    onLabel: (text) => saveLabel(prefix, text),
     // OPENING IS A UI CHANGE. The session is not started here and not
     // stopped by shutting: `boot` starts or attaches one when the pane is
     // MADE, and `stop` ends it when the pane is destroyed. All this has to
@@ -1016,6 +1071,10 @@ export function makeTerminalPane(root, prefix) {
     try { await post('shutdown', {}); } catch (e) { /* likewise */ }
   };
 
+  // WHAT THIS PANE WAS CALLED LAST TIME. `window.PANE_LABELS` is the config
+  // file's label notes, handed to the page with the rest of it -- so a reload
+  // brings the notes back with the tabs rather than quietly losing them.
+  termPanel.setLabel((window.PANE_LABELS || {})[prefix] || '');
   return termPanel;
 }
 
@@ -1036,6 +1095,23 @@ const harnessPane = makeTerminalPane(document.getElementById('harness'), 'harnes
 // The panel is CLONED from the one in the page rather than written out again
 // here. A second copy of that markup is a second place to change when the bar
 // grows a button, and the two would drift.
+// WHERE A LABEL IS KEPT. The config file, like the pane sockets beside it --
+// it is the one thing that outlives a crash and belongs to this project. See
+// `labels` in config.janet. Sent on blur rather than per keystroke, since the
+// write goes through a file the watcher is reading.
+async function saveLabel(id, text) {
+  try {
+    await fetch('/label', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id, text }),
+    });
+  } catch (_) {
+    // A label that did not reach the file is not worth an error on the page:
+    // what you typed is still on the tab, and the next save will carry it.
+  }
+}
+
 export let paneCount = 1;
 export const extraPanes = [];
 

@@ -620,3 +620,32 @@
                                 (string root "/visualize.conf")) root))
   (t/ok (some |(string/find "@childA" $) (state2 :hidden))
         "written without the trailing dot, it is still scoped"))
+
+(t/test "a label is what a pane has been called by hand"
+  # The name is the program running there and the state is how it is doing;
+  # a label is the person saying what the pane is FOR. Kept in the config
+  # because that is the one file that outlives a crash and belongs to this
+  # project -- the same reason the pane sockets are there.
+  (def lines ["(lines)"
+              "@visualize terminal 3 socket /tmp/x.sock"
+              "@visualize label 3 the failing test"])
+  (t/is= "the failing test" (get (config/labels lines) "3"))
+
+  # THE TEXT IS THE REST OF THE LINE, spaces and all, so a label reads the
+  # way it was typed rather than being cut at the first space.
+  (t/is= "two words here"
+         (get (config/labels ["@visualize label 7 two words here"]) "7"))
+
+  # AN EMPTY LABEL IS NOT WRITTEN. A pane nobody has named leaves no trace,
+  # which is what makes the row look untouched until someone types in one.
+  (def cleared (config/remember-labels lines @{"3" ""}))
+  (t/ok (not (some |(string/find "label" $) cleared))
+        "clearing a label takes its line out of the file")
+  (t/ok (some |(string/find "terminal 3 socket" $) cleared)
+        "and leaves the socket note alone")
+
+  # REWRITTEN WHOLE, so a changed label replaces rather than accumulates.
+  (def renamed (config/remember-labels lines @{"3" "prod logs"}))
+  (t/is= 1 (length (filter |(string/find "label" $) renamed))
+         "one label line, not two")
+  (t/is= "prod logs" (get (config/labels renamed) "3")))

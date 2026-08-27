@@ -89,6 +89,10 @@
 <div id="harness" class="panel term shut">
   <div class="bar" title="click to open, drag to move  (alt toggles the selected tab, hold to peek)">
     <span class="name">{{HARNESS_NAME}}</span>
+    <!-- WHAT THIS PANE IS FOR, in your words. Empty it shows nothing at all:
+         no box, no placeholder, no gap -- see `.label` in style.css. -->
+    <span class="label" contenteditable="plaintext-only" spellcheck="false"
+          role="textbox" aria-label="note for this tab"></span>
     <span class="state"></span>
   </div>
   <div class="panel-body">
@@ -100,6 +104,8 @@
 <div id="config" class="panel shut">
   <div id="bar" class="bar" title="click to open, drag to move  (alt toggles the selected tab, hold to peek)">
     <span class="name">{{CONFIG_NAME}}</span>
+    <span class="label" contenteditable="plaintext-only" spellcheck="false"
+          role="textbox" aria-label="note for this tab"></span>
   </div>
   <div id="body" class="panel-body">
     <div id="lines"></div>
@@ -112,6 +118,7 @@
 // on the same lines the graph came from.
 window.CONFIG_LINES = {{CONFIG_LINES}};
 window.CONFIG_PROBLEMS = {{CONFIG_PROBLEMS}};
+window.PANE_LABELS = {{PANE_LABELS}};
 // The verbs, generated from the grammar. See config/docs.
 window.CONFIG_DOCS = {{CONFIG_DOCS}};
 // The colours a config can name, for the editor to complete.

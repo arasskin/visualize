@@ -631,6 +631,56 @@ button:disabled { opacity: .5; cursor: progress; }
   flex: none; white-space: nowrap;
 }
 
+/* WHAT THIS PANE IS FOR, in your words -- `the failing test`, `prod logs`.
+   The name is the program running there and the state is how it is doing;
+   this is the one thing on a tab the tool did not decide.
+
+   NOTHING THERE UNTIL THERE IS SOMETHING. An empty label is zero-width with
+   no padding, no rule, no placeholder: a tab nobody has written on looks
+   exactly as it did before this existed. What makes it findable is the
+   cursor -- the bar drags, so a text caret over that one strip is the
+   affordance, and it is the only one.
+
+   IT DOES NOT GRAB THE ROW. `flex: none` and a max-width keep a long note
+   from pushing the state off the end; it ellipsises instead, and the whole
+   text is still there to edit when the caret is in it. */
+.bar .label {
+  flex: none; white-space: nowrap; font-size: 11px; opacity: .55;
+  cursor: text; outline: none;
+  max-width: 22ch; overflow: hidden; text-overflow: ellipsis;
+}
+/* SOMETHING TO CLICK, WITHOUT ANYTHING TO SEE. An empty span is zero pixels
+   wide, so the click went through to the bar -- which drags and collapses,
+   which is the opposite of putting a caret in the text. It gets a strip of
+   width and nothing else: no ground, no rule, no placeholder glyph. The tab
+   looks untouched and the cursor turning to a caret over that strip is what
+   says it is there.
+
+   `::before` rather than a min-width, because a width on the span itself is
+   width the caret sits inside -- the text would start a few pixels in and
+   the label would look indented once written. */
+.bar .label:empty::before {
+  /* WIDE ENOUGH TO HIT. At two and a half characters the strip was a
+     seventeen-pixel target between a draggable bar and a collapse click, and
+     a press meant for it landed on one of those instead -- which opens the
+     panel and drags it. Six characters is a comfortable target and still
+     nothing to look at. */
+  content: ""; display: inline-block; width: 6ch;
+}
+/* WRITTEN ON, IT IS JUST TEXT. The strip goes away -- the words are the
+   click target now -- and the gap that was collapsed for an empty label
+   comes back so the note is not jammed against the name. */
+.bar .label:not(:empty) { margin-left: 0; }
+/* EDITING IS WHERE THE BOX APPEARS, and only then: a faint ground says the
+   caret is somewhere that takes text, which an empty span with a blinking
+   cursor does not. It goes away with the focus. */
+.bar .label:focus {
+  opacity: .9; margin-left: 0;
+  min-width: 4ch; max-width: 40ch; overflow: visible;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  border-radius: 3px; padding: 0 .25rem;
+}
+
 
 /* The scrolling part. flex:1 so it takes whatever the resize left it. */
 .panel-body {
