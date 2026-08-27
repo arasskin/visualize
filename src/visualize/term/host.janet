@@ -733,6 +733,16 @@
   closing a unix socket leaves its file behind, and binding over one fails
   with "address already in use" rather than replacing it.``
   [path]
+  # DEAF TO THE TERMINAL'S SIGNALS. The supervisor is spawned into the
+  # server's process group, so a ctrl-c in the terminal that started the
+  # server delivers SIGINT to every supervisor as well -- and a closed
+  # terminal window delivers SIGHUP the same way. Both would kill the very
+  # sessions this process exists to keep alive across server restarts. The
+  # design has always said a supervisor is ended by the `shutdown` op, not
+  # by a signal that happens to reach it; this is where that becomes true.
+  # SIGTERM still works, so a deliberate `kill` still ends one.
+  (os/sigaction :int (fn [] nil))
+  (os/sigaction :hup (fn [] nil))
   # A crashed predecessor leaves its socket file behind, and binding over one
   # fails. The client only spawns this role after finding nothing alive on
   # the path, so anything still here is dead by definition.
