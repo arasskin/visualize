@@ -11,7 +11,7 @@
 
 import { pane, wire as wireGraph, paint, repaint, fit, fitSoon, isTouched, hatchFolded } from './graph.js';
 import {
-  find, hits, wire as wireFind, placeArrow, keepHitInView, redrawFind,
+  find, hits, wire as wireFind, placeArrow, redrawFind,
   forgetUnit,
 } from './find.js';
 import { moduleNames, hideEdge, wireEdges, keepEdgeLabel } from './hover.js';
@@ -26,7 +26,7 @@ import {
 // it has to be replaced after a zoom, and a mark can be carried off the edge
 // by one. Passed in rather than imported by `graph.js`, which would put the
 // two modules in a circle.
-wireGraph({ onRepaint: () => placeArrow(), onFit: () => keepHitInView() });
+wireGraph({ onRepaint: () => placeArrow() });
 
 
 fitSoon();

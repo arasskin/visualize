@@ -15,13 +15,11 @@
 // -- both import from here, and a circle of modules is a circle whichever way
 // you enter it. `wire` is called once at startup with the two callbacks.
 
-// Set by `wire`: what to do after a repaint, and what to do after a fit.
+// Set by `wire`: what to do after a repaint.
 let onRepaint = () => {};
-let onFit = () => {};
 
 export function wire(hooks) {
   if (hooks.onRepaint) onRepaint = hooks.onRepaint;
-  if (hooks.onFit) onFit = hooks.onFit;
 }
 
 // -- the viewport ------------------------------------------------------------
@@ -84,9 +82,6 @@ export function zoomAt(factor, cx, cy) {
   scale = next;
   touched = true;
   paint();
-  // A ZOOM CAN CARRY THE MARK OFF THE SCREEN, since everything not under the
-  // cursor swings away from it. Bring it back once the zooming stops.
-  onFit();
 }
 
 export function fit() {

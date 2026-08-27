@@ -324,27 +324,13 @@ function revealHit(hit) {
         (view.top + view.height / 2) - (aim.top + aim.height / 2));
 }
 
-// Follow the current hit after the view moves under it. Guarded, because
-// revealHit pans and painting is what called us in the first place.
-let keeping = false;
-// AFTER THE GESTURE, NOT DURING IT. Zooming is about a point: the thing
-// under the cursor is meant to stay put, and re-centring on every notch
-// fought the hand doing the zooming. It also cost a forced layout per wheel
-// event, since deciding takes measuring. So the check waits for the scroll
-// to stop, and only then, and only if the mark has actually left the pane,
-// does it come back.
-let keepTimer = 0;
-export function keepHitInView() {
-  clearTimeout(keepTimer);
-  keepTimer = setTimeout(() => {
-    if (keeping) return;
-    const hit = hits[hitAt];
-    if (!hit || !hit.node.isConnected) return;
-    if (!pane.querySelector('#find-arrow')) return;
-    keeping = true;
-    try { revealHit(hit); } finally { keeping = false; }
-  }, 180);
-}
+// THE VIEW IS THE HAND'S. There used to be a pull-back here: a zoom that
+// carried the mark off the pane panned it back once the scrolling stopped.
+// Meant for zooming AROUND the thing just found, it also captured leaving --
+// with a find open, scrolling away from the hit was simply not possible; the
+// view snapped back every time. Departure is a choice, and the find bar
+// already has both recovery affordances: the arrow points at the hit from
+// anywhere, and Enter re-centres on it.
 
 function runFind() {
   const query = findInput.value.trim();
@@ -375,9 +361,16 @@ function showHit() {
 }
 
 function stepHit(by) {
-  if (hits.length < 2) return;
-  // WRAPS, like the completion list and the config selection.
-  hitAt = (hitAt + by + hits.length) % hits.length;
+  if (!hits.length) return;
+  // ONE HIT STILL REVEALS. Enter is the way back to the mark after panning
+  // off it -- the view is the hand's, nothing pulls it home uninvited (see
+  // the note above runFind) -- and a single match used to make this a no-op,
+  // which left a lone hit with an arrow pointing at it and no key that
+  // followed the arrow.
+  if (hits.length > 1) {
+    // WRAPS, like the completion list and the config selection.
+    hitAt = (hitAt + by + hits.length) % hits.length;
+  }
   showHit();
 }
 
