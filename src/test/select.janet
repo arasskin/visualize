@@ -284,3 +284,30 @@
   (def all (select/drop-nodes g ["?"]))
   (t/is= ["childA.a.py" "childB.b.py"] (sorted (map |($ :name) (all :nodes)))
          "an unscoped mark takes them all"))
+
+(t/test "hiding the last thing that referenced an external takes it too"
+  # An external IS its references: there is no directory behind `?.structlog`
+  # and no file to be left unused, so hiding the last thing that imported it
+  # leaves not an unused name but no name at all. `(hide archive)` left
+  # fourteen of these standing in a row along the top of one drawing.
+  #
+  # ONE OF OURS IS DIFFERENT and still stays -- a file with nothing attached
+  # is a fact about the picture, and sweeping those would let a (hide) remove
+  # a node it was never asked to remove.
+  (def g {:nodes [{:name "archive.old.py" :ours true}
+                  {:name "src.main.py" :ours true}
+                  {:name "src.orphan.py" :ours true}
+                  {:name "?.structlog" :ours false}
+                  {:name "?.WebKit" :ours false}]
+          :edges [["archive.old.py" "?.structlog"]
+                  ["src.main.py" "?.WebKit"]]
+          :ours {"archive.old.py" true "src.main.py" true
+                 "src.orphan.py" true}})
+  (def out (select/drop-nodes g ["archive"]))
+  (def left (sorted (map |($ :name) (out :nodes))))
+  (t/ok (not (index-of "?.structlog" left))
+        "the external went with the only file that named it")
+  (t/ok (index-of "?.WebKit" left)
+        "one still referenced stayed")
+  (t/ok (index-of "src.orphan.py" left)
+        "and a file of ours with no edges is still a fact worth drawing"))

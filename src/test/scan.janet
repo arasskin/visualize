@@ -767,3 +767,22 @@ database  where things are kept
   (def edges2 (map |(string (first $) " -> " (get $ 1)) (g2 :edges)))
   (t/ok (not (index-of "otto.onboarding.server.py -> otto.mcp.__init__.py" edges2))
         "the local package did not capture the library's name"))
+
+(t/test "a symbol whose module is the file beside it is not a node"
+  # `from search import search_products` in `src/main.py` names the
+  # `search.py` sitting beside it. The symbol reading `search.search_products`
+  # is dropped when its PREFIX resolves -- but the prefix was looked for in
+  # the maps alone, and a bare sibling name is in no map: only the walk finds
+  # it. So `?.search.search_products` was drawn next to the very file it came
+  # out of.
+  (def root (string (os/getenv "TMPDIR") "vz-sym-" (string (os/time))))
+  (os/mkdir root)
+  (os/mkdir (string root "/src"))
+  (spit (string root "/src/search.py") "def search_products(): pass\n")
+  (spit (string root "/src/main.py") "from search import search_products\n")
+
+  (def g (scan/scan root))
+  (t/is= [] (map |($ :name) (filter |(not ($ :ours)) (g :nodes)))
+         "the symbol invented no external")
+  (t/is= [["src.main.py" "src.search.py"]] (g :edges)
+         "and the module it named is the edge"))

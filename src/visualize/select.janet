@@ -120,12 +120,18 @@
 (defn drop-nodes
   ``Remove some nodes, and every edge touching them.
 
-  A NODE LEFT WITH NO EDGES STAYS ON THE GRAPH. Hiding the test files takes
-  every edge that touched XCTest, and the XCTest box is then drawn on its own.
-  That is deliberate: a node with nothing attached says "this is here and
-  nothing you are looking at uses it", which is a fact about the picture you
-  asked for rather than a defect in it. Sweeping them would also mean a (hide)
-  could silently remove a node it was never asked to remove.
+  ONE OF OURS LEFT WITH NO EDGES STAYS ON THE GRAPH. A file with nothing
+  attached says "this is here and nothing you are looking at uses it", which
+  is a fact about the picture you asked for rather than a defect in it.
+  Sweeping them would also mean a (hide) could silently remove a node it was
+  never asked to remove.
+
+  AN EXTERNAL LEFT WITH NO EDGES DOES NOT, because an external IS its
+  references. There is no directory behind `?.structlog` and no file to be
+  left unused: the only reason it was ever a node is that something imported
+  it, so hiding the last thing that did leaves not an unused name but no name
+  at all. `(hide archive)` left fourteen standing in a row along the top of
+  one drawing -- the libraries of a directory that had just been hidden.
 
   This is where `drop` and `keep` are asymmetric on purpose. `keep` drops an
   edge unless both ends survive, so narrowing cannot leave a half-drawn arrow;
@@ -163,10 +169,30 @@
                          (selector name ours)))
                      hidden)
           hidden? (fn [node] (some |($ node) tests))]
-      (merge graph
-             {:nodes (filter |(not (hidden? ($ :name))) (graph :nodes))
-              :edges (filter (fn [[a b]] (not (or (hidden? a) (hidden? b))))
-                             (graph :edges))}))))
+      (let [nodes (filter |(not (hidden? ($ :name))) (graph :nodes))
+            edges (filter (fn [[a b]] (not (or (hidden? a) (hidden? b))))
+                          (graph :edges))
+            # AN EXTERNAL IS ITS REFERENCES. A node of ours left with nothing
+            # attached is a fact worth drawing -- "this is here and nothing
+            # you are looking at uses it" -- but an external has no existence
+            # apart from the reference that named it: there is no directory
+            # behind `?.structlog`, and the only reason it was ever a node is
+            # that some file imported it. Hide that file and the name is not
+            # an unused thing, it is nothing at all.
+            #
+            # `(hide archive)` left fourteen of these standing in a row along
+            # the top of the drawing -- the libraries of a directory that had
+            # just been hidden, still drawn because the rule that keeps our
+            # orphans kept theirs too.
+            attached (do
+                       (def seen @{})
+                       (each [a b] edges (put seen a true) (put seen b true))
+                       seen)]
+        (merge graph
+               {:nodes (filter |(or (not (names/external? ($ :name)))
+                                    (attached ($ :name)))
+                               nodes)
+                :edges edges})))))
 
 (defn fold
   ``Fold everything under each prefix into one node.

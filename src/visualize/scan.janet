@@ -650,7 +650,10 @@
       # `otto/mcp/` and drew an edge to it, when the name means the INSTALLED
       # mcp library. A directory holding `__init__.py` is a package, and the
       # first one without it is the root the imports are written against.
-      (def beside
+      # A FUNCTION OF THE NAME, because two callers need this walk: the
+      # lookup below, and the symbol check further down that has to find a
+      # prefix wherever the name itself would be found.
+      (defn beside-of [wanted]
         (let [parts (string/split "." (names/stem (node-name (file :rel))))]
           # HOW FAR UP TO LOOK. The importer's own directory is where a bare
           # `import db` finds the module beside it. Above that, each
@@ -678,7 +681,7 @@
           (var depth (- (length parts) 1))
           (while (and (nil? found) (>= depth floor) (> depth 0))
             (def candidate (string (string/join (slice parts 0 depth) ".")
-                                   "." mapped))
+                                   "." wanted))
             # EACH CANDIDATE IS FILTERED AS IT IS FOUND, not after the walk
             # has settled on one. `otto.sh` has the stem `shoppingagent.otto`
             # and was found first, so the walk stopped there and the language
@@ -713,6 +716,8 @@
                                 (ok (from-package-exact candidate)))))
             (-- depth))
           found))
+      (def beside (beside-of mapped))
+
       # AN INFERRED NAME GETS ONLY THE EXACT LOOKUPS. The fallbacks below
       # match a name ANYWHERE in the tree, which is right for a name a file
       # actually wrote -- it was written from some root, and the root is what
@@ -789,12 +794,19 @@
         (or (empty? mapped)
             (string/has-prefix? (string mapped ".") here)) nil
 
+        # THE PREFIX IS LOOKED FOR WHEREVER THE NAME ITSELF WOULD BE, the
+        # sibling walk included. `from search import search_products` in
+        # `src/main.py` names the `search.py` beside it -- which only the
+        # walk finds, since a bare name is in no map -- so asking the maps
+        # alone did not recognise `search.search_products` as a symbol and
+        # drew `?.search.search_products` next to the file it came out of.
         (let [parts (string/split "." name)
               prefix (string/join (slice parts 0 -2) ".")]
           (and (> (length parts) 1)
                (not (empty? prefix))
                (or (from-stem prefix)
                    (and (ours prefix) prefix)
+                   (beside-of prefix)
                    (from-tail prefix)
                    (from-package prefix))))
         nil
