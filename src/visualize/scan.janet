@@ -117,11 +117,11 @@
   hidden, which cannot change a drawing it is not in.``
   [root &opt extra-skips]
   (def found @[])
-  # Each spec's own skips, merged with the global set once rather than per
-  # directory.
-  (def skips (merge @{} skip-dirs))
-  (each spec specs
-    (each dir (or (spec :skip-dirs) []) (put skips dir true)))
+  # The global set, each spec's own, and whatever the caller has hidden --
+  # one map, built by the same function `build` reads. This line was once a
+  # local re-merge that quietly dropped `extra-skips`, and the hidden
+  # archive/ it was meant to prune was being walked on every tick again.
+  (def skips (pruned-dirs extra-skips))
 
   # WHAT THE DRAWING HAS NO USE FOR. A directory the config hides cannot
   # change the picture, so walking it is work spent to be ignored -- and on
@@ -614,6 +614,21 @@
       # resolved like any other. `@wterm/dom` arrives here as `wterm.dom`,
       # which is the safe-name of the specifier, so the map is keyed both
       # ways.
+      # A NAME ALREADY WEARING THE MARK IS EXTERNAL BY DECLARATION: the
+      # parser knew -- a `"dart:ui"` require names what the platform ships,
+      # and no tree will ever hold it -- so nothing here goes looking. What
+      # looking did was worse than wasted: `dart.ui` fell through every
+      # exact lookup and the last-resort leaf match then found the one file
+      # ending in `ui`, drawing seven confident edges into `icare/ui.cljd`
+      # from files that require the DART library. On a graph where a
+      # clojure namespace cannot even compile with a cycle, they read as
+      # exactly what they were: bugs.
+      (def declared-external (names/external? name))
+      (when declared-external
+        (put externals name true)
+        (unless (= name here) (put pairs [here name] true)))
+      (unless declared-external
+
       # A TRAILING DOT MARKS AN INFERRED NAME. Python's parser reports the
       # packages above each import (`otto` and `otto.mcp` for
       # `otto.mcp.cart`), because importing a submodule runs its parents --
@@ -825,7 +840,7 @@
         # `nested-lines` in config.janet and `matches?` in select.janet.
         (do (put externals (names/external name) true)
             (unless (= name here)
-              (put pairs [here (names/external name)] true))))))
+              (put pairs [here (names/external name)] true)))))))
 
   (def nodes @[])
   (each file live

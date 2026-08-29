@@ -23,6 +23,8 @@
 # string may hold anything at all; a grammar honest about all that is a
 # parser, so this is one -- small, and reading only the require spans.
 
+(import ../names)
+
 (defn- munge-ns
   "A namespace symbol as the dotted node stem its file wears."
   [sym]
@@ -37,11 +39,23 @@
   ?.flutter)` takes every flutter package at once.``
   [text]
   (var name text)
+  # `package:` AND `dart:` NAME WHAT THE PLATFORM SHIPS -- pub packages and
+  # the dart runtime -- and no tree holds either, so they arrive already
+  # wearing the external mark and the scan does not go looking. It went
+  # looking once: `dart.ui` fell through to the leaf match and found
+  # `icare/ui.cljd`, a cycle no clojure compiler would even accept. A bare
+  # relative string (`"firebase_options.dart"`) stays unmarked: that one IS
+  # a file beside the sources, and resolving it is the point.
+  (var platform false)
   (when (string/has-prefix? "package:" name)
+    (set platform true)
     (set name (string/slice name (length "package:"))))
+  (when (string/has-prefix? "dart:" name)
+    (set platform true))
   (when (string/has-suffix? ".dart" name)
     (set name (string/slice name 0 (- (length name) (length ".dart")))))
-  (string/replace-all ":" "." (string/replace-all "/" "." name)))
+  (def dotted (string/replace-all ":" "." (string/replace-all "/" "." name)))
+  (if platform (names/external dotted) dotted))
 
 # One character wide, so the walkers below can ask cheaply.
 (defn- ws? [b] (or (= b 32) (= b 9) (= b 10) (= b 13) (= b 44)))  # , is whitespace in clojure

@@ -803,9 +803,13 @@ database  where things are kept
   (t/ok (not (index-of "icare.benchmarks" found)) "the ;; line said nothing")
   # THE DASH IS THE FILE'S UNDERSCORE: clojure munges namespaces onto disk.
   (t/ok (index-of "icare.ui.normalized_ast" found) "munged to match the file")
-  # STRING REQUIRES BECOME GROUPABLE NAMES: the wrapper words say nothing.
-  (t/ok (index-of "flutter.material" found) "package: and .dart trimmed")
-  (t/ok (index-of "dart.ui" found) "dart: is a prefix like any other")
+  # STRING REQUIRES BECOME GROUPABLE NAMES, and platform ones arrive
+  # ALREADY MARKED: `package:` and `dart:` name what pub and the runtime
+  # ship, no tree holds either, and saying so here is what keeps the scan
+  # from going looking -- `dart.ui` once fell through to the leaf match and
+  # found `icare/ui.cljd`, a cycle no clojure compiler would accept.
+  (t/ok (index-of "?.flutter.material" found) "package: and .dart trimmed, marked")
+  (t/ok (index-of "?.dart.ui" found) "dart: likewise")
   # THE :refer VECTOR HOLDS SYMBOLS THAT ARE NOT REQUIRES.
   (t/ok (not (index-of "scale_down_fade_animation" found)) "refer names skipped")
   (t/ok (index-of "icare.ui.shared" found)))
