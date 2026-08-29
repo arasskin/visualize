@@ -7,6 +7,7 @@
 (import ../visualize/parser :as parser)
 (import ../visualize/scan)
 (import ../visualize/parsers/swift)
+(import ../visualize/parsers/clojure)
 (import ../visualize/parsers/python)
 (import ../visualize/parsers/go)
 (import ../visualize/parsers/arduino)
@@ -786,3 +787,48 @@ database  where things are kept
          "the symbol invented no external")
   (t/is= [["src.main.py" "src.search.py"]] (g :edges)
          "and the module it named is the edge"))
+
+(t/test "clojure reads the ns form, and only the live parts of it"
+  (def got (parser/run clojure/spec `
+(ns icare.ui
+  (:require ["package:flutter/material.dart" :as m]
+            ;; [icare.benchmarks :refer [dart-time]]
+            [icare.ui.shared :refer [scale-down-fade-animation]]
+            ["dart:ui" :as ui]
+            [icare.ui.normalized-ast :refer [ast->ast-store]]))
+` "t.cljd"))
+  (def found (got :imports))
+  # A COMMENTED-OUT REQUIRE IS NOT ONE -- this exact line sits inside a live
+  # :require form in the project that motivated the spec.
+  (t/ok (not (index-of "icare.benchmarks" found)) "the ;; line said nothing")
+  # THE DASH IS THE FILE'S UNDERSCORE: clojure munges namespaces onto disk.
+  (t/ok (index-of "icare.ui.normalized_ast" found) "munged to match the file")
+  # STRING REQUIRES BECOME GROUPABLE NAMES: the wrapper words say nothing.
+  (t/ok (index-of "flutter.material" found) "package: and .dart trimmed")
+  (t/ok (index-of "dart.ui" found) "dart: is a prefix like any other")
+  # THE :refer VECTOR HOLDS SYMBOLS THAT ARE NOT REQUIRES.
+  (t/ok (not (index-of "scale_down_fade_animation" found)) "refer names skipped")
+  (t/ok (index-of "icare.ui.shared" found)))
+
+(t/test "a clojuredart require finds its file from the source root"
+  # `icare.ui.shared` is written from `src/app/src/`, three directories deep
+  # in the project -- the same tail rule every module import follows. And
+  # `cljd-out` is the transpiler's OUTPUT: `cljd.flutter` is a library from
+  # deps.edn, and its compiled copy under lib/ was capturing the name that
+  # should have stayed an external.
+  (def root (string (os/getenv "TMPDIR") "vz-cljd-" (string (os/time))))
+  (os/mkdir root)
+  (each d ["/src" "/src/app" "/src/app/src" "/src/app/src/icare"
+           "/lib" "/lib/cljd-out" "/lib/cljd-out/cljd"]
+    (os/mkdir (string root d)))
+  (spit (string root "/src/app/src/icare/shared_thing.cljd") "(ns icare.shared-thing)\n")
+  (spit (string root "/src/app/src/icare/ui.cljd")
+        "(ns icare.ui (:require [icare.shared-thing :as s] [cljd.flutter :as f]))\n")
+  (spit (string root "/lib/cljd-out/cljd/flutter.dart") "// transpiled\n")
+
+  (def g (scan/scan root))
+  (def edges (map |(string (first $) " -> " (get $ 1)) (g :edges)))
+  (t/ok (index-of "src.app.src.icare.ui.cljd -> src.app.src.icare.shared_thing.cljd" edges)
+        "the munged require found the file under the source root")
+  (t/ok (index-of "src.app.src.icare.ui.cljd -> ?.cljd.flutter" edges)
+        "and the library stayed external, its transpiled copy unseen"))

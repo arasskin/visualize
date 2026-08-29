@@ -22,6 +22,7 @@
 (import ./names)
 (import ./parsers/arduino :as arduino)
 (import ./parsers/visualize-bash :as bash)
+(import ./parsers/clojure :as clojure)
 (import ./parsers/css :as css)
 (import ./parsers/go :as go)
 (import ./parsers/janet :as janet-lang)
@@ -41,8 +42,9 @@
   that ship in this repo and change when someone edits this line anyway.
   Adding a language is now an import and an entry here, which is the same
   amount of editing the loader was avoiding, minus the machinery.``
-  [arduino/spec bash/spec css/spec go/spec html/spec janet-lang/spec
-   javascript/spec python/spec swift/spec visualize-lang/spec])
+  [arduino/spec bash/spec clojure/spec css/spec go/spec html/spec
+   janet-lang/spec javascript/spec python/spec swift/spec
+   visualize-lang/spec])
 
 (defn languages
   "Their names, for the startup banner."
