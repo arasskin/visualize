@@ -1250,6 +1250,11 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 #find-arrow {
   animation: arrive .22s ease-out;
 }
+/* RE-POINTED, NOT ARRIVED. The same mark redrawn at the same node -- a
+   keystroke refining the query, an Enter on a lone hit, a watcher redraw --
+   is not a landing, and replaying the fade made the arrow flash. find.js
+   marks those `settled`. */
+#find-arrow.settled { animation: none; }
 @keyframes arrive {
   from { opacity: 0; }
   to { opacity: 1; }

@@ -167,7 +167,14 @@ function edgeOf(t) { return Math.max(t.w, t.h) / 2; }
 // approach search agree even though they run at different moments.
 function zoomNow() { return scale || 1; }
 
+// WHERE THE ARROW LAST POINTED, by name and in a variable -- not read off
+// the previous element, because a watcher redraw swaps the whole svg and
+// takes the element with it. The variable is what lets the redraw's redrawn
+// arrow know it is still on the same node.
+let lastArrowKey = null;
+
 function clearArrow() {
+  lastArrowKey = null;
   const old = pane.querySelector('#find-arrow');
   if (old) old.remove();
   for (const n of pane.querySelectorAll('g.node.found')) n.classList.remove('found');
@@ -177,6 +184,12 @@ function clearArrow() {
 // drawing: pan and zoom move it with its target, and it is in the image if
 // the drawing is saved. Appended last so it sits over the nodes it passes.
 function drawArrow(hit) {
+  // WHETHER THIS IS AN ARRIVAL. The arrow fades in so you watch it land --
+  // but drawArrow rebuilds the element, so the fade replayed on every
+  // redraw of the same mark: each keystroke while typing, every Enter on a
+  // lone hit, every watcher redraw. Landing on the SAME node is not an
+  // arrival, and the flash was the animation saying otherwise.
+  const settled = lastArrowKey === hit.key;
   clearArrow();
   const svg = pane.querySelector('svg');
   if (!svg || !hit) return;
@@ -235,7 +248,9 @@ function drawArrow(hit) {
   g.dataset.x = target.x + ca * edge;
   g.dataset.y = target.y + sa * edge;
   g.dataset.deg = (aim.angle * 180) / Math.PI;
+  if (settled) g.classList.add('settled');
   host.append(g);
+  lastArrowKey = hit.key;
   placeArrow();
   hit.node.classList.add('found');
 }
@@ -332,7 +347,12 @@ function revealHit(hit) {
 // already has both recovery affordances: the arrow points at the hit from
 // anywhere, and Enter re-centres on it.
 
-function runFind() {
+// The search half of a find: hits, the count, the empty state -- everything
+// except drawing and travelling. `runFind` shows what it found; a redraw
+// (see redrawFind) must not, or the arrow is drawn against an svg that has
+// no transform yet and repainted through every step of the reframe -- one
+// visible flash per intermediate state.
+function search() {
   const query = findInput.value.trim();
   hits = searchNodes(query);
   hitAt = 0;
@@ -340,16 +360,21 @@ function runFind() {
     findCount.textContent = '';
     find.classList.remove('empty');
     clearArrow();
-    return;
+    return false;
   }
   if (!hits.length) {
     findCount.textContent = 'no match';
     find.classList.add('empty');
     clearArrow();
-    return;
+    return false;
   }
   find.classList.remove('empty');
-  showHit();
+  findCount.textContent = hits.length > 1 ? `${hitAt + 1}/${hits.length}` : '';
+  return true;
+}
+
+function runFind() {
+  if (search()) showHit();
 }
 
 function showHit() {
@@ -563,21 +588,28 @@ export function anchorHit() {
 // element: the element died with the old svg. A node the redraw removed
 // anchors nothing, and the view stays wherever repaint or fit put it.
 export function restoreAnchor(anchor) {
-  if (!anchor) return;
   const svg = pane.querySelector('svg');
-  if (!svg) return;
-  for (const node of svg.querySelectorAll('g.node')) {
-    const title = node.querySelector('title');
-    if (!title || title.textContent.trim() !== anchor.key) continue;
-    const box = node.getBoundingClientRect();
-    panBy(anchor.x - (box.left + box.width / 2),
-          anchor.y - (box.top + box.height / 2));
-    // The hit list was rebuilt against the new svg; point it back at the
-    // node that anchored, so Enter and the arrow agree about which one
-    // matters.
-    const at = hits.findIndex(h => h.node === node);
-    if (at >= 0) hitAt = at;
-    return;
+  if (anchor && svg) {
+    for (const node of svg.querySelectorAll('g.node')) {
+      const title = node.querySelector('title');
+      if (!title || title.textContent.trim() !== anchor.key) continue;
+      const box = node.getBoundingClientRect();
+      panBy(anchor.x - (box.left + box.width / 2),
+            anchor.y - (box.top + box.height / 2));
+      // The hit list was rebuilt against the new svg; point it back at the
+      // node that anchored, so Enter and the arrow agree about which one
+      // matters.
+      const at = hits.findIndex(h => h.node === node);
+      if (at >= 0) hitAt = at;
+      break;
+    }
+  }
+  // THE ARROW, ONCE, LAST. Its geometry is screen pixels, so it can only be
+  // drawn honestly after the final pan -- and drawing it here instead of in
+  // the redraw's search is what removes the flash. No travelling: a redraw
+  // nobody asked for does not move the view, anchored or not.
+  if (finding() && hits[hitAt] && hits[hitAt].node.isConnected) {
+    drawArrow(hits[hitAt]);
   }
 }
 
@@ -585,7 +617,7 @@ export function restoreAnchor(anchor) {
 // Called from the redraw itself rather than listening for an event, since
 // that is the only place the swap happens.
 export function redrawFind() {
-  if (finding() && findInput.value.trim()) runFind();
+  if (finding() && findInput.value.trim()) search();
 }
 
 
