@@ -11,7 +11,7 @@
 
 import { pane, wire as wireGraph, paint, repaint, fit, fitSoon, isTouched, hatchFolded } from './graph.js';
 import {
-  find, hits, wire as wireFind, placeArrow, redrawFind,
+  find, hits, wire as wireFind, placeArrow, redrawFind, anchorHit, restoreAnchor,
   forgetUnit,
 } from './find.js';
 import { moduleNames, hideEdge, wireEdges, keepEdgeLabel } from './hover.js';
@@ -422,6 +422,9 @@ async function send(action, index, keepView) {
         // "edgelabel is not defined" on every redraw that carried an SVG,
         // which meant one config action broke the page.
         hideEdge();
+        // The found node's screen position, measured while the old svg can
+        // still answer -- see the anchoring note in find.js.
+        const anchor = anchorHit();
         pane.innerHTML = out.svg;
         keepEdgeLabel();
         wireEdges();
@@ -443,6 +446,10 @@ async function send(action, index, keepView) {
         // has no transform yet, and deferring it a frame would show the
         // graph unpositioned for that frame.
         if (keepView && isTouched()) repaint(); else fit();
+        // AFTER the transform is set, whichever branch set it: the anchor is
+        // a correction on top of the frame, panning the searched-for node
+        // back under the eyes that were on it.
+        restoreAnchor(anchor);
       }
       const count = Object.keys(faults).length;
       const ms = Math.round(performance.now() - t0);

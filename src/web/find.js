@@ -533,6 +533,54 @@ document.addEventListener('keydown', (e) => {
   openFind();
 }, true);
 
+/* -- anchoring across a redraw ---------------------------------------------
+   A watcher redraw swaps the whole svg, and graphviz owes the new layout
+   nothing: the node you searched for can land anywhere. If a find is open,
+   the redraw pins it -- the found node keeps its place ON SCREEN across the
+   swap, so the thing you are looking at stays under your eyes while the
+   rest of the drawing rearranges around it.
+
+   ONLY ACROSS THE SWAP. The view is otherwise the hand's: nothing here
+   listens to scrolling, and leaving the node still leaves it (the pull-back
+   that once fought departure is gone for good -- see the note above
+   runFind). The redraw is the one moment nobody's hand is on the view, and
+   the one moment the node would otherwise jump. */
+
+// The current hit's name and screen position, or nil with no find open.
+// Taken BEFORE the swap, while the old svg can still be measured.
+export function anchorHit() {
+  if (!finding()) return null;
+  const hit = hits[hitAt];
+  if (!hit || !hit.node.isConnected) return null;
+  const title = hit.node.querySelector('title');
+  if (!title) return null;
+  const box = hit.node.getBoundingClientRect();
+  return { key: title.textContent.trim(),
+           x: box.left + box.width / 2, y: box.top + box.height / 2 };
+}
+
+// Pan the new svg so the anchored node sits where it was. By NAME, not by
+// element: the element died with the old svg. A node the redraw removed
+// anchors nothing, and the view stays wherever repaint or fit put it.
+export function restoreAnchor(anchor) {
+  if (!anchor) return;
+  const svg = pane.querySelector('svg');
+  if (!svg) return;
+  for (const node of svg.querySelectorAll('g.node')) {
+    const title = node.querySelector('title');
+    if (!title || title.textContent.trim() !== anchor.key) continue;
+    const box = node.getBoundingClientRect();
+    panBy(anchor.x - (box.left + box.width / 2),
+          anchor.y - (box.top + box.height / 2));
+    // The hit list was rebuilt against the new svg; point it back at the
+    // node that anchored, so Enter and the arrow agree about which one
+    // matters.
+    const at = hits.findIndex(h => h.node === node);
+    if (at >= 0) hitAt = at;
+    return;
+  }
+}
+
 // A redraw replaces the svg, and the arrow was drawn into the old one.
 // Called from the redraw itself rather than listening for an event, since
 // that is the only place the swap happens.
