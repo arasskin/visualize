@@ -1,13 +1,3 @@
 #!/usr/bin/env sh
-# Report (and with --write, apply) the `?.` an external name now needs.
-#
-# Externals used to be matchable without their mark: `(hide os)` found `?.os`
-# as a fallback. That made a name mean different things in different places --
-# see `matches?` in select.janet -- so the mark is now required. A config
-# written before that change has bare names that no longer match anything.
-#
-# A name is rewritten ONLY when it matches nothing as written and matches an
-# external once marked. Anything still naming a real node is left alone, and
-# so is anything matching neither (a stale line this has no opinion about).
 exec "$(dirname "$0")/../external-src/janet/janet" \
      "$(dirname "$0")/mark-externals.janet" "$@"

@@ -2,10 +2,7 @@
 <meta charset="utf-8">
 <title>{{TITLE}}</title>
 <link rel="icon" href="{{FAVICON}}">
-<!-- THE TERMINAL EMULATOR'S OWN NAMES. wterm's modules import each other by
-     package (`@wterm/core`), and the files are vendored flat because the
-     static route serves a single path component -- see tools/vendor-wterm.
-     This is the one place the two spellings meet. -->
+
 <script type="importmap">
 {
   "imports": {
@@ -15,82 +12,47 @@
   }
 }
 </script>
-<!-- Ghostty's own rules FIRST, ours second: the vendored sheet carries the
-     structure its renderer depends on (the scroller's overflow, the `contain`
-     that keeps a repaint local) plus a theme and a drop shadow we do not
-     want. Loading it ahead of style.css lets our rules override the looks
-     without touching the file, which the vendoring script would overwrite. -->
+
 <link rel="stylesheet" href="/wterm.css">
 <link rel="stylesheet" href="/style.css">
-<!-- No top bar. Regenerate is gone because a watcher notices edits on its
-     own; Fit is the `0` key; and what is left -- the zoom level and what the
-     server is doing -- is status, not furniture, so it floats over the graph
-     and fades when there is nothing to say. -->
+
 <div id="graph">{{GRAPH}}<div id="edgelabel"></div></div>
 <div id="hud"><span id="zoom"></span><span id="status"></span></div>
 
-<!-- The compose bar. Hidden until you type: start typing anywhere on the
-     page and the keystroke lands here. What you write is wrapped in
-     parentheses on its way to the file -- every line of the config is a
-     call, so they are not something to type. -->
 <div id="compose" class="shut">
-  <!-- The box is the bordered thing; the parens live INSIDE it, one at each
-       end of the line. Printed, not typed -- every line of the config is a
-       call, so they are the shape of what you are writing. -->
-  <!-- A TEXTAREA, not an input, because on a terminal tab this grows to as
-       many lines as you type. On the config tab it is held to one line and
-       behaves exactly as an input did -- see app.js. -->
+
   <div id="compose-box">
     <span class="paren">(</span><textarea id="compose-input" rows="1"
       spellcheck="false" autocomplete="off" autocapitalize="off"
       aria-label="add a config line"></textarea><span class="paren">)</span>
   </div>
-  <!-- Completions, ABOVE the bar: the graph is behind, and a list dropping
-       down would cover the part you are looking at while you filter it. -->
+
   <ul id="compose-list" role="listbox" aria-label="completions"></ul>
-  <!-- Why the line was refused, under the bar. Empty until something is. -->
+
   <p id="compose-fault" role="status" aria-live="polite"></p>
 </div>
 
-<!-- The search bar, at the top: the browser's own find cannot see into a
-     drawing -- it matches text, but a node's name is scattered across
-     <text> elements and finding it neither says where it is nor moves the
-     view to it. Cmd-F opens this instead, and a hit gets an arrow drawn at
-     it in the graph's own coordinates. -->
 <div id="find" class="shut">
   <div id="find-box">
     <input id="find-input" spellcheck="false" autocomplete="off"
       placeholder="find a node" aria-label="find a node">
     <span id="find-count" aria-live="polite"></span>
   </div>
-  <!-- Completions, BELOW this bar: it sits at the top of the screen, so the
-       list drops away from the field rather than off the edge -- the mirror
-       of the compose bar's, which opens upward from the bottom. -->
+
   <ul id="find-list" role="listbox" aria-label="node names"></ul>
 </div>
 
-<!-- The help panel. Empty here: its content is the verb table from
-     src/visualize/config.janet, rendered by app.js, because a list of verbs
-     written out in HTML is a list that goes stale the first time one
-     changes. -->
-<!-- A new terminal. Beside the help mark because both are page furniture
-     rather than parts of the drawing, and both are one glyph. -->
 <button id="term-new" title="new terminal  (ctrl-t, or cmd-t inside one)" aria-label="new terminal">+</button>
 <button id="help-open" title="what the config can say  (? or F1)" aria-label="help">?</button>
-<!-- aria-label rather than aria-labelledby: there is no heading to point at,
-     but a dialog still has to announce itself as something. -->
+
 <div id="help" class="shut" role="dialog" aria-modal="true" aria-label="config verbs">
   <div id="help-verbs"></div>
 </div>
 
-<!-- The terminal pane. The screen is a <pre>: the emulator writes a grid of
-     cells into it, which is exactly the shape a terminal is, and tabindex
-     makes it focusable so keystrokes are captured without a text input. -->
 <div id="harness" class="panel term shut">
   <div class="bar" title="click to open, drag to move  (alt toggles the selected tab, hold to peek)">
     <span class="name">{{HARNESS_NAME}}</span>
-    <!-- WHAT THIS PANE IS FOR, in your words. Empty it shows nothing at all:
-         no box, no placeholder, no gap -- see `.label` in style.css. -->
+
     <span class="label" contenteditable="plaintext-only" spellcheck="false"
           role="textbox" aria-label="note for this tab"></span>
     <span class="state"></span>
@@ -114,20 +76,18 @@
   <div id="grip" class="grip" title="drag to resize"></div>
 </div>
 <script>
-// The file the page was rendered from, handed over at load so the editor opens
-// on the same lines the graph came from.
+
+window.GRAPH_GENERATION = {{GRAPH_GENERATION}};
 window.CONFIG_LINES = {{CONFIG_LINES}};
 window.CONFIG_PROBLEMS = {{CONFIG_PROBLEMS}};
 window.PANE_LABELS = {{PANE_LABELS}};
-// The verbs, generated from the grammar. See config/docs.
+
 window.CONFIG_DOCS = {{CONFIG_DOCS}};
-// The colours a config can name, for the editor to complete.
+
 window.CONFIG_COLOURS = {{CONFIG_COLOURS}};
-// The secret the write endpoints require. Here rather than in a cookie so
-// it dies with the tab and is never sent to another origin.
+
 window.TOKEN = {{TOKEN}};
-// The terminals a previous run left open, which this page puts tabs back
-// for -- see the note on recovery in core.janet.
+
 window.OPEN_TERMINALS = {{OPEN_TERMINALS}};
 </script>
 <script type="module" src="/app.js"></script>

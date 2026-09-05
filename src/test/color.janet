@@ -1,10 +1,3 @@
-# Colour arithmetic, checked against the values the Python tools produce.
-#
-# These numbers are not invented here: they are what swiftdepgraph.py's tint,
-# ink, ink_on_page and ramp return for the same inputs. Keeping them means a
-# port that drifts is a port that fails, rather than one that quietly draws a
-# different-looking graph.
-
 (import ../visualize/color :as color)
 (import ./harness :as t)
 
@@ -28,7 +21,7 @@
   (t/is= "#42141c" (color/ink "#ff4d6d"))
   (t/is= "#8c2a3c" (color/ink-on-page "#ff4d6d"))
   (t/is= "#f7f7f7" (color/ink "#101010") "a dark fill inverts to near-white")
-  # The property the exact values above exist to protect.
+
   (each hue color/palette
     (t/ok (>= (color/contrast (color/ink hue) hue) 4.5)
           (string "ink is legible on " hue))
@@ -36,7 +29,7 @@
           (string "ink-on-page is legible for " hue))))
 
 (t/test "ramp ranks rather than scales"
-  # The long tail is the point: 13 is far from 5, but both are one tier apart.
+
   (t/is= {"a" 0 "b" 0 "c" 0.5 "d" 1}
          (color/ramp {"a" 1 "b" 1 "c" 5 "d" 13}))
   (t/is= {"only" 1} (color/ramp {"only" 3})

@@ -1,0 +1,832 @@
+{
+  "measurement": "Headless Chrome key dispatch to DOM update; milliseconds, excluding physical display scanout.",
+  "runs": [
+    {
+      "metadata": {
+        "platform": "darwin",
+        "arch": "arm64",
+        "trace": "1",
+        "workload": "panes",
+        "variant": "current",
+        "backlog": "4000",
+        "browser": {
+          "protocolVersion": "1.3",
+          "product": "Chrome/152.0.7977.82",
+          "revision": "@d04cdb24d67b081f6cf80200ffc5233f44b61109",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+          "jsVersion": "15.2.124.21"
+        }
+      },
+      "results": [
+        {
+          "name": "one-pane",
+          "summary": {
+            "key-dispatch": {
+              "n": 100,
+              "p50": 0.2,
+              "p95": 0.6,
+              "max": 2.5
+            },
+            "input-queue": {
+              "n": 100,
+              "p50": 0,
+              "p95": 0,
+              "max": 0.1
+            },
+            "key-to-data": {
+              "n": 100,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.5
+            },
+            "input-rpc": {
+              "n": 100,
+              "p50": 8.8,
+              "p95": 16.1,
+              "max": 17.9
+            },
+            "echo-wait": {
+              "n": 100,
+              "p50": 0,
+              "p95": 0,
+              "max": 0
+            },
+            "host-handle": {
+              "n": 100,
+              "p50": 0.07,
+              "p95": 0.17,
+              "max": 0.19
+            },
+            "pty-send": {
+              "n": 100,
+              "p50": 0.05,
+              "p95": 0.13,
+              "max": 0.16
+            },
+            "input-total": {
+              "n": 100,
+              "p50": 8.8,
+              "p95": 16.1,
+              "max": 17.9
+            },
+            "emulator-write": {
+              "n": 100,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.8
+            },
+            "render": {
+              "n": 100,
+              "p50": 0.5,
+              "p95": 0.9,
+              "max": 1.2
+            },
+            "write-to-render": {
+              "n": 100,
+              "p50": 16.7,
+              "p95": 17.8,
+              "max": 18.6
+            },
+            "key-to-DOM": {
+              "n": 100,
+              "p50": 25.6,
+              "p95": 33.8,
+              "max": 34.5
+            }
+          }
+        },
+        {
+          "name": "2-panes",
+          "summary": {
+            "key-dispatch": {
+              "n": 60,
+              "p50": 0.2,
+              "p95": 0.9,
+              "max": 1.3
+            },
+            "input-queue": {
+              "n": 60,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.1
+            },
+            "key-to-data": {
+              "n": 60,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.1
+            },
+            "input-rpc": {
+              "n": 60,
+              "p50": 8.7,
+              "p95": 15.9,
+              "max": 16.2
+            },
+            "echo-wait": {
+              "n": 60,
+              "p50": 0,
+              "p95": 0,
+              "max": 0
+            },
+            "host-handle": {
+              "n": 60,
+              "p50": 0.06,
+              "p95": 0.14,
+              "max": 0.14
+            },
+            "pty-send": {
+              "n": 60,
+              "p50": 0.05,
+              "p95": 0.11,
+              "max": 0.12
+            },
+            "input-total": {
+              "n": 60,
+              "p50": 8.7,
+              "p95": 15.9,
+              "max": 16.3
+            },
+            "emulator-write": {
+              "n": 60,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.1
+            },
+            "render": {
+              "n": 60,
+              "p50": 0.5,
+              "p95": 0.7,
+              "max": 0.9
+            },
+            "write-to-render": {
+              "n": 60,
+              "p50": 16.6,
+              "p95": 17.9,
+              "max": 18.5
+            },
+            "key-to-DOM": {
+              "n": 60,
+              "p50": 25.7,
+              "p95": 32.7,
+              "max": 33.5
+            }
+          }
+        },
+        {
+          "name": "3-panes",
+          "summary": {
+            "key-dispatch": {
+              "n": 60,
+              "p50": 0.2,
+              "p95": 0.5,
+              "max": 0.8
+            },
+            "input-queue": {
+              "n": 60,
+              "p50": 0,
+              "p95": 0,
+              "max": 0.1
+            },
+            "key-to-data": {
+              "n": 60,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.2
+            },
+            "input-rpc": {
+              "n": 60,
+              "p50": 10.2,
+              "p95": 17.3,
+              "max": 18.5
+            },
+            "echo-wait": {
+              "n": 60,
+              "p50": 0,
+              "p95": 0,
+              "max": 0
+            },
+            "host-handle": {
+              "n": 60,
+              "p50": 0.06,
+              "p95": 0.16,
+              "max": 0.3
+            },
+            "pty-send": {
+              "n": 60,
+              "p50": 0.05,
+              "p95": 0.13,
+              "max": 0.27
+            },
+            "input-total": {
+              "n": 60,
+              "p50": 10.2,
+              "p95": 17.3,
+              "max": 18.5
+            },
+            "emulator-write": {
+              "n": 60,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.1
+            },
+            "render": {
+              "n": 60,
+              "p50": 0.4,
+              "p95": 1,
+              "max": 1
+            },
+            "write-to-render": {
+              "n": 60,
+              "p50": 16.4,
+              "p95": 17.8,
+              "max": 18.7
+            },
+            "key-to-DOM": {
+              "n": 60,
+              "p50": 26.8,
+              "p95": 33.7,
+              "max": 34.8
+            }
+          }
+        },
+        {
+          "name": "4-panes",
+          "summary": {
+            "key-dispatch": {
+              "n": 60,
+              "p50": 0.2,
+              "p95": 0.7,
+              "max": 1.5
+            },
+            "input-queue": {
+              "n": 60,
+              "p50": 0,
+              "p95": 0,
+              "max": 0.1
+            },
+            "key-to-data": {
+              "n": 60,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.2
+            },
+            "input-rpc": {
+              "n": 60,
+              "p50": 9.2,
+              "p95": 16.7,
+              "max": 17.4
+            },
+            "echo-wait": {
+              "n": 60,
+              "p50": 0,
+              "p95": 0,
+              "max": 0
+            },
+            "host-handle": {
+              "n": 60,
+              "p50": 0.06,
+              "p95": 0.13,
+              "max": 0.16
+            },
+            "pty-send": {
+              "n": 60,
+              "p50": 0.05,
+              "p95": 0.11,
+              "max": 0.14
+            },
+            "input-total": {
+              "n": 60,
+              "p50": 9.2,
+              "p95": 16.7,
+              "max": 17.5
+            },
+            "emulator-write": {
+              "n": 60,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.1
+            },
+            "render": {
+              "n": 60,
+              "p50": 0.5,
+              "p95": 0.9,
+              "max": 1
+            },
+            "write-to-render": {
+              "n": 60,
+              "p50": 16.6,
+              "p95": 17.7,
+              "max": 18.3
+            },
+            "key-to-DOM": {
+              "n": 60,
+              "p50": 26.1,
+              "p95": 33.2,
+              "max": 35.3
+            }
+          }
+        },
+        {
+          "name": "5-panes",
+          "summary": {
+            "key-dispatch": {
+              "n": 60,
+              "p50": 0.2,
+              "p95": 0.7,
+              "max": 1.1
+            },
+            "input-queue": {
+              "n": 60,
+              "p50": 0,
+              "p95": 0,
+              "max": 0
+            },
+            "key-to-data": {
+              "n": 60,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.2
+            },
+            "input-rpc": {
+              "n": 60,
+              "p50": 10.4,
+              "p95": 17.3,
+              "max": 17.7
+            },
+            "echo-wait": {
+              "n": 60,
+              "p50": 0,
+              "p95": 0,
+              "max": 0.01
+            },
+            "host-handle": {
+              "n": 60,
+              "p50": 0.07,
+              "p95": 0.1,
+              "max": 0.11
+            },
+            "pty-send": {
+              "n": 60,
+              "p50": 0.06,
+              "p95": 0.08,
+              "max": 0.09
+            },
+            "input-total": {
+              "n": 60,
+              "p50": 10.4,
+              "p95": 17.3,
+              "max": 17.7
+            },
+            "emulator-write": {
+              "n": 60,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.5
+            },
+            "render": {
+              "n": 60,
+              "p50": 0.5,
+              "p95": 0.9,
+              "max": 0.9
+            },
+            "write-to-render": {
+              "n": 60,
+              "p50": 16.7,
+              "p95": 17.5,
+              "max": 17.7
+            },
+            "key-to-DOM": {
+              "n": 60,
+              "p50": 27.5,
+              "p95": 34.7,
+              "max": 35
+            }
+          }
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "platform": "darwin",
+        "arch": "arm64",
+        "trace": "1",
+        "workload": "scan",
+        "variant": "current",
+        "backlog": "4000",
+        "browser": {
+          "protocolVersion": "1.3",
+          "product": "Chrome/152.0.7977.82",
+          "revision": "@d04cdb24d67b081f6cf80200ffc5233f44b61109",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+          "jsVersion": "15.2.124.21"
+        }
+      },
+      "results": [
+        {
+          "name": "one-pane",
+          "summary": {
+            "key-dispatch": {
+              "n": 100,
+              "p50": 0.2,
+              "p95": 0.8,
+              "max": 2.6
+            },
+            "input-queue": {
+              "n": 100,
+              "p50": 0,
+              "p95": 0,
+              "max": 0.1
+            },
+            "key-to-data": {
+              "n": 100,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.4
+            },
+            "input-rpc": {
+              "n": 100,
+              "p50": 9.7,
+              "p95": 17,
+              "max": 18.5
+            },
+            "echo-wait": {
+              "n": 100,
+              "p50": 0,
+              "p95": 0,
+              "max": 0
+            },
+            "host-handle": {
+              "n": 100,
+              "p50": 0.07,
+              "p95": 0.13,
+              "max": 0.2
+            },
+            "pty-send": {
+              "n": 100,
+              "p50": 0.06,
+              "p95": 0.11,
+              "max": 0.16
+            },
+            "input-total": {
+              "n": 100,
+              "p50": 9.7,
+              "p95": 17,
+              "max": 18.5
+            },
+            "emulator-write": {
+              "n": 100,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.8
+            },
+            "render": {
+              "n": 100,
+              "p50": 0.5,
+              "p95": 1,
+              "max": 1.3
+            },
+            "write-to-render": {
+              "n": 100,
+              "p50": 16.8,
+              "p95": 18.1,
+              "max": 18.5
+            },
+            "key-to-DOM": {
+              "n": 100,
+              "p50": 26.9,
+              "p95": 34.8,
+              "max": 35.2
+            }
+          }
+        },
+        {
+          "name": "3000-files-idle",
+          "summary": {
+            "key-dispatch": {
+              "n": 150,
+              "p50": 0.1,
+              "p95": 0.7,
+              "max": 1.6
+            },
+            "input-queue": {
+              "n": 150,
+              "p50": 0,
+              "p95": 0,
+              "max": 0.1
+            },
+            "key-to-data": {
+              "n": 150,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.1
+            },
+            "input-rpc": {
+              "n": 150,
+              "p50": 9.2,
+              "p95": 16.3,
+              "max": 18.3
+            },
+            "echo-wait": {
+              "n": 150,
+              "p50": 0,
+              "p95": 0,
+              "max": 0
+            },
+            "host-handle": {
+              "n": 150,
+              "p50": 0.06,
+              "p95": 0.11,
+              "max": 2.19
+            },
+            "pty-send": {
+              "n": 150,
+              "p50": 0.05,
+              "p95": 0.1,
+              "max": 2.18
+            },
+            "input-total": {
+              "n": 150,
+              "p50": 9.2,
+              "p95": 16.3,
+              "max": 18.4
+            },
+            "emulator-write": {
+              "n": 150,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.1
+            },
+            "render": {
+              "n": 150,
+              "p50": 0.4,
+              "p95": 0.8,
+              "max": 1.1
+            },
+            "write-to-render": {
+              "n": 150,
+              "p50": 16.7,
+              "p95": 17.6,
+              "max": 18.3
+            },
+            "key-to-DOM": {
+              "n": 150,
+              "p50": 26.4,
+              "p95": 33.6,
+              "max": 34.8
+            }
+          }
+        },
+        {
+          "name": "3000-files-edits",
+          "summary": {
+            "key-dispatch": {
+              "n": 150,
+              "p50": 0.1,
+              "p95": 0.3,
+              "max": 0.7
+            },
+            "input-queue": {
+              "n": 150,
+              "p50": 0,
+              "p95": 0,
+              "max": 0
+            },
+            "key-to-data": {
+              "n": 150,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.1
+            },
+            "input-rpc": {
+              "n": 150,
+              "p50": 9.3,
+              "p95": 16.3,
+              "max": 17.9
+            },
+            "echo-wait": {
+              "n": 150,
+              "p50": 0,
+              "p95": 0,
+              "max": 0
+            },
+            "host-handle": {
+              "n": 150,
+              "p50": 0.04,
+              "p95": 0.08,
+              "max": 0.11
+            },
+            "pty-send": {
+              "n": 150,
+              "p50": 0.03,
+              "p95": 0.07,
+              "max": 0.1
+            },
+            "input-total": {
+              "n": 150,
+              "p50": 9.3,
+              "p95": 16.3,
+              "max": 18
+            },
+            "emulator-write": {
+              "n": 150,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.2
+            },
+            "render": {
+              "n": 150,
+              "p50": 0.3,
+              "p95": 0.6,
+              "max": 0.8
+            },
+            "write-to-render": {
+              "n": 150,
+              "p50": 16.5,
+              "p95": 17.5,
+              "max": 17.7
+            },
+            "key-to-DOM": {
+              "n": 150,
+              "p50": 26.2,
+              "p95": 33.4,
+              "max": 34.4
+            }
+          }
+        }
+      ]
+    },
+    {
+      "metadata": {
+        "platform": "darwin",
+        "arch": "arm64",
+        "trace": "1",
+        "workload": "default-backlog",
+        "variant": "current",
+        "backlog": "4000",
+        "browser": {
+          "protocolVersion": "1.3",
+          "product": "Chrome/152.0.7977.82",
+          "revision": "@d04cdb24d67b081f6cf80200ffc5233f44b61109",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+          "jsVersion": "15.2.124.21"
+        }
+      },
+      "results": [
+        {
+          "name": "one-pane",
+          "summary": {
+            "key-dispatch": {
+              "n": 100,
+              "p50": 0.2,
+              "p95": 0.6,
+              "max": 2.8
+            },
+            "input-queue": {
+              "n": 100,
+              "p50": 0,
+              "p95": 0,
+              "max": 0.1
+            },
+            "key-to-data": {
+              "n": 100,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.4
+            },
+            "input-rpc": {
+              "n": 100,
+              "p50": 9,
+              "p95": 16.3,
+              "max": 19
+            },
+            "echo-wait": {
+              "n": 100,
+              "p50": 0,
+              "p95": 0,
+              "max": 0
+            },
+            "host-handle": {
+              "n": 100,
+              "p50": 0.06,
+              "p95": 0.14,
+              "max": 1.86
+            },
+            "pty-send": {
+              "n": 100,
+              "p50": 0.05,
+              "p95": 0.11,
+              "max": 1.85
+            },
+            "input-total": {
+              "n": 100,
+              "p50": 9.1,
+              "p95": 16.3,
+              "max": 19
+            },
+            "emulator-write": {
+              "n": 100,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.7
+            },
+            "render": {
+              "n": 100,
+              "p50": 0.5,
+              "p95": 1,
+              "max": 1.5
+            },
+            "write-to-render": {
+              "n": 100,
+              "p50": 16.7,
+              "p95": 17.8,
+              "max": 18.6
+            },
+            "key-to-DOM": {
+              "n": 100,
+              "p50": 26.4,
+              "p95": 33.6,
+              "max": 35.2
+            }
+          }
+        },
+        {
+          "name": "default-full-backlog",
+          "summary": {
+            "key-dispatch": {
+              "n": 100,
+              "p50": 0.2,
+              "p95": 0.8,
+              "max": 2.3
+            },
+            "input-queue": {
+              "n": 100,
+              "p50": 0,
+              "p95": 0,
+              "max": 0.1
+            },
+            "key-to-data": {
+              "n": 100,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.2
+            },
+            "input-rpc": {
+              "n": 100,
+              "p50": 9.6,
+              "p95": 17.3,
+              "max": 18.5
+            },
+            "echo-wait": {
+              "n": 100,
+              "p50": 0,
+              "p95": 0,
+              "max": 0.01
+            },
+            "host-handle": {
+              "n": 100,
+              "p50": 0.06,
+              "p95": 0.13,
+              "max": 0.19
+            },
+            "pty-send": {
+              "n": 100,
+              "p50": 0.05,
+              "p95": 0.11,
+              "max": 0.17
+            },
+            "input-total": {
+              "n": 100,
+              "p50": 9.6,
+              "p95": 17.3,
+              "max": 18.5
+            },
+            "emulator-write": {
+              "n": 100,
+              "p50": 0,
+              "p95": 0.1,
+              "max": 0.1
+            },
+            "render": {
+              "n": 100,
+              "p50": 0.4,
+              "p95": 0.9,
+              "max": 1.3
+            },
+            "write-to-render": {
+              "n": 100,
+              "p50": 16.6,
+              "p95": 17.6,
+              "max": 18.3
+            },
+            "key-to-DOM": {
+              "n": 100,
+              "p50": 26.6,
+              "p95": 34.7,
+              "max": 35.8
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

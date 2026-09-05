@@ -1,22 +1,8 @@
-# The pseudo-terminal, tested against /bin/sh.
-#
-# DELIBERATELY NOT TESTED AGAINST A REAL HARNESS. Claude Code and pi both run
-# through this unchanged -- that is the whole point of the module -- but a
-# suite that spawned one would cost API calls, need network, and fail on a
-# machine that has neither. `/bin/sh` proves every property that matters:
-# that the child gets a REAL terminal, that typing reaches it, that the size
-# can be changed, and that the thing dies when told to.
-
 (import ../visualize/term/pty)
 (import ./harness :as t)
 
 (defn- capture
-  ``Run a shell command on a pty and return everything it printed.
 
-  The pump BLOCKS, so it gets its own thread -- see the note in src/term/pty.janet.
-  Reading from the main thread instead is what starved the scheduler in
-  development, and the symptom was a server that stopped answering while the
-  terminal was busy.``
   [script &opt rows cols]
   (default rows 24)
   (default cols 80)
@@ -38,16 +24,13 @@
   (string seen))
 
 (t/test "the child gets a REAL terminal, not a pipe"
-  # The whole reason this module exists. An agent harness checks isatty() and
-  # behaves completely differently when the answer is no -- piped, Claude Code
-  # answers once and exits instead of running its TUI.
+
   (def out (capture "test -t 0 && echo IS_TTY; tty"))
   (t/ok (string/find "IS_TTY" out) "isatty() must be true inside the child")
   (t/ok (string/find "/dev/tty" out) "the child is attached to a tty device"))
 
 (t/test "a terminal ends lines with CRLF"
-  # The give-away that this is a terminal rather than a pipe: the line
-  # discipline translates \n into \r\n on the way out.
+
   (t/ok (string/find "\r\n" (capture "echo hello"))))
 
 (t/test "the window size reaches the child"
@@ -70,10 +53,7 @@
   (def seen @"")
   (ev/sleep 0.4)
   (pty/write-input session "echo TYPED-OK\n")
-  # Read until the answer shows up rather than for a fixed number of chunks.
-  # A pty splits output wherever it likes -- the echoed command and its result
-  # may arrive together or several reads apart -- so counting chunks is a race
-  # that passes on a quiet machine and fails on a busy one.
+
   (var found false)
   (var reads 0)
   (while (and (not found) (< reads 40))
@@ -81,9 +61,7 @@
     (def chunk (ev/take out-chan))
     (if (string? chunk)
       (do (buffer/push-string seen chunk)
-          # The echoed input contains the string too, so only a line that is
-          # the OUTPUT counts: the shell echoes `echo TYPED-OK`, and the
-          # result is the bare word on a line of its own.
+
           (when (string/find "\nTYPED-OK" (string seen)) (set found true)))
       (break)))
   (pty/write-input session "exit\n")
@@ -91,13 +69,7 @@
   (pty/close session))
 
 (t/test "resize is applied by the kernel"
-  # Checked against the DEVICE rather than by asking the program, because a
-  # long-running shell caches the size it started with and only a full-screen
-  # program redraws on SIGWINCH. The kernel is the authority here.
-  #
-  # This is also the test that would have caught the ioctl problem: the FFI
-  # path returned success while changing nothing, because `ioctl` is variadic
-  # and libffi cannot call it on arm64. `resize` uses `stty` for that reason.
+
   (def ready (ev/thread-chan 4))
   (def out-chan (ev/thread-chan 512))
   (ev/thread
@@ -119,8 +91,7 @@
   (pty/close session))
 
 (t/test "a session reports the device it is attached to"
-  # Needed by `resize`, and worth asserting on its own: without the device
-  # path there is no non-variadic way to set the window size at all.
+
   (def ready (ev/thread-chan 4))
   (ev/thread
     (fn [rc]
@@ -144,11 +115,9 @@
   (t/ok (pty/alive? session) "it is running before being closed")
   (pty/close session)
   (ev/sleep 0.4)
-  # alive? also reaps, so a closed child does not linger as a zombie.
+
   (t/ok (not (pty/alive? session)) "and gone afterwards"))
 
 (t/test "the harness is argv, not a code path"
-  # The coupling claim, asserted: nothing in this module names a program. If
-  # this passes for `echo` it passes for `claude` and `pi`, which were both
-  # driven through the same code during development.
+
   (t/ok (string/find "from-any-program" (capture "echo from-any-program"))))

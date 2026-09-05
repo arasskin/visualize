@@ -16,7 +16,6 @@
     (when (and (not hit) (string/has-prefix? prefix k)) (set hit true)))
   hit)
 
-# Every config under the root: the top one and each nested project's.
 (defn configs [dir &opt acc]
   (default acc @[])
   (def path (string dir "/" config/config-name))
@@ -62,13 +61,7 @@
                       path n verb arg verb (names/external arg))
               (++ total)
               (++ changed)
-              # Rewrite the token in place, bounded so `os` inside
-              # `otto.models` is untouched.
-              # BOUNDED ON BOTH SIDES so `os` inside `otto.models` and the
-              # `hide` in `(hide hide)` are left alone: the token has to
-              # start right after a paren or space and end at a space or the
-              # closing paren. The opening character is captured and put
-              # back, since it belongs to the line rather than the name.
+
               (set result
                    (string
                      (peg/replace-all

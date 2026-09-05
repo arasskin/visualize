@@ -1,51 +1,10 @@
-# The pane client: talking to the host that owns a pane's live session.
-#
-# THIS FILE IS THE SERVER PROCESS. It speaks to a pane host over a unix
-# socket, one line of JSON each way, and knows how to start one that outlives
-# it. The session it talks about -- the pty, the pump thread, the backlog --
-# is owned by ./host.janet in another process entirely. ("Supervisor"
-# survives in prose throughout this file and its neighbours: it is still the
-# right English word for a process that owns and outlives a session, and
-# --supervise is still the flag that starts one. Only the files changed
-# names, to say which side of the wire each one is.)
-#
-# ONE CLIENT PER PANE, AND NO DEFAULT. This module used to expose both
-# `make-client` and a module-level singleton with wrappers -- so core drove
-# the agent pane through (harness/poll ...) and the repl pane through
-# (:poll repl-client ...), the same operation written two ways, and adding
-# a third pane meant choosing which. Clients are values now; core makes one
-# per pane and hands it to the routes. `register` names them for the repl,
-# which is the one caller that cannot hold a client of its own.
-#
-# THE WIRE IS THE CONTRACT, and it is the ONLY thing shared: this file does
-# not import that one and cannot call into it. The op names and reply shapes
-# below have to agree with `handle` there, and nothing but the protocol tests
-# will tell you when they stop agreeing -- see the note there before adding
-# an op.
-#
-# The HTTP routes in src/core.janet only ever see the API at the bottom:
-# configure, start, stop, send, resize, redraw, state, since, poll, shutdown.
-
 (import ../json)
-
-# -- the client --------------------------------------------------------------
+(import ../trace)
 
 (defn- talk
-  ``One request and its reply over an open connection, or nil on EOF.
 
-  Reads to the newline the supervisor terminates every reply with: a `since`
-  reply routinely exceeds one chunk, and a single :read would hand json/decode
-  a truncated object. Throws if the connection is dead, which `ask` treats as
-  "drop it and try a fresh one".``
   [connection message &opt deadline]
-  # TEN-SECOND DEADLINES on both directions, by default. Without them, a
-  # supervisor that accepts and then wedges -- which one did, when a pty open
-  # failed before its reply was sent -- hangs this read forever, and the HTTP
-  # request above it, and the page above that. The longest honest ordinary
-  # operation is a start under heavy load; ten seconds is far beyond it, and
-  # a timeout lands in `ask`'s retry path like any other dead connection.
-  # A parked `since` (see the wait handling in session/handle) is the one
-  # caller that legitimately holds longer, and it says so.
+
   (default deadline 10)
   (:write connection (string (json/encode message) "\n") 10)
   (def reply @"")
@@ -58,42 +17,13 @@
       (if-let [chunk (:read connection 65536 nil deadline)]
         (buffer/push-string reply chunk)
         (set reading false))))
-  # NO LINE MEANS THIS CONNECTION IS POISONED, and saying so is the whole
-  # difference between a failed request and a corrupted stream. The request
-  # was already written; if the reply did not arrive whole, the host may
-  # still send it -- into the next exchange on this connection, which then
-  # reads the PREVIOUS answer to the PREVIOUS question. Answers shift by one
-  # and never recover. That is not theoretical: it put a raw `since` REQUEST
-  # into an HTTP response body, which is what a browser (or ./pane) sees as
-  # "BadStatusLine: {"op":"since"}". Callers close on error, so throwing is
-  # what makes reuse impossible; returning nil would let a standing
-  # connection carry the damage forward.
+
   (unless line (error "incomplete reply -- connection unusable"))
-  # THE RAW LINE TRAVELS WITH THE PARSED ONE. A poll's reply is mostly
-  # terminal output, and the server's only use for it is to send it to the
-  # browser as JSON -- which it already is. Decoding it here and encoding it
-  # again there costs 113ms per megabyte ON THE SHARED THREAD (86 to decode,
-  # 27 to encode), and every keystroke from every pane waits behind that.
-  #
-  # Kept as a field on the parsed table rather than a second return value, so
-  # every existing caller reads unchanged and only the poll path looks for
-  # it. See `raw-poll` below and `poll-answer` in core.janet.
-  # THE LINE, NOT A TABLE. A poll reply is mostly terminal output, and the
-  # server's only use for it is to send it to the browser as JSON -- which it
-  # already is. Decoding it here cost 86ms per megabyte on the one thread
-  # every keystroke waits behind, and the caller that only relays never
-  # needed the table at all. The few callers that do read fields decode for
-  # themselves, and their replies are tiny.
+
   line)
 
 (defn- client-state
-  ``A `state` reply as this side's callers expect it: keyword keys, and a
-  value for every field even when the supervisor is gone.
 
-  ONE PLACE FOR THE KEYS because `start`, `stop` and `state` all answer with
-  the same shape, and the routes hand it straight to `json/encode` -- a
-  keyword encodes as its bare name, so `:running` reaches the browser as
-  "running" and the page cannot tell which of the three it asked.``
   [reply]
   {:running (truthy? (get reply "running"))
    :generation (or (get reply "generation") 0)
@@ -101,38 +31,9 @@
    :chunks (or (get reply "chunks") 0)})
 
 (defn make-client
-  ``A handle on ONE supervisor: the socket it listens on, and the argv that
-  starts one when nothing is there.
 
-  A handle rather than module state, because there are two supervisors now --
-  the agent's, shared per project root, and the repl window's. Each handle
-  owns its own pinned connection and its own turn-lock: two supervisors'
-  replies interleaved over shared state would pair answers with the wrong
-  questions exactly as two fibers' would.
-
-  Returns a table of closures, called method-style: (:poll client at). The
-  module-level functions below drive a default handle set by `configure`, so
-  the routes and the tests that predate the second supervisor read unchanged.
-
-  `path` is keyed to the project root by the caller, so two copies of
-  visualize pointed at different directories do not share a terminal.``
   [path argv]
-  # ONE CONNECTION, KEPT OPEN -- not one per request.
-  #
-  # The per-request version opened and closed a unix socket for every poll,
-  # several times a second, and each of those briefly owned the process's
-  # lowest free fd -- the same number every new browser connection was about
-  # to be handed. That churn is what tickled a runtime fd/reuse race on
-  # macOS: under a real browser's concurrency, an occasional net/write blew
-  # up with EBADF on a connection whose fd had been closed behind its back,
-  # the page declared itself disconnected, and the terminal froze. Slowing
-  # the fibers down with logging made it vanish, which is the signature of
-  # exactly this kind of race.
-  #
-  # A pinned connection removes the churn (and, incidentally, four syscalls
-  # per poll). The turn-lock matters as much as the pinning: several fibers
-  # ask at once -- a poll races a resize races an input -- and interleaved
-  # writes on one socket would pair replies with the wrong requests.
+
   (var pinned nil)
   (def turn @{:busy false :waiting @[]})
 
@@ -155,30 +56,10 @@
       (try (:close pinned) ([_] nil))
       (set pinned nil)))
 
-
-  # A connection to the supervisor, or nil if nothing is listening.
-  #
-  # The stat comes first because it is free: a `net/connect` that fails still
-  # burns a file descriptor at the kernel for a moment, and during supervisor
-  # boot this used to be called in a tight retry loop -- a storm of
-  # short-lived fds churning the exact numbers the browser's connections were
-  # being handed, which fed the EBADF race. No socket file, no syscall.
   (defn connect []
     (when (and path (os/stat path :mode))
       (try (net/connect :unix path) ([_] nil))))
 
-  # THE PARK CONNECTION, standing like the pinned one and for the same
-  # reason. Wait-polls used to open a fresh unix socket per park, and during
-  # a scroll the parked poll wakes and re-parks tens of times a second --
-  # tens of connections a second churning the process's lowest fd numbers,
-  # which is precisely the regime that tickles the macOS fd-reuse race the
-  # pinned connection was built to end (see the note above it). Every reply
-  # that race dropped knocked the page out of its streaming chain into
-  # retry cadence: the intermittent multi-second hangs that survived four
-  # redesigns of wheel pacing, because they were never about the wheel.
-  # One page parks one poll at a time, so one standing connection serves;
-  # a second concurrent park -- another tab -- falls back to a fresh
-  # connection rather than queueing 20 seconds behind the first.
   (var parked-conn nil)
   (var parked-busy false)
 
@@ -198,69 +79,29 @@
               (set parked-conn nil))
             reply)))))
 
-  # Start the supervisor so that it outlives this process.
-  #
-  # VIA `sh -c '... &'`, NOT `os/spawn` WITH `:d`. Janet's `:d` flag does not
-  # mean what the name suggests here: the runtime still tracks the child for
-  # reaping, and the spawning process WEDGES rather than continuing --
-  # measured, not assumed. `os/spawn`'s own documentation is explicit that
-  # the caller must wait on the process, which is precisely what a supervisor
-  # outliving us cannot allow.
-  #
-  # So the shell forks and exits, orphaning the supervisor onto init. Nothing
-  # waits on it and nothing needs to: it is ended by the `shutdown` op on
-  # ctrl-c, not by a signal that happens to reach it.
-  #
-  # Output goes to /dev/null because there is no terminal to write to -- the
-  # supervisor's errors are its own, and a stray write to a closed stdout
-  # from an orphan is a way to die confusingly.
   (defn spawn-detached []
-    (def quoted (string/join (map |(string "'" (string/replace-all "'" "'\\''" $) "'")
-                                  argv)
-                             " "))
-    # The descriptor closes matter as much as the redirects. A forked child
-    # inherits every open fd, INCLUDING THE SERVER'S LISTENING SOCKET -- and
-    # a supervisor holding that fd keeps the port undead after the server
-    # exits: the kernel still accepts connections into the backlog of a
-    # socket nobody will ever read, so clients hang instead of being refused,
-    # and the next server's is-it-free probe reads "taken". Ports 3-9 cover
-    # everything the server has open at first-start time; the supervisor
-    # opens its own fds after exec.
-    # The supervisor's stderr normally goes nowhere -- it is an orphan with
-    # no terminal. VISUALIZE_SUPERVISOR_LOG names a file to keep it instead,
-    # which is how the drain race was finally caught in the act.
     (def errlog (or (os/getenv "VISUALIZE_SUPERVISOR_LOG") "/dev/null"))
     (os/execute ["/bin/sh" "-c"
-                 (string quoted " >/dev/null 2>" errlog
-                         " 3>&- 4>&- 5>&- 6>&- 7>&- 8>&- 9>&- &")]
-                :p))
+      ``supervisor_log=$1
+shift
+(
+  for supervisor_fd in /dev/fd/*; do
+    supervisor_fd=${supervisor_fd##*/}
+    case "$supervisor_fd" in
+      0|1|2|*[!0-9]*) ;;
+      *) eval "exec $supervisor_fd>&-" ;;
+    esac
+  done
+  exec "$@"
+) </dev/null >/dev/null 2>"$supervisor_log" &``
+      "visualize-supervisor" errlog ;argv] :p))
 
-  # A connection to a running supervisor, starting one if there is none.
-  #
-  # THREE CASES, and the third is the one that bites. A live socket connects.
-  # No socket file at all means nothing has run yet. A socket file that
-  # REFUSES the connection is the leftover of a crashed supervisor -- closing
-  # a unix socket leaves its file on disk, and binding over one fails rather
-  # than replacing it, so the file has to go before a new supervisor can
-  # start.
   (defn ensure []
     (or (connect)
         (do
           (when (os/stat path :mode) (try (os/rm path) ([_] nil)))
           (spawn-detached)
-          # Spawn is not listen: the child has to get as far as binding
-          # before a connection can land. Retried on a short timer rather
-          # than slept on once, so the common case costs a few milliseconds
-          # and a slow start still succeeds.
-          #
-          # THIRTY TRIES, WHICH IS SIX HUNDRED MILLISECONDS. A supervisor
-          # binds on the FIRST try -- measured, repeatedly -- so this budget
-          # is not for the ordinary case at all; it is what gets waited out
-          # when the spawn FAILED and nothing is ever going to answer. Every
-          # try past the first is latency the caller pays to be told no, so
-          # the number is a margin over the worst honest start rather than
-          # room for a hang: thirty times the observed cost, and a failure
-          # reported in well under a second instead of two.
+
           (var found nil)
           (for _ 0 30
             (unless found
@@ -268,20 +109,6 @@
               (set found (connect))))
           found)))
 
-  # Send one request and read the reply, or nil if the supervisor is gone.
-  #
-  # Every failure lands here as nil rather than an error: the supervisor
-  # dying should degrade the terminal panel, not take down the request that
-  # noticed.
-  #
-  # A dead pinned connection gets ONE retry on a fresh one -- the supervisor
-  # may simply have restarted between requests -- and a failure after that
-  # answers nil like any other.
-  # The server-side halves of every exchange's timing: how long the turn
-  # was waited for, how long the supervisor took to answer. The SPLIT is
-  # the diagnostic -- during the hang hunt, "turn-wait=10.00 talk=0.00"
-  # against "turn-wait=0.00 talk=10.00" was what separated "queued behind
-  # a wedged exchange" from "the wedged exchange itself".
   (def ask-stats @{})
   (defn- note-ask [op turn talk]
     (def entry (or (get ask-stats op)
@@ -297,7 +124,7 @@
 
   (defn ask [message &opt start?]
     (def asked (os/clock :monotonic))
-    (take-turn)
+    (trace/measure "client-queue" (take-turn))
     (def turned (os/clock :monotonic))
     (defer (do (give-turn)
                (note-ask (string (get message "op" "?"))
@@ -305,55 +132,30 @@
       (when (nil? pinned)
         (set pinned (if start? (ensure) (connect))))
       (when pinned
-        (def reply (try (talk pinned message) ([_] nil)))
+        (def reply (try (trace/measure "client-talk" (talk pinned message)) ([_] nil)))
         (if reply
           reply
           (do
             (drop-pinned)
-            (set pinned (if start? (ensure) (connect)))
+            (unless (= (get message "op") "input")
+              (set pinned (if start? (ensure) (connect))))
             (when pinned
-              (def again (try (talk pinned message) ([_] nil)))
+              (def again (try (trace/measure "client-talk" (talk pinned message)) ([_] nil)))
               (unless again (drop-pinned))
               again))))))
 
-  # `start` is the only op that may bring a supervisor into being. Everything
-  # else talks to one that is already there -- polling a terminal nobody
-  # started should answer "not running", not silently spawn a process.
-  # A LINE AS A TABLE, for the callers that read fields rather than relay.
-  # Their replies are tiny -- state, a keystroke's echo -- so decoding them
-  # costs nothing; the megabyte case is the poll, which stays a line.
   (defn asked [message &opt start?]
     (when-let [line (ask message start?)] (json/decode line)))
 
-  # ONE FETCH FOR BOTH POLL METHODS. `:poll` parses the reply into the shape
-  # its callers expect; `:raw-poll` relays the supervisor's own line. They
-  # differ only in what they do with the answer, so the asking -- including
-  # the parking rules below, which are the delicate part -- lives here once.
-  (defn fetch-poll [at &opt generation wait]
+  (defn fetch-poll [at &opt generation wait limit encoding]
     (def message @{"op" "since" "at" at})
     (when generation (put message "generation" generation))
+    (when limit (put message "limit" limit))
+    (when encoding (put message "encoding" encoding))
     (if (and wait (pos? wait))
-      # A waiting poll must not hold the pinned connection's turn: input and
-      # resize share it, and a keystroke queued behind a 20-second park is a
-      # frozen keyboard. So ask the cheap question over the pinned path first
-      # -- during a streaming burst there is already output, and this answers
-      # without opening anything -- and only a quiet session parks, on a
-      # PRIVATE connection whose lifetime is the park. That keeps connection
-      # churn to one per quiet period rather than the one-per-poll that used
-      # to feed the macOS fd race.
+
       (let [quick (ask message)]
-        # Park only on a quiet, LIVE session: text in hand answers now, and a
-        # dead session's "exited" must reach the page promptly, not after a
-        # park that can learn nothing.
-        #
-        # DECIDED BY BYTE PROBES, NOT BY DECODING. `quick` is the
-        # supervisor's own line, and decoding a streaming burst's megabyte
-        # just to ask "is the text empty" cost 86ms of the shared thread.
-        # The encoder is this repository's own -- sorted keys, no spaces --
-        # so an empty text is exactly `"text":""` and a live session exactly
-        # `"running":true`, and probing for those bytes is the whole
-        # question. See `escape` in json.janet for the writer these bytes
-        # come from.
+
         (if (or (nil? quick)
                 (not (string/find `"text":""` quick))
                 (not (string/find `"running":true` quick)))
@@ -363,7 +165,7 @@
             (or (park-talk message (+ 10 (/ wait 1000))) quick))))
       (ask message)))
 
-  {# This side's ask timings, and the supervisor's own table over the wire.
+  {
    :stats (fn [_] ask-stats)
    :remote-stats (fn [_] (asked {"op" "stats"}))
 
@@ -378,27 +180,19 @@
    :stop
    (fn [_] (client-state (asked {"op" "stop"})))
 
-   # With `at`, the reply carries the ECHO -- everything the program printed
-   # in response, in the same round trip. That is what makes typing feel
-   # immediate: polling for the effect of your own keystroke costs a second
-   # round trip even when the delay between polls is zero, because the page
-   # has to wait for this request to return before it can ask what happened.
-   # Without `at` it answers nil as it always did.
-   # A KEYSTROKE'S REPLY AS THE SUPERVISOR WROTE IT, for the route -- the
-   # same relay the poll does, and for the same reason: during a streaming
-   # burst the echo reply carries everything printed since `at`, and decoding
-   # a megabyte to re-encode it is the shared thread's time. "null" when
-   # nothing answered, which the page already reads as "no echo came back".
    :raw-send
-   (fn [_ text &opt at quiet]
+   (fn [_ text &opt at quiet generation]
      (def message @{"op" "input" "text" text})
+     (when trace/enabled (put message "_trace" true))
      (when at (put message "at" at))
      (when quiet (put message "quiet" true))
+     (when generation (put message "generation" generation))
      (or (ask message) "null"))
 
    :send
    (fn [_ text &opt at quiet]
      (def message @{"op" "input" "text" text})
+     (when trace/enabled (put message "_trace" true))
      (when at (put message "at" at))
      (when quiet (put message "quiet" true))
      (def reply (asked message))
@@ -422,9 +216,6 @@
    :state
    (fn [_] (client-state (asked {"op" "state"})))
 
-   # Everything printed since chunk `at`, as [text next]. With no supervisor
-   # running this is ["" at] -- nothing new rather than an error, which is
-   # exactly what a page polling an unstarted terminal should see.
    :since
    (fn [_ at]
      (def reply (asked {"op" "since" "at" at}))
@@ -432,45 +223,12 @@
        [(or (get reply "text") "") (or (get reply "at") at)]
        ["" at]))
 
-   # The whole answer to one poll, in a single round trip. Kept as one call
-   # rather than `since` plus `state` because it is the hot path -- the page
-   # asks several times a second -- and two round trips per poll is twice the
-   # syscalls for one answer.
-   #
-   # `generation` is the session the page's `at` belongs to. The supervisor
-   # replays from the beginning when it does not match the running session,
-   # which is what stops a page from sitting blank in front of a restarted
-   # agent.
-   # THE POLL REPLY AS THE SUPERVISOR WROTE IT, or nil when it cannot be used
-   # as it stands. A poll is mostly terminal output, and the server's only use
-   # for it is to send that to the browser as JSON -- which the supervisor has
-   # already produced. Relaying its line skips a decode and an encode on the
-   # shared thread: 113ms per megabyte that every keystroke was waiting behind.
-   #
-   # ONLY WHEN IT IS ALREADY THE RIGHT SHAPE. `:poll` fills in a default for
-   # every field, which is what lets an OLDER SUPERVISOR keep working -- so
-   # the line is relayed only when the supervisor sent all of them itself.
-   # One missing field and this answers nil, and the caller falls back to the
-   # parsed path, which has not changed.
-   # THE SUPERVISOR'S OWN LINE, for the route to send as it stands. A poll
-   # reply is mostly terminal output, and the server's only use for it is to
-   # write it to the browser as JSON -- which the supervisor already did.
-   # Decoding it here and encoding it again there cost 142ms per megabyte on
-   # the one thread every keystroke waits behind.
-   #
-   # Nil when there is no line to relay: an unreachable supervisor, which
-   # `:poll` answers for with a table this side invents. There is no version
-   # check, because the supervisor is this repository -- it is started by the
-   # server that talks to it, from the same source tree, so a reply in an
-   # older shape is not a thing that happens.
    :raw-poll
-   (fn [self at &opt generation wait]
-     (def line (fetch-poll at generation wait))
+   (fn [self at &opt generation wait limit encoding]
+     (def line (fetch-poll at generation wait limit encoding))
      (if line
        line
-       # NOTHING ANSWERED, so this side writes the reply -- the same table
-       # `:poll` invents, encoded here so the route has one kind of thing to
-       # send. See the note there on why unreachable is not dead.
+
        (json/encode
          {"text" "" "at" at "from" -1 "running" false "generation" 0
           "rows" 24 "cols" 80 "trimmed" false "waited" false
@@ -481,34 +239,12 @@
                        true)
                      true)})))
 
-   # THE PARSED REPLY, for the callers that read fields rather than relay the
-   # line: `dump` and the tests. The route uses `:raw-poll`.
-   #
-   # NO PER-FIELD DEFAULTS. They existed to tolerate a supervisor older than
-   # the field being read, and there is no such thing: the supervisor is this
-   # repository, started by the server that talks to it, from the same source
-   # tree. What is left is the unreachable case, which is not an old reply
-   # but no reply.
    :poll
    (fn [_ at &opt generation wait]
      (def line (fetch-poll at generation wait))
      (if line
        (merge (json/decode line) {"reachable" true})
-       # UNREACHABLE IS NOT DEAD. This used to say running=false,
-       # generation=0 -- and the page, taking it as truth, blanked its screen
-       # for the generation change, showed "exited", and stopped polling. All
-       # of that for one supervisor blip: a deadline expiring while the
-       # machine woke from sleep. The flag lets the page treat this as the
-       # failed request it is, and keep both its screen and its session.
-       #
-       # `absent` separates "safe to start a fresh session" from "wait, one
-       # is coming back". No socket file: nothing ever started, or a clean
-       # shutdown -- start away. File present: probe it. A unix connect with
-       # no listener is REFUSED instantly, which means the supervisor is dead
-       # and the file is a corpse a crash left behind -- also safe, since
-       # ensure clears it. Only accepted-but-unresponsive is a genuine blip
-       # (a machine mid-wake), where starting would shoot the session about
-       # to return.
+
        {"text" "" "at" at "running" false "generation" 0 "rows" 24 "cols" 80
         "reachable" false
         "absent" (if (and path (os/stat path :mode))
@@ -517,51 +253,28 @@
                      true)
                    true)}))
 
-   # End the supervisor, killing its session with it. CALLED ON CTRL-C AND
-   # NOWHERE ELSE. Quitting visualize takes the terminal down exactly as it
-   # did when one process owned everything; a server that is merely
-   # restarting because a file changed must NOT call this -- it closes the
-   # socket and says nothing, which is what leaves the agent running.
    :shutdown
    (fn [_]
      (ask {"op" "shutdown"})
-     # The supervisor is gone; a conn pinned to it would cost the next caller
-     # a dead-connection retry for nothing. The park connection likewise.
+
      (drop-pinned)
      (when parked-conn
        (try (:close parked-conn) ([_] nil))
        (set parked-conn nil))
      nil)})
 
-# -- the debugging equipment ---------------------------------------------------
-# The hang hunt's tools, kept where the next investigator -- human or model --
-# will find them: at the repl, named in its connection banner (see
-# `equipment` below, which core.janet hands to dev/serve).
-#
-# THESE LIVE HERE, NOT IN dev.janet, because their subject is the session and
-# dev.janet is about the repl -- a socket, an evaluator, a debugger, hot
-# reload, none of it terminal-specific. The repl reaches these the way it
-# reaches everything else: it evaluates in an env whose proto is the server's
-# own, so `(term/stats)` needs no import and dev.janet stays liftable
-# into a program that has no terminal at all.
-
 (def- here (os/realpath (string (dyn :current-file) "/../../..")))
 
-# The panes this server made, by name, so the repl can ask about one without
-# the caller having to hold its client. Registered by core as it builds them;
-# a plain table because a person at a prompt should be able to see what is
-# there with (keys term/panes).
 (def panes @{})
 
 (defn register
-  ``Give a client a name the repl can use: (stats "harness"), (dump "repl").
-  Returns the client, so a caller can register and bind in one expression.``
+
   [name client]
   (put panes name client)
   client)
 
 (defn- named
-  "The client called `name`, or the only one when there is just one."
+
   [name]
   (or (get panes name)
       (if (and (nil? name) (= 1 (length panes)))
@@ -569,10 +282,7 @@
         (errorf "no pane named %v -- try one of %j" name (keys panes)))))
 
 (defn stats
-  ``Print both sides' op timings for one pane: the server's asks (turn-wait
-  vs talk -- the split that separates "queued behind a wedged exchange" from
-  "the wedged exchange itself") and the host's handle table, plus its queue
-  depths. Numbers survive since each process started.``
+
   [&opt name]
   (def client (named name))
   (print "server asks (op: count, worst turn-wait, worst talk):")
@@ -596,10 +306,7 @@
   nil)
 
 (defn dump
-  ``Write one pane's whole backlog -- the recording of everything the program
-  drew -- to `path`, and say how to replay it. This is the capture half of
-  the forensic loop that convicted the wrap and alternate-screen bugs;
-  `replay` is the other half.``
+
   [&opt name path]
   (def client (named name))
   (default path (string "/tmp/visualize-dump-" (os/time) ".bin"))
@@ -614,21 +321,14 @@
   path)
 
 (defn replay
-  ``Run a capture through the emulator headlessly and report suspects --
-  escape-like text on the final screen, the signature of a torn stream or a
-  parser gap. Geometry defaults to the named pane's, since a recording
-  replayed at the wrong size scatters absolute cursor positions.``
+
   [name path &opt rows cols]
-  # `state`, not `poll`: the geometry is two integers, and poll would drag
-  # the entire backlog over the socket to deliver them.
+
   (unless (and rows cols)
     (def now (:state (named name)))
     (default rows (get now :rows 24))
     (default cols (get now :cols 80)))
-  # Spawned with a pipe rather than executed: the child's stdout is the
-  # PROCESS's stdout -- the server's log -- while the repl reader is on the
-  # other end of a socket. Read and re-print, so the verdict lands where the
-  # question was asked.
+
   (def proc (os/spawn ["node" (string here "/tools/replay.mjs") path
                        "--rows" (string rows) "--cols" (string cols)]
                       :p {:out :pipe :err :pipe}))
@@ -640,8 +340,7 @@
   nil)
 
 (def equipment
-  ``The banner lines describing the above, handed to dev/serve by core.janet
-  so the repl advertises the terminal's tools without knowing what they are.``
+
   (string "panes:    (term/stats \"harness\") op timings both sides\n"
           "          (term/dump \"harness\") capture it · (term/replay\n"
           "          \"harness\" path) re-render a capture · term/panes\n"))

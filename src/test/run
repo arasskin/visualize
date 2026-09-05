@@ -1,17 +1,7 @@
 #!/bin/sh
-#
-# Run the test suite against the VENDORED runtime.
-#
-#     ./src/test/run
-#
-# Through bin/janet rather than whatever `janet` happens to be on PATH, so the
-# suite tests the interpreter the tool will actually use. A green run against
-# a different Janet than the one that ships here would not mean much.
 
 set -e
 
-# Two levels up: this script lives in src/test/, and build and the runtime
-# are siblings of src/ rather than of this file.
 here=$(cd "$(dirname "$0")/../.." && pwd)
 
 "$here/build"

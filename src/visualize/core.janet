@@ -1,44 +1,5 @@
 #!/usr/bin/env janet
-#
-# visualize -- a dependency graph you draw by editing a file.
-#
-#     janet src/core.janet [directory]
-#
-# Opens a browser on the first free port at or above 8770. How the graph is
-# drawn lives in `visualize.conf` in the directory being scanned -- a few
-# s-expressions, edited through the page itself:
-#
-#     (hide ~.Tests)          drop it, and every edge touching it
-#     ;;(hide ~.Tests)        comment it out to put it back
-#     (hide ~.Clip.)          ...trailing dot: its contents, not itself
-#     (box ~.Clip)            draw a box round its members, next palette colour
-#     (box ~.Shared red)      ...or a colour you name
-#     (only ~)                narrow to our own files -- the everyday setting
-#     (lines)                 write each file's line count on it
-#
-# `~` IS THE PROJECT, the way a shell expands ~ to a home directory. Every
-# other name is literal, and a name from outside the tree carries the `?.`
-# the drawing shows it with -- (box ?.SwiftUI), (hide ?.WebKit) -- so that
-# one name means one thing wherever it is written. See `matches?` in
-# select.janet.
-#
-# The config is real Janet, so it is not limited to the list above:
-#
-#     (each n ["Core" "UI" "Net"] (box (string "~." n)))
-#
-# The page runs that file on load, so the view you left is the view you return
-# to. Every button press is a real edit to the real file.
 
-# DEV MODE IS THE DEFAULT, DECIDED BEFORE ANYTHING COMPILES. Every server run
-# hosts a repl inside itself (see src/dev.janet) and turns on `*redef*`,
-# which is a property of code generation, not of runtime: set after the
-# imports below, the engine would already be compiled to constants and a repl
-# redefinition would silently change nothing. `--no-dev` opts out; `--dev` is
-# accepted for old habits and changes nothing.
-#
-# The SUPERVISOR is not a dev surface: it hosts no repl, it owns the agent's
-# pty, and it was never compiled under *redef* before -- the server spawned it
-# without the flag. Excluding it here preserves exactly that.
 (def dev?
   (let [argv (or (dyn *args*) [])]
     (not (or (index-of "--no-dev" argv)
@@ -47,32 +8,26 @@
 (when dev? (put root-env *redef* true))
 
 (import ./http)
+(import ./trace)
 (import ./json)
-# The first app built on this core. See the note at the top of graph.janet:
-# it is a consumer, not a component -- delete it and the server still runs.
+(import ./browser)
+
 (import ./config)
-(import ./graph)
+(import ./worker)
+(import ./websocket)
+(import ./term/stream :as stream)
 (import ./scan)
-# The terminal pane: a client here, and a host in another process. The pty's
-# master fd belongs to whoever called forkpty and cannot be handed on, so the
-# session has to outlive this server rather than live in it -- see
-# ./term/host.janet. This process only ever speaks to it over a socket.
+
 (import ./term/client :as term)
 (import ./term/host :as term-host)
 
-# The env the dev repl evaluates in protos to THIS one, captured at load so
-# a connection sees the same names this file sees -- every module above,
-# prefixed, and everything defined below.
 (def- this-env (curenv))
 
-# Where to start looking, not where it will land. `serve` walks upward to the
-# first free port -- another copy of this tool is often already up in another
-# window, and "address already in use" leaves you to go find out who has it.
 (def default-port 8770)
 (def port-tries 20)
 
 (defn- query
-  ``The query string of a path, as a table. Enough for `?k=secret`.``
+
   [path]
   (def out @{})
   (when-let [at (string/find "?" path)]
@@ -85,204 +40,66 @@
   (if-let [at (string/find "?" path)] (string/slice path 0 at) path))
 
 (defn- make-token
-  ``A secret for this run, so only this page can drive the terminal.
 
-  WHY THIS EXISTS. Everything else visualize serves is derived from files and
-  the worst a stray request can do is redraw a graph. The harness endpoints
-  run a program, and 127.0.0.1 IS NOT A BOUNDARY: any page in any tab can POST
-  to a localhost port. Without a secret, a website you happen to be visiting
-  could type into your agent.
-
-  From `os/cryptorand` because a predictable token is not a token.``
   []
   (string/join (map |(string/format "%02x" $) (os/cryptorand 24)) ""))
 
-# `/pane/<id>/<op>` split into its two halves, or nil when the path is not
-# one -- which is what the route match tests.
-#
-# THE ID IS CONSTRAINED BECAUSE IT BECOMES A FILENAME. It is passed to
-# `socket-for` as a tag and lands in $TMPDIR, so `..` or a slash in it would
-# be a path this server was asked to bind rather than a name. Lowercase
-# letters, digits and dashes only: everything a pane needs to be called and
-# nothing that can leave the directory.
 (defn- pane-route [path]
   (peg/match ~(* "/pane/" (<- (some (+ (range "az") (range "09") "-"))) "/"
                  (<- (some (range "az"))) -1)
              path))
 
 (defn- socket-for
-  ``Where this project's supervisor listens.
 
-  Keyed to the root so two copies of visualize, pointed at two directories, do
-  not end up sharing one terminal. The name is derived rather than random: a
-  restarting server has to find the supervisor its predecessor started, and it
-  has nothing to go on but the path it was given.
-
-  HASHED RATHER THAN SPELLED OUT, because a sockaddr_un holds about 104 bytes
-  on this platform and $TMPDIR alone is half of that. A deep project path
-  would overflow it, and the failure is a bind error rather than a truncation
-  you could notice.``
   [root &opt tag]
   (default tag ".sock")
   (def base (string/trimr (or (os/getenv "TMPDIR") "/tmp") "/"))
-  # A cheap, stable digest: the path never leaves this machine, so this is
-  # only asking for "different directories, different names".
-  #
-  # `%` RATHER THAN `band`, and 31 bits rather than 32. Janet's bitwise ops
-  # take 32-bit SIGNED operands and `* 33` leaves that range on the third
-  # character of any real path -- so masking afterwards is already too late,
-  # and masking with 0xffffffff would then hand `%x` a number it also refuses.
-  # A modulo applies to the arithmetic value before either limit is reached.
-  # Dropping the top bit costs nothing: this is a name, not a checksum.
+
   (var digest 5381)
   (each byte (string/trimr root "/")
     (set digest (% (+ (* digest 33) byte) 0x7fffffff)))
   (string base "/visualize-" (string/format "%08x" digest) tag))
 
 (defn main [& args]
-  # ONE PROGRAM, TWO ROLES. Run plainly, this is the web server. Run with
-  # --supervise it is the process that owns a terminal, spawned by the
-  # server's own client half and outliving it -- see ./term/host.janet for
-  # why the pty cannot live here. Both roles from one entry point means one
-  # program to install, one to spawn, and one place that knows how the
-  # pieces fit.
-  #
-  # BEFORE the flag filtering below, and before anything reads a directory:
-  # this branch never returns.
+
   (when (= (get args 1) "--supervise")
     (def path (or (get args 2) (error "usage: visualize --supervise <socket-path>")))
     (term-host/host path)
     (os/exit 0))
 
-  # The dev flags were consumed at load (they had to be -- see the top of
-  # this file); here they just must not be mistaken for the directory.
   (def args (filter |(not (index-of $ ["--dev" "--no-dev"])) args))
   (def root (os/realpath (or (get args 1) (os/cwd))))
-  # THE PROJECT BEING LOOKED AT, which is not this tool. The last component
-  # of the scanned path is what a person calls the thing on screen, and with
-  # several visualize tabs open it is the only thing telling them apart.
+
   (def project
     (let [parts (filter |(not (empty? $)) (string/split "/" root))]
       (if (empty? parts) "/" (last parts))))
-  # The REPO root, two levels up: this file lives in visualize/, and bin/,
-  # web/ and the parsers are siblings of that directory, not of this file.
+
   (def here (os/realpath (string (dyn :current-file) "/../..")))
   (def web-dir (string here "/web"))
-  # Vendored third-party code, served beside our own but kept apart from it
-  # on disk -- see the static route below, and tools/vendor-wterm which puts
-  # it here. `here` is src/, so this climbs out to the repo root.
+
   (def vendor-dir (string here "/../external-src/wterm"))
   (def static-roots [web-dir vendor-dir])
   (def config-path (string root "/" config/config-name))
-  # THE SOURCE GENERATION. Bumped whenever the watcher sees the tree change;
-  # the page waits on it and redraws, which is what replaced the Regenerate
-  # button. A number rather than a flag so a page that missed one edit still
-  # knows it is behind.
+
   (var source-generation 0)
 
-  # THE SCANNED TREE, held here because this is what knows when it is stale.
-  # The watcher below tells this loop the source moved, and the same place
-  # that hears it is the place that drops the tree -- rather than a renderer
-  # holding a cache that something else has to remember to invalidate.
-  #
-  # Scanned on demand rather than at startup, so a first draw pays for it and
-  # a re-scan is just forgetting.
-  #
-  # CHECKED PER DRAW, not only when the watcher fires. The watcher polls, so
-  # between an edit and the tick that notices it there is a window -- and a
-  # config save landing in that window used to draw the STALE tree. That drew
-  # the edited file as unchanged and, worse, recorded it as seen: the flash
-  # then arrived on whatever redraw came after the tick, which is how a file
-  # nobody was working on appeared to flash out of nowhere.
-  #
-  # The fingerprint is the cheap half of a scan (a stat per file), so asking
-  # it per draw costs a few milliseconds and removes the window entirely.
-  (var tree nil)
-  (var tree-print nil)
-  # WHAT THE CONFIG HAS HIDDEN, as top-level directory names. A directory
-  # the drawing does not show cannot change the drawing, so the scan skips
-  # it -- and on a tree whose hidden part is most of the tree, that is most
-  # of the work saved.
-  #
-  # TOP LEVEL ONLY, and whole names only: `(hide archive)` prunes
-  # `archive/`, while `(hide src.test)` does not prune anything, because
-  # pruning `src` would take the rest of it with it. The cheap, safe half of
-  # the idea is where nearly all the saving is anyway.
-  #
-  # READ FROM THE FILE rather than from a running config, because this is
-  # what decides whether the config can be read at all -- and a hide that
-  # has just been removed has to put its directory back, which asking each
-  # time is what gives.
-  (defn hidden-dirs []
-    (def out @[])
-    (each line (try (config/read-config config-path) ([_] []))
-      (each hit (or (peg/match ~(any (+ (* "(hide" (some (set " \t"))
-                                           (<- (some (if-not (+ (set " \t()") -1) 1))))
-                                        1))
-                               (string line)) [])
-        (def name (string/trim hit "./"))
-        (unless (or (empty? name) (string/find "." name))
-          (when (= :directory (os/stat (string root "/" name) :mode))
-            (array/push out name)))))
-    out)
+  (def graph-worker (worker/start root (fn [value] (set source-generation value))))
 
-  (defn scanned []
-    (def now (scan/fingerprint root false (hidden-dirs)))
-    (when (or (nil? tree) (not= now tree-print))
-      (set tree (scan/scan root nil (hidden-dirs)))
-      (set tree-print now))
-    tree)
-  (defn rescan [] (set tree nil))
-
-  # Faults go to this project's state directory from here on, so a crash
-  # that takes the server down is still readable afterwards.
   (def token (make-token))
-  # When this run began. Faults are counted from here, so the page's number
-  # means "since the server started" rather than "ever".
+
   (def page-born (os/time))
 
-  # THE TERMINAL LIVES IN ANOTHER PROCESS, so this one can be restarted
-  # without killing what is running in it -- the pty's master fd belongs to
-  # whoever called forkpty and cannot be handed on. This client knows where
-  # to look for a host and how to start one; it never holds the fd itself.
-  #
-  # The socket path is computed ONCE and passed twice: the address we look on
-  # and the address we tell a new host to bind have to be the same string,
-  # and two calls is two chances for that to stop being true.
-  # `here` is src/, which is what web-dir wants; the runtime and this file
-  # are named from the REPO root, one level further up. Spelled out rather
-  # than reusing `here` with a "/.." glued on, because the two are different
-  # anchors and gluing hid that -- the first version spawned
-  # src/external-src/janet/janet and the pane just never started.
   (def repo (os/realpath (string here "/..")))
 
-  # A CLIENT PER PANE, MADE ON DEMAND. Panes are numbered, and a number is
-  # all the page sends: the first request naming one builds its client and
-  # its socket, and every request after finds the same one. Nothing is
-  # started here, because a client that has never been asked for anything
-  # has no host behind it -- the pane the page opens is what spawns one.
-  #
-  # KEYED BY THE SAME NUMBER ON BOTH SIDES. The socket tag is the pane's
-  # number, so pane 2 always finds pane 2's host across a server restart --
-  # which is the property the whole split exists for.
   (def panes @{})
-  # Where each pane's socket is, by id, so the file can be rewritten from
-  # what is open right now rather than from what was opened once.
+
   (def pane-sockets @{})
 
   (defn- remember-panes []
-    # IN THE ORDER THEY WERE OPENED, which is the order the ids sort in for
-    # the numbered ones and puts `harness` first because it is made first.
-    # A stable order means the file does not churn on every pane.
+
     (def pairs (seq [id :in (sorted (keys pane-sockets))]
                  [id (get pane-sockets id)]))
-    (def lines (config/read-config config-path))
-    # Labels are read back and rewritten so that remembering a socket does
-    # not drop the name someone gave the pane.
-    (def named (config/labels lines))
-    (config/write-config
-      config-path
-      (config/remember-labels (config/remember-terminals lines pairs) named)))
+    (:call graph-worker :notes pairs))
 
   (defn pane-for [id]
     (or (get panes id)
@@ -294,8 +111,7 @@
                         "--supervise" socket])]
           (put panes id client)
           (put pane-sockets id socket)
-          # WRITTEN DOWN AS SOON AS IT EXISTS. A pane recorded only once it
-          # is running is a pane lost by a crash during the start.
+
           (remember-panes)
           client)))
 
@@ -303,13 +119,7 @@
     (put panes id nil)
     (put pane-sockets id nil)
     (remember-panes))
-  # WHAT THE LAST RUN LEFT BEHIND. Each of these was a pane; its supervisor
-  # may still be alive with a session in it, or it may be a name in a file
-  # and a socket nobody is listening on.
-  #
-  # ASKED, NOT ASSUMED. A unix connect to a socket with no listener is
-  # REFUSED instantly -- there is no timeout to wait out -- so this costs
-  # nothing and answers exactly the question: is anyone there.
+
   (defn- answers? [socket]
     (and (os/stat socket :mode)
          (if-let [probe (try (net/connect :unix socket) ([_] nil))]
@@ -317,44 +127,26 @@
            false)))
 
   (def recovered @[])
-  (each [id socket] (config/terminals (config/read-config config-path))
+  (each [id socket] (config/terminals (:call graph-worker :read))
     (if (answers? socket)
       (do
-        # Rebuilt through `pane-for`, so it is an ordinary pane from here on
-        # -- there is no such thing as a recovered pane after this line.
+
         (pane-for id)
         (array/push recovered id))
-      # A CORPSE. The supervisor is gone and the file is a name for nothing;
-      # the socket file goes with it, since leaving it would make the next
-      # `answers?` do the same work to reach the same conclusion.
+
       (try (os/rm socket) ([_] nil))))
-  # Written back either way: the ones that answered are still open, and the
-  # ones that did not are now out of the file.
+
   (remember-panes)
 
-  # The pane the page opens by default. Numbered like the rest so nothing
-  # special-cases it, and made eagerly because the page's markup names it.
   (def pane-client (pane-for "harness"))
 
-  # WHAT THE TERMINAL RUNS. An environment variable rather than a config verb
-  # for now: the config's verb table describes fixed-arity calls over graph
-  # prefixes, and a command line is neither -- `(harness claude --flag x)` is
-  # variadic free text, which the grammar has no kind for. Adding one is a
-  # config-language decision, not a terminal one, so this stays out of the
-  # way until that is made. VISUALIZE_HARNESS is read per request, so
-  # changing it and pressing start does the new thing.
   (defn harness-argv []
     (def named (os/getenv "VISUALIZE_HARNESS"))
     (if (and named (not (empty? named)))
       (string/split " " named)
-      # A shell is the honest default: it needs nothing installed, and it
-      # proves the pane works before anything is pointed at it.
-      [(or (os/getenv "SHELL") "/bin/sh") "-i"]))
 
-  # A DIRECTORY NAME IS NOT MARKUP. Both the title and the favicon carry the
-  # project's name into the page's head, and a directory may be called
-  # anything at all -- `<script>` is a legal name on every filesystem here.
-  # Escaped once, in one place, so the two holes cannot disagree about it.
+      [(or (os/getenv "SHELL") "/bin/sh") "-l" "-i"]))
+
   (defn escaped [text]
     (->> text
          (string/replace-all "&" "&amp;")
@@ -363,21 +155,11 @@
          (string/replace-all "\"" "&quot;")
          (string/replace-all "'" "&#39;")))
 
-  # THE TAB'S PICTURE: the project's first letter, drawn rather than fetched.
-  #
-  # A data URI because everything else the page loads is served from web/ and
-  # this is not a file -- it depends on which directory the server was pointed
-  # at, so there is nothing to put on disk. SVG because a letter at 16px has
-  # to be drawn at whatever size the browser asks for, and a bitmap picked one.
-  #
-  # The colour is the graph's own ink, so the tab matches the drawing.
   (def favicon
     (let [safe (escaped (string/ascii-upper (string/slice project 0 1)))]
       (string
         "data:image/svg+xml,"
-        # Percent-encoded by hand: only the characters a data URI actually
-        # cannot carry. Leaving the rest legible keeps this readable in a
-        # view-source, which is where anyone will meet it.
+
         (string/replace-all
           "\"" "%22"
           (string/replace-all
@@ -392,16 +174,10 @@
                 " fill=\"#fdfdfb\">" safe "</text>"
                 "</svg>")))))))
 
+  (var serving-port nil)
+
   (defn permitted?
-    ``May this request drive the terminal?
 
-    Two checks, because they fail differently. The TOKEN proves the request
-    came from the page this run served -- another tab guessing the port does
-    not have it. The ORIGIN check stops a cross-site POST from a page that
-    somehow learned the token, and rejects anything not from this server.
-
-    A missing Origin is allowed: `curl` sends none, and the token alone is
-    what protects a request that no browser made.``
     [request]
     (def given (or ((query (request :path)) "k")
                    ((query (or (request :body) "")) "k")))
@@ -409,246 +185,106 @@
     (def origin (request :origin))
     (def same-origin
       (or (not origin)
-          (string/has-prefix? "http://127.0.0.1:" origin)
-          (string/has-prefix? "http://localhost:" origin)))
+          (= (string "http://127.0.0.1:" serving-port) origin)
+          (= (string "http://localhost:" serving-port) origin)))
     (and sent-token same-origin))
 
-  # The app's render, and the values only the CORE knows, kept apart: the
-  # graph does not reach into the server for a token, and the server does
-  # not know what a graph is.
-  # WHAT THE EDITOR IS SHOWN, and where its complaints point.
-  #
-  # THE EDITOR IS SHOWN THE CONFIG, not visualize's notes about itself. They
-  # are not lines anyone wrote and there is nothing to do to one; the edit
-  # endpoint puts them back afterwards, so leaving them out here is the whole
-  # of hiding them.
-  #
-  # The problems are keyed by line NUMBER, so they are renumbered against the
-  # shorter list -- a complaint about line four pointing at line three is
-  # worse than no complaint at all.
-  #
-  # BOTH PATHS USE THIS. The page load stripped notes and the edit reply did
-  # not, so the first delete handed the browser a list with a note in it: the
-  # note appeared as a row, and every index after that pointed one line off
-  # what the person had clicked.
-  (defn- as-shown [lines problems]
-    (var shown 0)
-    (def visible @[])
-    (def moved @{})
-    (eachp [i line] lines
-      (unless (config/note? line)
-        (array/push visible line)
-        (when-let [why (get problems i)] (put moved shown why))
-        (++ shown)))
-    [visible moved])
+  (defn draw [] (:call graph-worker :draw))
 
-  # ONE DRAWING, from the file: read the config, run it, render it. The three
-  # steps are three modules -- config owns the file and the language, graph
-  # owns the picture, and this is where they meet.
-  (defn draw []
-    (def lines (config/read-config config-path))
-    (def [state problems] (config/run lines root))
-    (def [ok result] (graph/render-svg (scanned) state))
-    (def [visible moved] (as-shown lines problems))
-    [visible moved ok result])
-
-  # THE PAGE, built here rather than in graph. Slurping a template and
-  # substituting holes is serving, not drawing -- and it needed `json` to
-  # hand the config to the browser, which was the renderer's only reason to
-  # know that format exists.
   (defn page [title lines problems svg fill]
-    # `->>`, not `->`: string/replace takes the subject LAST, and threading
-    # it first quietly produced a page that was the replacement value alone.
+
     (def template (slurp (string web-dir "/index.html")))
     (var out (->> template
                   (string/replace "{{TITLE}}" (escaped title))
                   (string/replace "{{FAVICON}}" favicon)
                   (string/replace "{{CONFIG_NAME}}" config/config-title)
-                  # The pane's bar says what it runs, so a glance tells you
-                  # which harness this run would start.
-                  # The LEAF, matching what the pane writes into its own bar
-                  # once a session reports its argv -- /bin/zsh and zsh are
-                  # the same answer, and the two should not disagree for the
-                  # moment before the first start reply lands.
+
                   (string/replace "{{HARNESS_NAME}}"
                                   (escaped (last (string/split "/" (first (harness-argv))))))
                   (string/replace "{{CONFIG_LINES}}" (json/encode lines))
                   (string/replace "{{CONFIG_PROBLEMS}}" (json/encode problems))
-                  # What each pane has been called by hand, so a reload
-                  # brings the labels back with the tabs. READ FROM DISK
-                  # rather than from `lines`: the lines handed to the page
-                  # are the ones the EDITOR shows, and `as-shown` has already
-                  # taken the notes out of those -- which is the whole point
-                  # of a note. See `labels` in config.janet.
+
                   (string/replace "{{PANE_LABELS}}"
                                   (json/encode
                                     (config/labels
-                                      (config/read-config config-path))))
-                  # The help panel's content, generated from the grammar's
-                  # own verb table -- so the list cannot describe a verb the
-                  # parser does not have, or miss one it does.
+                                      (:call graph-worker :read))))
+
                   (string/replace "{{CONFIG_DOCS}}" (json/encode (config/docs)))
                   (string/replace "{{CONFIG_COLOURS}}" (json/encode (config/colours)))
-                  # THE PANES THAT SURVIVED, so the page can put their tabs
-                  # back. Everything else about a pane the page works out for
-                  # itself; this is the one thing only the server knows,
-                  # because only the server read the file.
+
                   (string/replace "{{OPEN_TERMINALS}}"
                                   (json/encode (filter |(not= $ "harness") recovered)))))
     (eachp [key value] fill
       (set out (string/replace (string "{{" key "}}") value out)))
-    # The SVG goes in last, and with a function rather than a literal:
-    # string/replace treats `%` sequences in its replacement specially, and
-    # SVG is full of them (percent widths, escaped characters in a label). A
-    # function replacement is taken verbatim.
+
     (string/replace "{{GRAPH}}" (fn [&] svg) out))
 
-  # ONE BUTTON PRESS from the page: edit the lines, save unless only asked,
-  # and answer with what went wrong and a fresh drawing.
-  #
-  # Here rather than in graph because it is a route -- it decodes a request
-  # body and shapes a reply, which is this file's subject. It also means the
-  # body is decoded ONCE: core used to parse it to look for `regenerate` and
-  # then hand the raw string to graph, which parsed it again.
-  (defn config-edit [body]
-    (def sent (json/decode body))
-    (def action (string (get sent "action" "")))
-    (def index (math/floor (or (get sent "index") -1)))
-    # THE PAGE NEVER SEES VISUALIZE'S OWN NOTES and so cannot send them back.
-    # It sends the lines it is showing, which is what makes an in-place typo
-    # and the button that acts on it arrive together -- and it would also
-    # make the first edit after a restart write a file with the notes gone.
-    # They are taken from the file as it is on disk and put back after the
-    # edit, so an edit is an edit to the config and nothing else.
-    (def on-disk (config/read-config config-path))
-    (def kept (config/terminals on-disk))
-    # The same for labels, and for the same reason: they are the page's
-    # notes about its panes, not lines anybody edited.
-    (def kept-labels (config/labels on-disk))
-    # A REDRAW DRAWS WHAT IS ON DISK, and does not write. The watcher asks
-    # for one because the FILE moved, so the page's own copy of the lines is
-    # by definition the old one -- sending it back wrote the edit away, the
-    # file changed again, the watcher fired again, and the graph flashed
-    # through several drawings before settling. The page gets the file's
-    # lines in the reply and catches up from there.
-    #
-    # This is also why `draw` and an edit are different requests rather than
-    # one with a flag: an edit is the page telling the server what the file
-    # should say, and a redraw is the server telling the page what it does.
-    (def redrawing (and (truthy? (get sent "draw")) (= action "run")))
-    (def edited
-      (if redrawing
-        on-disk
-        (config/edit (map string (get sent "lines" [])) action index)))
-    (def lines (if redrawing
-                 edited
-                 (config/remember-labels
-                   (config/remember-terminals edited kept) kept-labels)))
-    # `check` ASKS WITHOUT TELLING. It runs the lines and answers with what
-    # was wrong, and writes nothing -- the compose bar uses it to find out
-    # whether what you typed parses before that text reaches the file. Every
-    # other action is an edit and saves.
-    #
-    # Save first, for those: the file is the thing being edited, and it
-    # should hold what you just did even if drawing it then fails.
-    # A redraw writes nothing: it has nothing new to say about the file.
-    (def asking (or (= action "check") redrawing))
-    (unless asking (config/write-config config-path lines))
-    # Regenerate means "the source changed and I am telling you", so the
-    # tree is dropped before the edit is drawn.
-    (when (= action "regenerate") (rescan))
-    # ALWAYS RUN, RARELY DRAW. Running is what produces the per-line
-    # complaints the editor writes under the rows, and every action needs
-    # those. Drawing is separate and is now asked for explicitly.
-    (def [state problems] (config/run lines root))
-    # THE WATCHER OWNS THE REDRAW, and it is the only caller that sets
-    # `draw`. An edit from the page SAVES and stops there: the write moves
-    # the file's mtime, the watcher's next tick sees the tree changed, and
-    # the page is told to redraw exactly as it is for an edit to any other
-    # file. The config used to be the one file whose editor drew its own
-    # result, which meant two paths to the same picture and a picture that
-    # could differ between them.
-    #
-    # `check` never draws whatever it says, because it does not even save.
-    (def wants-draw (and (truthy? (get sent "draw")) (config/draws action)))
-    (def [ok result]
-      (if wants-draw
-        (graph/render-svg (scanned) state)
-        [true ""]))
-    # THE SAME LIST THE PAGE LOAD SHOWS. The browser replaces its rows with
-    # what comes back here, so a reply carrying the notes would put them on
-    # screen as rows -- and every index after that would be one line out.
-    (def [visible moved] (as-shown lines problems))
-    {"lines" visible
-     "problems" moved
-     # A render failure belongs to no single line -- an unknown layout name
-     # is not any one form's fault -- so it stays separate from the per-line
-     # messages.
-     "error" (if ok "" result)
-     "svg" (if ok result "")})
+  (defn config-edit [body] (:call graph-worker :edit (json/decode body)))
 
   (defn handler [request]
     (def path (without-query (request :path)))
     (def method (request :method))
 
     (defn guarded [reply]
-      # One shape for every endpoint that writes: prove you are the page this
-      # run served, or get nothing. See `permitted?`.
+
       (if (permitted? request)
         (reply)
         ["403 Forbidden" "application/json"
          (json/encode {"error" "bad or missing token"})]))
 
     (defn poll-answer
-      ``The reply to a poll, for either pane. `ask` is the client's poll --
-      the ONLY thing that differs between the two panes, which is the point:
-      the page drives both with identical code, so the server answers them
-      with identical code. They were once two copy-pasted blocks, and the
-      repl's copy had already lost the comments explaining its own arguments.
 
-      One call rather than `since` plus `state`: this is the hot path, and
-      each one is a round trip to the supervisor.``
       [ask body]
       (def sent (json/decode body))
-      # THE SUPERVISOR'S OWN LINE, SENT AS IT STANDS. A poll reply is mostly
-      # terminal output, and this route's only job with it is to write it out
-      # as JSON -- which the supervisor already did. Taking it apart and
-      # putting it back together cost 142ms per megabyte on the one thread
-      # every keystroke waits behind, and with several panes streaming that
-      # is what a keystroke was queueing behind.
-      #
-      # Always a line: when no supervisor answers, the client writes the
-      # reply this side sends in its place.
+
       (def raw
         (ask (math/floor (or (get sent "at") 0))
-             # Which session the page's `at` belongs to.
+
              (when-let [g (get sent "generation")] (math/floor g))
-             # How long the page is willing to have this request PARK for
-             # output -- the streaming transport.
-             (when-let [w (get sent "wait")] (math/floor w))))
+
+             (when-let [w (get sent "wait")] (math/floor w))
+             (get sent "limit") (get sent "encoding")))
       ["200 OK" "application/json" raw])
 
     (cond
+      (and (= method "GET") (= path "/session"))
+      ["200 OK" "application/json" (json/encode {"token" token})]
+
+      (and (= method "GET") (= path "/terminal"))
+      (if-not (permitted? request)
+        ["403 Forbidden" "text/plain" "bad or missing token"]
+        (if-not (websocket/upgrade? request)
+          ["400 Bad Request" "text/plain" "invalid websocket upgrade"]
+          {:upgrade (fn [connection carry]
+            (websocket/serve connection carry request
+              (fn [send]
+                (stream/open send pane-for
+                  (fn [id op body]
+                    (def [status _ raw] (handler {:method "POST"
+                      :path (string "/pane/" id "/" op "?k=" token)
+                      :body (json/encode body)}))
+                    (unless (= status "200 OK") (error "terminal operation failed"))
+                    raw)))))}))
+
+      (and (= method "GET") (= path "/diagnostics/graph"))
+      (guarded (fn []
+        ["200 OK" "application/json" (json/encode (:call graph-worker :diagnostics))]))
+
+      (and (= method "GET") (= path "/diagnostics"))
+      (guarded (fn []
+        ["200 OK" "application/json" (json/encode (trace/snapshot))]))
+
       (and (= method "GET") (= path "/"))
       (do
-        (def [lines problems ok result] (draw))
+        (def [lines problems ok result drawn-generation] (draw))
         ["200 OK" "text/html; charset=utf-8"
-         # The PROJECT names the tab, not the tool. Someone with three of
-         # these open is telling apart the things being looked at, and every
-         # one of them is visualize.
+
          (page project
                lines problems
                (if ok result (string "<p>could not render: " result "</p>"))
-               # What only the core knows, handed over rather than reached
-               # for: the page fills the template's holes and this fills the
-               # server's.
-               {"TOKEN" (json/encode token)})])
 
-      # THE WATCH: park until the source changes, so an edit on disk redraws
-      # the page without anyone pressing anything. Parked rather than
-      # polled so that an idle page costs one held connection rather
-      # than a request a second -- with a bounded hold so a proxy or a
-      # sleeping laptop cannot leave the request hanging forever.
+               {"TOKEN" (json/encode token) "GRAPH_GENERATION" (string drawn-generation)})])
+
       (and (= method "POST") (= path "/watch"))
       (guarded (fn []
                  (def sent (try (json/decode (request :body)) ([_] {})))
@@ -661,11 +297,6 @@
                   (json/encode {"generation" source-generation
                                 "changed" (not= seen source-generation)})]))
 
-      # THE GRAPH ALONE, as SVG. The page embeds the same picture, but an
-      # agent asking "what does it look like now?" should not have to dig
-      # it out of a page full of terminal panes and config rows -- and SVG
-      # is text, which is the one image format something with a Read tool
-      # can actually reason about. `vz shot` fetches this.
       (and (= method "GET") (= path "/graph.svg"))
       (guarded (fn []
                  (def [_ _ ok result] (draw))
@@ -673,24 +304,6 @@
                    ["200 OK" "image/svg+xml" result]
                    ["500 Internal Server Error" "text/plain" result])))
 
-
-      # Anything else in web/, served by name rather than by a route per file.
-      #
-      # THIS WAS A ROUTE PER FILE and it broke the whole page: app.js grew an
-      # `import './term.js'`, nothing served term.js, and the 404 aborted the
-      # module -- so panning, zooming and the config editor all died along
-      # with the terminal. One missing line took out every interaction on the
-      # page, which is exactly the failure a whitelist invites.
-      # TWO ROOTS, ONE RULE. `web/` holds what this project wrote and
-      # `external-src/wterm/` holds what it vendored -- Ghostty's emulator,
-      # its stylesheet and its wasm -- and the page asks for both by bare
-      # filename. The SINGLE-COMPONENT rule in `static-file` is what keeps
-      # that safe and is unchanged: a request still names a file and cannot
-      # describe a route to one, so adding a second directory to look in
-      # adds a place to find that name, not a way to escape it.
-      #
-      # `web/` FIRST, so a name this project owns is never shadowed by a
-      # vendored one that happens to match.
       (and (= method "GET")
            (when-let [name (http/static-file path)]
              (find |(= :file (os/stat (string $ "/" name) :mode)) static-roots)))
@@ -698,45 +311,22 @@
             dir (find |(= :file (os/stat (string $ "/" name) :mode)) static-roots)]
         ["200 OK" (http/content-type name) (slurp (string dir "/" name))])
 
-      # The graph app's route, answered whole by the app. The core knows
-      # only that something owns /config; what a config is, what a button
-      # does and what gets drawn are none of its business.
       (and (= (request :method) "POST") (= path "/config"))
-      ["200 OK" "application/json"
-       (json/encode (config-edit (request :body)))]
+      (guarded (fn []
+        ["200 OK" "application/json"
+         (config-edit (request :body))]))
 
-      # WHAT A PANE HAS BEEN CALLED BY HAND. Its own route rather than a
-      # config edit, because it is not one: nobody typed a line, the graph
-      # does not change, and a redraw for a label being typed would flash the
-      # drawing on every keystroke. See `labels` in config.janet.
       (and (= method "POST") (= path "/label"))
-      (do
+      (guarded (fn []
         (def sent (or (json/decode (or (request :body) "")) {}))
         (def id (string (or (get sent "id") "")))
         (def text (string (or (get sent "text") "")))
         (if (empty? id)
           ["400 Bad Request" "application/json" (json/encode {:ok false})]
           (do
-            (def lines (config/read-config config-path))
-            (def named (config/labels lines))
-            (put named id text)
-            (config/write-config config-path (config/remember-labels lines named))
-            ["200 OK" "application/json" (json/encode {:ok true})])))
+            (:call graph-worker :label [id text])
+            ["200 OK" "application/json" (json/encode {:ok true})]))))
 
-      # -- the terminal pane ------------------------------------------------
-      # Every one of these drives a session this process does not own. They
-      # are all `guarded`: the endpoint runs a program, so no token means no
-      # answer. See `permitted?`.
-      #
-      # THE /pane/ PREFIX EARNS ITS KEYSTROKES. A route called /term/poll
-      # reads as though it polled a terminal emulator; this is a pane in the
-      # page talking about the session behind it, and the prefix says so.
-      #
-      # ONE MATCH FOR EVERY PANE. The id is read out of the path rather than
-      # written into five routes per pane -- the page opens as many as it
-      # likes, and the first request naming one is what brings its client
-      # into being. A pane id is [a-z0-9-]: it becomes a socket filename, so
-      # anything that could climb out of a directory is not a name.
       (and (= method "POST") (string/has-prefix? "/pane/" path)
            (pane-route path))
       (guarded
@@ -748,6 +338,9 @@
           (defn rows [] (math/floor (or (get sent "rows") 24)))
           (defn cols [] (math/floor (or (get sent "cols") 100)))
           (case op
+            "diagnostics"
+            ["200 OK" "application/json" (json/encode (:remote-stats client))]
+
             "start"
             ["200 OK" "application/json"
              (json/encode (:start client (harness-argv) root (rows) (cols)))]
@@ -755,28 +348,18 @@
             "stop"
             ["200 OK" "application/json" (json/encode (:stop client))]
 
-            # A TAB THAT IS BEING DESTROYED, not merely put away. `stop` ends
-            # the session and leaves the host running to take another; this
-            # ends the host as well, because nothing will ever ask about this
-            # pane again and a supervisor per closed tab is a process leak.
             "shutdown"
             (do (:shutdown client)
                 (forget-pane id)
                 ["200 OK" "application/json" (json/encode {"ok" true})])
 
-            # `at` turns this into "type, and tell me what came back" -- one
-            # round trip for a keystroke and its echo.
             "input"
-            # RELAYED, like the poll: during a streaming burst the echo
-            # reply carries everything printed since `at`, and rebuilding it
-            # is the shared thread's time. `quiet` skips the supervisor's
-            # echo wait -- mouse reports, where the program often answers
-            # with nothing; the page has always sent it, and this route was
-            # dropping it.
+
             ["200 OK" "application/json"
              (:raw-send client (string (get sent "text" ""))
                         (when-let [a (get sent "at")] (math/floor a))
-                        (truthy? (get sent "quiet")))]
+                        (truthy? (get sent "quiet"))
+                        (get sent "generation"))]
 
             "redraw"
             (do (:redraw client)
@@ -787,7 +370,7 @@
                 ["200 OK" "application/json" (json/encode {"ok" true})])
 
             "poll"
-            (poll-answer (fn [at gen wait] (:raw-poll client at gen wait))
+            (poll-answer (fn [at gen wait limit encoding] (:raw-poll client at gen wait limit encoding))
                          (request :body))
 
             ["404 Not Found" "application/json"
@@ -797,31 +380,9 @@
 
   (def [server bound accept-loop]
     (http/serve default-port port-tries handler))
+  (set serving-port bound)
   (def url (string "http://127.0.0.1:" bound))
 
-  # -- the keyboard on the server's own terminal ----------------------------
-  #
-  # WHO GETS KILLED IS THE WHOLE DIFFERENCE between the two ways to stop.
-  # ctrl-c ends visualize: the server, every supervisor, every session. The
-  # supervisors ignore the terminal's SIGINT (see `host` in term/host.janet),
-  # so their ending is the deliberate shutdown op below, not a signal that
-  # happens to reach them. ctrl-d ends ONLY the server: the supervisors keep
-  # their sessions, and the next run finds them by the same derived socket
-  # names -- the restart gesture for picking up changed code without losing
-  # a terminal.
-  #
-  # CTRL-D NEEDS NO RAW MODE, which is why it is the key. In the terminal's
-  # ordinary canonical mode the line discipline turns it into END OF FILE on
-  # stdin -- a real kernel-delivered event, where catching any other chord
-  # would mean putting the tty into raw mode and reading keys by hand. A
-  # thread blocks on stdin and announces the EOF; typed lines are read and
-  # dropped on the way.
-  #
-  # ONLY WHEN THERE IS A KEYBOARD TO READ. The reader wants two facts: this
-  # process is the foreground job (`ps` shows `+` -- a backgrounded process
-  # reading its terminal is stopped cold by SIGTTIN), and stdin is actually
-  # a terminal (`stty -g` succeeds only on one -- a harness piping /dev/null
-  # would hand the reader an instant EOF and stop the server at boot).
   (os/sigaction :int
     (fn []
       (print)
@@ -863,20 +424,10 @@
   (print "visualize: " root " on " url)
   (print (align-word "config: " "visualize: ") config-path)
   (print (align-word "parsers: " "visualize: ") (string/join (scan/languages) ", "))
-  (print "ctrl-c stops everything; ctrl-d stops only the server, keeping its terminals")
-  # WATCH THE SOURCE. An edit anywhere under the root drops the scan cache
-  # and bumps the generation; the page is parked on /watch and redraws. This
-  # is what the Regenerate button used to do by hand, and the reason it is
-  # gone: a tool for seeing a codebase should not need to be told the
-  # codebase changed.
-  (scan/watch root
-              (fn []
-                (rescan)
-                (++ source-generation))
-              nil
-              hidden-dirs)
-  # Off the server, not off the constant: they differ whenever the first
-  # choice was taken, and printing the wrong one sends you to somebody else's
-  # page.
-  (os/spawn ["open" url] :pd)
+  (print "ctrl-c kills everything.")
+  (print "ctrl-d kills only the server.")
+
+  (trace/heartbeat)
+
+  (os/spawn (browser/command url) :pd)
   (accept-loop))

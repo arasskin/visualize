@@ -1,9 +1,4 @@
 #!/bin/sh
-#
-# Run visualize on a directory, building the runtime first if it is not built.
-#
-#     ./visualize                 the current directory
-#     ./visualize ~/code/project  somewhere else
 
 set -e
 

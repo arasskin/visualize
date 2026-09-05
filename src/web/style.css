@@ -1,16 +1,3 @@
-/* PARKINSANS, CARRIED BY THE PROJECT rather than fetched from a font host.
-   Three weights, which is what the page uses.
-
-   VENDORED FOR THE SAME REASON THE RUNTIME IS. The page is drawn in this
-   face and graphviz SIZES EVERY ELLIPSE from its metrics -- so if the machine
-   running the server cannot find it, dot measures a fallback while the
-   browser draws the real thing and the labels sit in outlines cut for other
-   glyphs. A file in the repo is a file both of them can read, on any machine,
-   with no network and nothing to install.
-
-   Served flat, beside the stylesheet: the static route takes a single path
-   component and refuses anything with a slash in it, which is the whole of
-   its path safety. */
 @font-face {
   font-family: Parkinsans;
   font-style: normal;
@@ -33,33 +20,16 @@
   src: url(/Parkinsans-Bold.ttf) format('truetype');
 }
 
-/* Vanilla CSS, no build step, no framework. Edit it and reload.
- *
- * Everything themeable is a custom property at the top. The rest of the file
- * refers to those and to nothing else, so a new theme is a new :root block
- * rather than a hunt through the rules. */
-
 :root {
   color-scheme: light dark;
 
-  /* -- the theme -------------------------------------------------------- */
   --font-ui: Parkinsans, -apple-system, system-ui, sans-serif;
-  /* The config editor's face, and the GRAPH's. Deliberately informal: this is
-     a scratchpad you poke at, not a settings dialog. graphviz names the font
-     in the SVG but cannot embed it, so the page is what actually resolves it
-     -- see the #graph svg rule below, without which every label falls back to
-     the browser's default and the drawing stops looking like itself.
-     KEEP IN STEP with `font` in src/visualize/layout.janet, which is what
-     graphviz sizes the ellipses from. Naming a different face here draws
-     labels that do not fit the boxes computed for them. */
+
   --font-config: Parkinsans, "Comic Sans MS", "Chalkboard SE", cursive;
 
-  /* Node ink and group colours are baked into the SVG by src/layout.janet,
-     which computes them from the palette and cannot know the page's theme --
-     so a dark canvas restates them instead. See the dark block below. */
   --canvas: #fbfbfa;
   --ink: #222;
-  /* An input's ground, a step off the canvas so a field reads as a field. */
+
   --field: #ffffff;
 
   --line: #8883;
@@ -71,77 +41,44 @@
   --bad-line: #b3403a55;
   --bad-wash: #b3403a14;
 
-  /* WHAT IS SELECTED. One colour for both of them, because they are one
-     idea: the tab the keyboard is aimed at, and the config line it is aimed
-     at, are answers to the same question and should not be two colours.
-     Distinct from --bad and from --lit, so nothing on this page reads as an
-     error or a hover by accident.
-
-     THE SITE'S OWN MAROON -- the favicon's colour. Selection used to be green,
-     and green made a third unrelated hue on a page that already had maroon
-     for the mark and orange for the rails; it also shouted loudest of the
-     three. Selection and the corner mark are now literally one colour, which
-     leaves the rails as the only other, and orange against maroon is a
-     distinction nobody has to be told about.
-
-     WRITTEN OUT RATHER THAN POINTED AT THE FAVICON'S. They are the same
-     colour today and mean different things: one is what the site is, the
-     other is what selection means, and the day either moves it moves
-     alone. */
   --pick: #8b1a2b;
   --pick-wash: #8b1a2b1c;
 
-  /* The tab rail's guides. Orange, which nothing else here is. */
   --rail: #d2811e;
 
-  /* The colour a hovered dependency lights up in. */
   --lit: #c04040;
 
   --shadow: 0 6px 18px #0004;
 
-  /* The terminal's ground, OPAQUE. It was translucent so the graph behind it
-     stayed visible, which was a fair trade when there was one pane pinned in
-     a corner; with several, a stack of washes over the drawing makes both
-     the terminals and the graph harder to read than either would be alone.
-     A terminal is its own surface now, and moving it is how you see what is
-     under it.
-     --term-ground is the same colour and stays as the name for the places
-     that always needed a solid one (the cursor cell, inverse video). */
-  --term: #fdfdfb;
-  --term-ink: #2c2c2a;
+  --term: #ffffff;
+  --term-ink: #3a4851;
+  --term-selection: #e5ecf1;
+  --term-cursor-color: #919191;
   --term-line: #0002;
-  --term-hint: #6a6a68;
-  /* --term's solid twin, for the places translucency would be wrong: the
-     cursor cell and inverse video. A highlight you can see the graph through
-     is not a highlight. */
-  --term-ground: #fdfdfb;
+  --term-hint: #506573;
 
-  /* The emulator's 16 ANSI colours. Darkened to read against the light
-     ground; a stock dark-terminal palette puts bright yellow and white on
-     near-white, which is invisible. Retheming the terminal means restating
-     these alongside --term and --term-ink. */
-  --term-black:          #000000;
-  --term-red:            #a83c3c;
-  --term-green:          #3c7d3c;
-  --term-yellow:         #8a6d1e;
-  --term-blue:           #3c5fa0;
-  --term-magenta:        #8a3ca8;
-  --term-cyan:           #2e8a8a;
-  --term-white:          #6e6e6a;
-  --term-bright-black:   #5a5a56;
-  --term-bright-red:     #c04848;
-  --term-bright-green:   #3f9e3f;
-  --term-bright-yellow:  #a3861e;
-  --term-bright-blue:    #4a6fc0;
-  --term-bright-magenta: #a848c0;
-  --term-bright-cyan:    #2f9f9f;
-  --term-bright-white:   #3a3a38;
+  --term-ground: #ffffff;
+
+  --term-black:          #2d3840;
+  --term-red:            #b45648;
+  --term-green:          #6caa71;
+  --term-yellow:         #c4ac62;
+  --term-blue:           #5685a8;
+  --term-magenta:        #ad64be;
+  --term-cyan:           #69c6c9;
+  --term-white:          #c1c8cc;
+  --term-bright-black:   #506573;
+  --term-bright-red:     #df6c5a;
+  --term-bright-green:   #79be7e;
+  --term-bright-yellow:  #e5c872;
+  --term-bright-blue:    #49a2e1;
+  --term-bright-magenta: #d389e5;
+  --term-bright-cyan:    #77e1e5;
+  --term-bright-white:   #d8e1e7;
 
   --shadow: 0 6px 18px #0004;
 }
 
-/* The dark theme: the same properties restated, per the note at the top.
-   The browser flips this with the OS setting -- the server never knows. */
 @media (prefers-color-scheme: dark) {
   :root {
     --canvas: #171715;
@@ -152,62 +89,45 @@
     --bad-line: #ff8a7a55;
     --bad-wash: #ff8a7a14;
 
-    /* Lifted to read against the dark ground, like every other colour here,
-       Where the light theme's
-       maroon reads 8.89 against its canvas, this reads 3.59 against the dark
-       one -- softer than the green it replaces, which is the point, and the
-       softer of the two themes. */
     --pick: #c2415a;
     --pick-wash: #c2415a24;
 
     --rail: #e8a545;
 
-    /* Lightened to read against the dark ground -- the mirror image of the
-       light palette's problem: stock black and dim colours vanish here. */
-
-    --term: #1b1b19;
-    --term-ink: #d6d6d2;
-    --term-ground: #1b1b19;
+    --term: #212734;
+    --term-ink: #e6e6e6;
+    --term-selection: #334e5e;
+    --term-cursor-color: #919191;
+    --term-ground: #212734;
     --term-line: #fff2;
-    --term-hint: #8f8f8b;
+    --term-hint: #465c6d;
 
-    /* Lightened to read against the dark ground -- the mirror image of the
-       light palette's problem: stock black and dim colours vanish here. */
-    --term-black:          #5a5a56;
-    --term-red:            #d47070;
-    --term-green:          #7ab87a;
-    --term-yellow:         #c7a84e;
-    --term-blue:           #7d98d4;
-    --term-magenta:        #c07ad4;
-    --term-cyan:           #62b8b8;
-    --term-white:          #a8a8a4;
-    --term-bright-black:   #82827e;
-    --term-bright-red:     #e08a8a;
-    --term-bright-green:   #8ed48e;
-    --term-bright-yellow:  #dcc165;
-    --term-bright-blue:    #94aee6;
-    --term-bright-magenta: #d494e6;
-    --term-bright-cyan:    #7cd0d0;
-    --term-bright-white:   #e8e8e4;
+    --term-black:          #35424c;
+    --term-red:            #b45648;
+    --term-green:          #6caa71;
+    --term-yellow:         #c4ac62;
+    --term-blue:           #6d96b4;
+    --term-magenta:        #bd7bcd;
+    --term-cyan:           #7ccbcd;
+    --term-white:          #dee5eb;
+    --term-bright-black:   #465c6d;
+    --term-bright-red:     #df6c5a;
+    --term-bright-green:   #79be7e;
+    --term-bright-yellow:  #e5c872;
+    --term-bright-blue:    #67b5ed;
+    --term-bright-magenta: #d389e5;
+    --term-bright-cyan:    #84dde0;
+    --term-bright-white:   #e5eff5;
   }
 
-  /* The label ink is dark and baked into the SVG -- src/color.janet picks it
-     for contrast against a pale page -- so the SVG itself flips: invert turns
-     the ink light, hue-rotate turns the colours (including the CSS-applied
-     --lit) back to roughly themselves. Slightly under 1 so pure black lands
-     on soft white rather than glare. */
-  #graph svg { filter: invert(.92) hue-rotate(180deg); }
+  #graph canvas.graph-canvas { filter: invert(.92) hue-rotate(180deg); }
 }
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0; font: 14px/1.5 var(--font-ui);
-  /* NO SCROLLBARS, EVER. Panels are positioned absolutely and the tab row
-     puts them deliberately off both sides -- scrolled left, dragged right --
-     which grows the document and hands the window a horizontal bar for a
-     page that does not scroll. The row has its own scrolling and the graph
-     has its own panning; the document itself is a fixed viewport. */
+
   overflow: hidden;
 }
 
@@ -219,10 +139,6 @@ button {
 button:hover:not(:disabled) { background: var(--wash-strong); }
 button:disabled { opacity: .5; cursor: progress; }
 
-/* Status floats over the graph rather than occupying a bar of its own: the
-   zoom level and "drawing..." are worth a glance and never worth a row of
-   permanent furniture. It fades out when there is nothing to say, and it
-   never takes the pointer -- the graph underneath stays draggable. */
 #hud {
   position: fixed; left: 1rem; bottom: .75rem; z-index: 5;
   display: flex; gap: .75rem; pointer-events: none;
@@ -236,60 +152,35 @@ button:disabled { opacity: .5; cursor: progress; }
 }
 #zoom.active { opacity: .7; transition-delay: 0s; }
 
-/* The viewport is fixed to what is left of the window and clips; panning
-   moves the graph inside it, so the page itself never scrolls. */
-/* Full window now that there is no bar above it. */
 #graph {
   position: absolute; inset: 0; overflow: hidden;
   cursor: grab; background: var(--canvas);
 }
 #graph.panning { cursor: grabbing; }
-#graph svg {
-  display: block; transform-origin: 0 0; will-change: transform;
-  max-width: none;
-  /* GRAPHVIZ NAMES THE FONT, THE PAGE RESOLVES IT. dot writes
-     font-family="Parkinsans" on every label because src/layout.janet tells
-     it to -- and it sizes each ellipse from that font's metrics -- but an SVG
-     carries no font, so whether the label is DRAWN in it is the browser's
-     business. Without this the drawing fell back to a default face whose
-     glyphs are wider than the ones the ellipses were sized for, which reads
-     as labels crowding their outlines. Restated here rather than left to the
-     attribute so the whole page has one answer about its face. */
-  font-family: var(--font-config);
+#graph canvas.graph-canvas {
+  position: absolute; inset: 0; width: 100%; height: 100%;
 }
-/* -- hovering a dependency ------------------------------------------------
-   Every edge carries a <title>, so the browser shows a native tooltip
-   -- in theory. In practice the edge is a 1px hairline: a target you cannot
-   land on is a target you do not have. So each edge gets a fat transparent
-   twin to catch the pointer, and hovering either lights the real path. */
+#graph svg.graph-layout {
+  position: absolute; left: 0; top: 0; visibility: hidden;
+  pointer-events: none; max-width: none;
+}
+#graph svg { font-family: var(--font-config); }
+#graph svg.graph-layout * { animation: none !important; }
 
-/* pointer-events: stroke IS THE WHOLE TRICK. The default hit-tests only where
-   a shape is actually PAINTED, so a transparent stroke -- however fat --
-   catches nothing. `stroke` means "hit-test the stroke area whether or not it
-   is visible".
-
-   vector-effect keeps that width in SCREEN pixels. Without it the graph's
-   scale() shrinks the target along with the view, so the thing meant to be
-   forgiving is hardest to hit exactly when the lines are thinnest. */
 #graph .edge .hit {
   stroke: transparent; stroke-width: 16; fill: none;
   vector-effect: non-scaling-stroke; pointer-events: stroke; cursor: help;
 }
-/* :not(.hit) IS THE FIX FOR A FLICKER LOOP. Without it this rule also matches
-   the hit stroke and shrinks it the instant hover begins -- the pointer,
-   inside the fat stroke but outside the thin one, falls off the edge, hover
-   ends, the stroke returns, hover fires again, forever. A hover state must
-   never move its own target. */
+
+#graph.navigating svg, #graph.navigating .edge .hit { pointer-events: none; }
+
 #graph .edge.lit path:not(.hit) {
   stroke: var(--lit); stroke-width: 2.4; vector-effect: non-scaling-stroke;
 }
 #graph .edge.lit polygon { fill: var(--lit); stroke: var(--lit); }
-/* Everything else steps back, so one line stays readable in a dense graph. */
-#graph svg.hovering > g > g:not(.lit) { opacity: .22; }
 
-/* The name of the dependency under the cursor. Fixed to the pane rather than
-   drawn into the SVG: the SVG is under a scale() transform, and text inside
-   it would grow and shrink with the zoom. */
+#graph svg.hovering g.graph > g:not(.lit) { opacity: .22; }
+
 #edgelabel {
   position: absolute; z-index: 6; pointer-events: none; display: none;
   padding: .2rem .45rem; border: 1px solid var(--line-strong);
@@ -299,169 +190,33 @@ button:disabled { opacity: .5; cursor: progress; }
 #edgelabel b { font-weight: 600; }
 #edgelabel .arrow { opacity: .55; padding: 0 .25rem; }
 
-/* -- floating panels --------------------------------------------------------
-   A panel floats over the graph and is moved by dragging its bar. Collapsed
-   it is just the bar, so the same element is both the button and the window
-   -- there is no separate toggle to keep in sync with it.
-
-   Written as classes rather than ids because there are two of them now: the
-   config editor is furniture with
-   different contents. */
 .panel {
   position: absolute; z-index: 5; display: flex; flex-direction: column;
   border: 1px solid var(--line-strong); background: var(--canvas);
-  /* SQUARE. Nothing inside a panel escapes it, so there is no clipping to do
-     either -- the bar and the body are laid out within its box. */
+
   overflow: hidden;
   font: 13px/1.5 var(--font-config);
-  touch-action: none;  /* dragging the bar must not also pan the graph */
-  --gutter: .5rem;     /* one gutter for the bar and the rows below it, so a
-                          panel's title and its contents share a left edge */
+  touch-action: none;
+  --gutter: .5rem;
 }
-/* A SHUT TAB IS THE SAME BOX, WITHOUT ITS HEIGHT. It keeps the width the
-   window has, so opening one appears to expand it downward rather than to
-   unfold something wider than the thing you clicked. Only the height is
-   given up, and only because there is nothing below the bar to be tall for. */
+
 .panel.shut { height: auto !important; }
 .panel.shut .panel-body, .panel.shut .grip { display: none; }
 
-/* ONE BOX THAT GROWS DOWNWARD. Shut and open are the same box at two
-   heights: the width does not change, so opening a tab appears to expand it
-   rather than to unfold something wider than the thing you clicked. The
-   title stays exactly where it was -- top left, in the bar that is the box's
-   own top edge either way.
-
-   THIS USED TO BE A MANILLA FOLDER: the bar kept its title's width while the
-   window opened out wider beneath it, so a tab stuck up off a sheet. The
-   width is the box's now, in both states, and the bar stretches to it.
-
-   The panel is transparent and borderless throughout: the bar and the body
-   draw the box's edges between them. */
-/* THE BOX IS THE PANEL, and the pieces inside it draw no edges of their own.
-   The bar and the body used to carry a border each, overlapped by a pixel so
-   their two lines fell in one place -- which worked while the corners were
-   square and showed as a seam the moment they were rounded: two arcs meeting
-   at the end of a straight edge, which is the mark at the right of the row.
-
-   One border on one element cannot disagree with itself. */
 .panel > .bar, .panel > .panel-body, .panel > .grip { align-self: stretch; }
-
-/* -- ONE SHAPE, ONE OUTLINE -------------------------------------------------
-
-   A TAB AND ITS WINDOW ARE A SINGLE FIGURE: a rectangle with a smaller
-   rectangle standing on it, sharing the edge where they meet. The obvious
-   way to draw that is to give both boxes a border and then hide the parts
-   that fall inside -- and that is what this did, for a while, with a rule
-   for each way the parts can be wrong: the seam under the tab, the top of
-   the body beyond the tab, the shut case, the selected case, the terminal
-   case. Every new colour needed another one, and the last of them
-   contradicted the first.
-
-   SO NEITHER BOX DRAWS AN OUTLINE. The bar draws three sides -- the ones on
-   the outside of the figure -- and the body draws three, and the edge they
-   share is drawn by nobody because it is not an edge of the shape. The two
-   pieces meet without a seam to erase, and one colour applies to the whole
-   figure however it is coloured.
-
-   The bar keeps its bottom border only when SHUT, because a tab with no
-   window under it is a closed rectangle in its own right.
-
-   THE WINDOW'S TOP IS BOTH THINGS AT ONCE, which is the one edge that
-   cannot simply be given to one box or the other: a window is wider than
-   its tab, so that edge is INSIDE the figure where the tab sits on it and
-   OUTSIDE it the rest of the way. Removing it altogether left the top of
-   every open window undrawn; leaving it drew a line under the tab. So the
-   body keeps the border and the BAR COVERS THE PART OF IT THAT IS INSIDE --
-   one pixel of the bar's own background, pulled down over it.
-   
-   `margin-bottom: -1px` is that pixel. It is why the bar sat on the body's
-   edge in the first place; what was missing was that the bar has to be
-   OPAQUE there and drawn after, which it is: a bar carries a z-index within
-   its panel and its background is the same ground as the body's. */
-/* -- ONE SHAPE, PLUS A WINDOW -----------------------------------------------
-
-   EVERY TAB IS A RECTANGLE. The bar draws all four of its sides, shut or
-   open, and its bottom edge is the rail's bottom line -- which is the whole
-   of what makes the row read as a row: every tab in it, in either state,
-   ends on the same line.
-
-   AN OPEN TAB HANGS A WINDOW OFF THAT LINE. The body is a second rectangle
-   starting where the tab ended, sharing the one edge between them: the body
-   pulls up by a pixel so its top border lands on the tab's bottom border
-   rather than a pixel under it, and the two lines become one.
-
-   That is the whole figure. Earlier versions had the tab give its bottom
-   border back as padding so the window could draw the line instead, which
-   left the open tab's foot a pixel below the shut tabs beside it -- the
-   lines staggered where they should have run straight through. Nothing is
-   borrowed and nothing is given back now; each box draws its own edges and
-   the overlap puts two of them in the same pixel. */
-
-/* NOTHING DIVIDES THE TITLE FROM THE CONTENT. A tab and the thing it opens
-   are one box, and a rule across the middle of a box says they are two. The
-   title sits at the top of the shape and the content below it, and the space
-   between them is what separates them. */
 
 .bar {
   display: flex; align-items: center; gap: .3rem; flex: none;
   padding: .4rem var(--gutter); cursor: grab; user-select: none;
-  /* NO BORDER AND NO GROUND OF ITS OWN: the panel is the box. What remains
-     here is the LINE UNDER THE TITLE, drawn only when there is something
-     below it to be separated from. */
+
   position: relative; z-index: 1;
 }
 
-
-/* TABS STAND APART, and every tab draws all four of its own edges.
-
-   A GAP RATHER THAN A SHARED LINE. Tabs that touch have to settle the pixel
-   between them: whose border it is, which of the two colours wins when one is
-   selected, what happens when a window pushes its neighbour along. Every
-   version of that arithmetic has been a bug -- borrowed edges that vanished
-   when the neighbour changed, a doubled 2px rule, a third of a pixel of
-   background showing through where the rounding fell badly. A gap has no
-   shared pixel to argue over, and each tab's outline is entirely its own.
-
-   SQUARE, ALL OF THEM, ALWAYS. The row stands in from the page's corner --
-   see RAIL_TOP and RAIL_LEFT -- so no tab is ever pressed into it, and none
-   has to answer for what the browser does with its own corner there. That is
-   a question a page cannot ask: Firefox rounds a floating window and squares
-   a maximized one, and nothing in the page changes between them. Standing
-   clear leaves it to the browser, which is the only one that knows. */
-
-/* A FOLDED NODE IS HATCHED. It stands for several files rather than being
-   one, and nothing about an ellipse with a name in it says so -- (fold
-   ~.parsers) reads as a file called parsers until you notice the count is
-   the sum of seven.
-
-   DIAGONAL STRIPES, because they say "more than one thing" without saying
-   anything else: they are not a colour, so they do not collide with the
-   group hues, and not an outline, so they do not collide with selection.
-
-   THE FILL IS SET ON THE NODE, not here: each folded node points at a hatch
-   drawn in its OWN ink, and only the layout knows which colour that is. See
-   `hatch-id`. Nothing to do in the stylesheet -- this note is here because
-   the striping is a page-level idea and this is where someone would look
-   for it. */
-
-/* THE RAILS. Two lines marking where the tab row sits, drawn ONLY while a
-   tab is being dragged near them -- the bar has no body and nothing to see,
-   and a strip of furniture across the top of the drawing would cost the page
-   its whole point for a thing you need only while aiming.
-
-   Orange because nothing else on the page is: maroon means selected and red
-   means found or wrong, and a guide that borrows either would be read as
-   saying something about the tab rather than about where it can go.
-
-   pointer-events:none throughout -- these appear under a hand that is in the
-   middle of a drag, and catching that pointer would end it. */
 #rail-marks {
   position: fixed; left: 0; right: 0; z-index: 4;
   pointer-events: none;
   opacity: 0;
-  /* IN AND OUT IN EQUAL TIME, like the node flash: a guide that snaps is a
-     flicker when a drag crosses the line, and one that lingers is in the way
-     after the drop. */
+
   transition: opacity .16s ease-in-out;
 }
 #rail-marks.near { opacity: 1; }
@@ -469,21 +224,10 @@ button:disabled { opacity: .5; cursor: progress; }
   position: absolute; left: 0; right: 0; height: 0;
   border-top: 1.5px dashed var(--rail);
 }
-/* The two edges of the row: one at the top of a tab, one at its bottom. */
+
 #rail-marks i:first-child { top: 0; }
 #rail-marks i:last-child { bottom: 0; }
 
-/* THE EDGE RAIL. A line across the bottom of the page, shown while a window
-   is being resized near it, that takes the window to the full height on the
-   drop. The bottom only -- see the note on EDGES.
-
-   DRESSED EXACTLY LIKE THE TAB RAIL, because it is the same offer: dashed,
-   orange, appearing while you aim and leaving once you land. Guides that
-   behave alike should look alike -- a reader learns "dashed orange means drop
-   here and it snaps" once, rather than once per edge.
-
-   pointer-events:none, like the rails: they appear under a hand in the middle
-   of a drag, and catching that pointer would end it. */
 .edge-mark {
   position: fixed; z-index: 4;
   pointer-events: none;
@@ -493,23 +237,14 @@ button:disabled { opacity: .5; cursor: progress; }
 .edge-mark.near { opacity: 1; }
 .edge-mark i { position: absolute; }
 
-/* The line each one draws: along the bottom, and down the right. Zero on the
-   cross axis so the box is the line rather than a region containing it. */
 #floor-mark { left: 0; right: 0; bottom: 0; height: 0; }
 #floor-mark i { left: 0; right: 0; bottom: 0; height: 0;
                 border-top: 1.5px dashed var(--rail); }
 
-/* THE BIN, bottom-left, and only while something is being dragged. Nothing
-   to throw away the rest of the time, and a bin sitting on the drawing would
-   be furniture rather than a tool.
-
-   It comes up from below rather than fading: a thing that arrives from
-   off-screen reads as having been fetched, where a fade reads as having been
-   there all along and only now noticed. */
 #bin {
   position: fixed; left: 1.25rem; bottom: 1.25rem; z-index: 7;
   width: 108px; height: 116px;
-  pointer-events: none;          /* the drag owns the pointer */
+  pointer-events: none;
   opacity: 0; transform: translateY(30px);
   transition: opacity .18s ease-out, transform .18s ease-out;
 }
@@ -521,23 +256,14 @@ button:disabled { opacity: .5; cursor: progress; }
 #bin .lid rect { fill: var(--field); stroke: var(--ink); stroke-width: 2; }
 #bin .ribs line { stroke: var(--ink); stroke-width: 1.5; opacity: .35; }
 
-/* THE LID COMES OFF when a pane is held over it -- hinged at the left
-   corner, so it lifts and tilts the way a lid does rather than sliding
-   away. This is the whole promise of the gesture: what will happen, before
-   it happens. */
-/* IN SVG USER UNITS, not screen pixels: the transform below is inside the
-   svg, whose viewBox is 48x52 whatever the box is sized to, so the lid
-   lifts the same proportion of itself at any size. */
 #bin .lid {
   transform-origin: 8px 11px;
   transition: transform .16s cubic-bezier(.34,1.4,.64,1);
 }
 #bin.open .lid { transform: translate(-7px, -13px) rotate(-22deg); }
-/* And the can opens its mouth a little, so the hole reads as a hole. */
+
 #bin.open .can { fill: var(--wash-strong); }
 
-/* SWALLOWED. The lid slams back down past its rest and settles -- the
-   overshoot is what makes it read as a clap rather than a close. */
 #bin.fed .lid { animation: bin-clap .42s ease-out; }
 #bin.fed .can { animation: bin-gulp .42s ease-out; }
 @keyframes bin-clap {
@@ -552,128 +278,33 @@ button:disabled { opacity: .5; cursor: progress; }
   100% { transform: none; }
 }
 
-/* THE SELECTED TAB, in the same maroon as the selected config line -- the two
-   mark the same idea, so they are one colour from one token.
+.panel:not(.picked) { opacity: .6; }
 
-   ON THE BAR, because the bar IS the tab: a shut panel is nothing else, and
-   an outline round the whole panel would jump from a tab-sized mark to a
-   window-sized one on opening.
-
-   `border-color` rather than an `outline`, so the maroon replaces the edge
-   the tab already has instead of drawing a second line outside it -- which
-   at this size reads as a thicker border rather than a coloured one. */
-/* THE SELECTED PANEL SITS ABOVE ITS NEIGHBOURS. The tabs overlap by a pixel
-   so their shared border collapses into one line -- which means one of the
-   two paints over the other, and by default that is whichever comes later in
-   the document. So a grey tab to the right could eat the maroon edge of the
-   selected pane beside it, one pixel at a time, which is exactly the pixel
-   that says which pane is selected.
-   
-   A number rather than `raise`: that hands out ever-larger values as panels
-   are opened and dragged, and this has to beat all of them for as long as
-   the selection lasts. Under the compose bar and the search bar, which are
-   above everything. */
-/* ABOVE ITS NEIGHBOURS, so the pixel where two tabs overlap is painted in
-   the selected one's colour rather than in whichever happens to come later
-   in the document.
-   
-   THE NUMBER IS NOT WRITTEN HERE. It was, and it was a fixed 12 with
-   `!important` -- which beat the inline z-index the selection had just been
-   given by `raise` and PINNED IT DOWN while every other panel climbed past
-   on being opened or dragged. After a few rounds the neighbours were at 44
-   and up, the selected panel was held at 12, and the shared edge went grey.
-   That is the bug that took several opens and closes to appear: it was
-   counting.
-   
-   `raise` puts the selection on top instead -- see selectPane -- and the
-   only thing left here is the floor, so a panel that has never been raised
-   still sits above the unselected ones. */
-.panel.picked { z-index: 12; }
-
-/* THE TOP EDGE OF THE BOX GOES MAROON. The box's own top line, thickened
-   and coloured -- so the mark is part of the outline rather than a second
-   line drawn near it.
-
-   THE SAME EDGE IN BOTH STATES. Shut and open are one box at two heights and
-   the top does not move between them, so the mark stays exactly where it was
-   when the window opens beneath it.
-
-   It was UNDER the title before, which put a rule across the middle of an
-   open box: two lines close together read as a shadow rather than as one
-   shape. */
-.panel.picked { border-top-color: var(--pick); }
+.panel.picked { z-index: 12; opacity: 1; }
 
 .bar:active { cursor: grabbing; }
-/* A panel's own status, right of its name: how many config lines failed.
-   Quiet enough to ignore. */
-/* THE TITLE AND ITS NOTE SIT AT THE LEFT, together. They were centred when a
-   tab was only as wide as its title -- centring a box around its own contents
-   is the same as not centring it -- but a tab is the width of its window now,
-   and a title floating in the middle of that is nowhere near the corner the
-   eye went to.
 
-   The pair stays a pair: a note appearing pushes along beside the name rather
-   than growing off one side of it. */
 .bar { justify-content: flex-start; }
 .bar .name { flex: none; }
-/* THE NOTE CENTRES WITH THE TITLE, as one thing. A tab saying `exited` or
-   `reconnecting...` grows to show it, and what sits in the middle is the
-   name and its note together rather than the name alone with the note
-   hanging off an edge.
-   
-   It was absolute for a while, hung off the right so it could not push the
-   title off centre -- which bought a still title at the price of the note:
-   laid over the tab rather than in it, it covered the name at one end and
-   had no width, so nothing made room for it and a tab in trouble looked
-   exactly like a tab that was fine. */
+
 .bar .state {
   opacity: .55; font-size: 11px;
   flex: none; white-space: nowrap;
 }
 
-/* WHAT THIS PANE IS FOR, in your words -- `the failing test`, `prod logs`.
-   The name is the program running there and the state is how it is doing;
-   this is the one thing on a tab the tool did not decide.
-
-   NOTHING THERE UNTIL THERE IS SOMETHING. An empty label is zero-width with
-   no padding, no rule, no placeholder: a tab nobody has written on looks
-   exactly as it did before this existed. What makes it findable is the
-   cursor -- the bar drags, so a text caret over that one strip is the
-   affordance, and it is the only one.
-
-   IT DOES NOT GRAB THE ROW. `flex: none` and a max-width keep a long note
-   from pushing the state off the end; it ellipsises instead, and the whole
-   text is still there to edit when the caret is in it. */
 .bar .label {
   flex: none; white-space: nowrap; font-size: 11px; opacity: .55;
   cursor: text; outline: none;
   max-width: 22ch; overflow: hidden; text-overflow: ellipsis;
 }
-/* SOMETHING TO CLICK, WITHOUT ANYTHING TO SEE. An empty span is zero pixels
-   wide, so the click went through to the bar -- which drags and collapses,
-   which is the opposite of putting a caret in the text. It gets a strip of
-   width and nothing else: no ground, no rule, no placeholder glyph. The tab
-   looks untouched and the cursor turning to a caret over that strip is what
-   says it is there.
 
-   `::before` rather than a min-width, because a width on the span itself is
-   width the caret sits inside -- the text would start a few pixels in and
-   the label would look indented once written. */
 .bar .label:empty::before {
-  /* WIDE ENOUGH TO HIT. At two and a half characters the strip was a
-     seventeen-pixel target between a draggable bar and a collapse click, and
-     a press meant for it landed on one of those instead -- which opens the
-     panel and drags it. Six characters is a comfortable target and still
-     nothing to look at. */
+
   content: ""; display: inline-block; width: 6ch;
 }
-/* WRITTEN ON, IT IS JUST TEXT. The strip goes away -- the words are the
-   click target now -- and the gap that was collapsed for an empty label
-   comes back so the note is not jammed against the name. */
+
 .bar .label:not(:empty) { margin-left: 0; }
-/* EDITING IS WHERE THE BOX APPEARS, and only then: a faint ground says the
-   caret is somewhere that takes text, which an empty span with a blinking
-   cursor does not. It goes away with the focus. */
+
 .bar .label:focus {
   opacity: .9; margin-left: 0;
   min-width: 4ch; max-width: 40ch; overflow: visible;
@@ -681,14 +312,11 @@ button:disabled { opacity: .5; cursor: progress; }
   border-radius: 3px; padding: 0 .25rem;
 }
 
-
-/* The scrolling part. flex:1 so it takes whatever the resize left it. */
 .panel-body {
   flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
   padding: .4rem var(--gutter);
 }
 
-/* Resize grip, bottom-right, drawn as two diagonal rules. */
 .grip {
   position: absolute; right: 0; bottom: 0; width: 16px; height: 16px;
   cursor: nwse-resize; opacity: .5;
@@ -703,8 +331,6 @@ button:disabled { opacity: .5; cursor: progress; }
 
 .row { display: flex; align-items: center; gap: .3rem; padding: .1rem 0; }
 
-/* The drag handle. Its own element so the input keeps normal text selection
-   -- making the whole row draggable would break that. */
 .hold {
   cursor: grab; user-select: none; opacity: .35; letter-spacing: -2px;
   padding: 0 .15rem; flex: none;
@@ -712,11 +338,8 @@ button:disabled { opacity: .5; cursor: progress; }
 .hold:hover { opacity: .8; }
 .hold:active { cursor: grabbing; }
 
-/* While carrying: grabbing everywhere, and no accidental text selection from
-   the pointer sweeping across the list. */
 body.carrying, body.carrying * { cursor: grabbing !important; user-select: none; }
 
-/* The row being carried: a real copy of it, following the pointer. */
 .slot.ghost {
   position: fixed; z-index: 50; pointer-events: none; margin: 0;
   background: var(--canvas); border: 1px solid var(--line-strong);
@@ -727,18 +350,14 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   transition: top .13s ease-out, left .13s ease-out, transform .13s ease-out;
   transform: none;
 }
-/* What it left behind -- a hole the same size, marked so it reads as the
-   destination rather than as an empty line. */
+
 .slot.gap {
   border: 1px dashed var(--line-strong); background: var(--wash);
 }
 .slot.gap > * { visibility: hidden; }
-/* The rows getting out of the way. Only while a drag is live, so normal
-   redraws are not animated. */
+
 .slot.sliding { transition: transform .13s ease-out; }
 
-/* The line itself is an input so a typo is fixable in place; the BUTTONS are
-   what add, remove and run it. */
 .row input {
   flex: 1; min-width: 0; font: inherit; color: inherit;
   background: var(--wash); border: 1px solid transparent;
@@ -748,16 +367,10 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   outline: none; border-color: var(--line-strong); background: var(--wash-strong);
 }
 
-/* The selected line. A bar down the left edge rather than a fill, so a
-   selection reads over a commented row and a faulted one without fighting
-   the colours those already carry. */
 .row.picked { position: relative; }
 .row.picked::before {
   content: ''; position: absolute; left: -.45rem; top: 0; bottom: 0;
-  /* THE SAME MAROON THE SELECTED TAB WEARS -- the two mark the same idea and
-     used to be told apart only by which panel you were looking at. Fully
-     opaque: at .55 the bar read as a grey with a tint rather than as a
-     colour meaning something. */
+
   width: 2px; background: var(--pick);
 }
 .row.picked input {
@@ -765,17 +378,13 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   outline: 1px solid var(--pick);
   outline-offset: -1px;
 }
-/* A commented line is still there, just not doing anything -- so the whole
-   row recedes together rather than the text fading while its buttons stay
-   bright. The hash itself keeps a little more weight than the rest, since it
-   is the control that brings the line back. */
+
 .row.comment input { opacity: .55; font-style: italic; }
 .row.comment .del { opacity: .4; }
 .row.comment .hash { opacity: .6; }
 .row.comment .del:hover:not(:disabled),
 .row.comment .hash:hover:not(:disabled) { opacity: 1; }
 
-/* Square, quiet buttons -- several per row would shout otherwise. */
 .row button {
   font: inherit; line-height: 1; padding: .22rem .4rem; min-width: 1.8rem;
   border: 1px solid var(--line-strong); background: var(--wash);
@@ -785,36 +394,17 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 .row button:disabled { opacity: .3; cursor: progress; }
 .row .del { color: var(--bad); }
 
-/* A line's complaint, tucked under the line it belongs to. Flush left: the
-   input starts the row, so an indent would push this off the text it is
-   about rather than onto it. */
 .why {
   margin: .05rem 0 .3rem 0; padding-left: .5rem;
   border-left: 2px solid var(--bad-line); color: var(--bad); font-size: 12px;
 }
 .row.bad input { border-color: var(--bad); background: var(--bad-wash); }
 
-/* Anything belonging to no single line -- an unknown layout name, a failed
-   request -- still needs somewhere to go. */
 #problems {
   padding: .3rem .5rem 0; color: var(--bad); white-space: pre-wrap;
 }
 #problems:empty { display: none; }
 
-/* THE GRAPH IS DRAWN FOR A WHITE PAGE, and this rescues it on a dark one.
-   graphviz gets no background of its own (bgcolor=transparent in
-   src/layout.janet), so the SVG floats on --canvas and follows the theme --
-   but the INK inside it was chosen by color/ink-on-page, which deepens each
-   hue until it clears 4.5:1 against WHITE. Measured against the dark
-   canvas those same inks come back at 2.1 to 3.1, which is a muddy label
-   on a dark field.
-
-   The server cannot pick per theme -- it never learns which one the browser
-   is in, as the :root block above says -- so the correction belongs here.
-   Each deepened ink maps back to the hue it was deepened from, and those
-   hues clear the bar on the dark canvas as they are: 7.1, 5.6 and 9.1.
-   Three rules because there are exactly three hues in the palette; if a
-   fourth is ever added to src/color.janet, it needs a line here. */
 @media (prefers-color-scheme: dark) {
   #graph svg [fill="#455c6c"] { fill: #7ea8c4; }
   #graph svg [stroke="#455c6c"] { stroke: #7ea8c4; }
@@ -822,58 +412,30 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   #graph svg [stroke="#8c2a3c"] { stroke: #ff4d6d; }
   #graph svg [fill="#20715f"] { fill: #3bceac; }
   #graph svg [stroke="#20715f"] { stroke: #3bceac; }
-  /* The edges, drawn mid-grey for a white page, want to be lighter than
-     the canvas rather than darker. */
+
   #graph svg [stroke="#8a8a8a"] { stroke: #6f6f6b; }
   #graph svg [fill="#8a8a8a"] { fill: #6f6f6b; }
 }
 
-/* -- help ------------------------------------------------------------------
-   The `?` sits opposite the HUD, in the corner nothing else claims. Small and
-   low-contrast until hovered: it is here for the first five minutes of using
-   the config, and should not compete with the graph after that. */
 #help-open {
-  /* INSET EQUALLY: 12px of gap below the glyph and 12px to its right, so
-     both marks sit the same distance into the same corner. Bottom right,
-     because the tab row owns the top and the HUD and the bin own the
-     bottom left -- this is the corner nothing else wants.
-     
-     The offsets are not 12px themselves, because the padding is a HIT TARGET
-     rather than spacing -- it sits between the glyph and the edge and has to
-     come off. Written as the subtraction so the two stay tied: change the
-     padding and the gap holds. */
+
   --inset: 12px;
   --pad-y: .35rem;
   --pad-x: .5rem;
-  /* A pixel further in than the bottom gap. The glyph's right side is its
-     thin stroke where its foot is a full stop, so matching the numbers
-     leaves it looking a touch further out than it is. */
+
   --nudge: 1px;
   position: fixed; z-index: 6;
   bottom: calc(var(--inset) - var(--pad-y));
   right: calc(var(--inset) - var(--pad-x) + var(--nudge));
-  /* Bare glyph: the generic button rule gives every button a border and a
-     wash, and both are undone here. A chrome-less mark reads as part of the
-     page the way the HUD does, where a bordered circle reads as a control
-     placed on top of the drawing. */
+
   border: 0; background: none;
-  /* Padding is the HIT TARGET, not decoration. With the circle gone the
-     glyph is eleven pixels wide, which is a hard thing to hit and was --
-     the first click after removing the border missed it. The mark stays
-     bare; the area around it is just clickable. */
+
   padding: var(--pad-y) var(--pad-x);
   font: 700 20px/1 var(--font-config);
   color: var(--ink); opacity: .55;
 }
 #help-open:hover, #help-open:focus-visible { background: none; opacity: 1; }
 
-/* NEW TERMINAL, left of the help mark. Every rule above is inherited by
-   sharing the selector rather than restating it -- the two are the same
-   piece of furniture with a different glyph, and a second copy of the
-   inset arithmetic is a second thing to keep in step.
-   
-   The offset is the help button's own width plus a gap, so the two never
-   overlap however wide the glyph is. */
 #term-new {
   --inset: 12px;
   --pad-y: .35rem;
@@ -883,57 +445,36 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   right: calc(var(--inset) - var(--pad-x) + 1.6rem);
   border: 0; background: none;
   padding: var(--pad-y) var(--pad-x);
-  /* A shade lighter than the question mark's 700: a plus is all strokes and
-     reads heavier than a glyph with a bowl at the same weight. */
+
   font: 500 21px/1 var(--font-config);
   color: var(--ink); opacity: .5;
   cursor: pointer;
 }
 #term-new:hover, #term-new:focus-visible { background: none; opacity: 1; }
 
-/* The dim, and the page itself. There is no card: the verbs sit directly on
-   the darkened graph, so opening the help does not put a document on top of
-   your work -- it just turns the screen down and writes on it.
-   
-   That means the text is on a DARK GROUND IN BOTH THEMES, so it cannot use
-   --ink, which is near-black in light mode. The colours here are fixed to
-   the dim rather than to the theme, because what is behind them is the dim. */
 #help {
   position: fixed; inset: 0; z-index: 20;
   padding: 3rem clamp(1.5rem, 8vw, 7rem);
-  /* The graph stays READABLE AS A GRAPH behind the words -- you can still
-     see the shape of what you are configuring while you read what to type.
-     The text carries itself instead: it is the only bright thing on the
-     screen, and the drawing sits well below it. */
+
   background: #000000d4;
   overflow-y: auto;
   color: #f2f2f0;
-  /* The compose line's size. What you read here is what you then type. */
+
   font-size: 17px;
-  /* Centred as a block AND as text. With no title, no footnote and no card,
-     the verbs are the whole content, and a centred column has no edge to be
-     ragged against. */
+
   display: flex; flex-direction: column; align-items: center;
-  /* Centre vertically too, but `safe` so a viewport shorter than the list
-     pins it to the top and leaves it scrollable -- plain centring overflows
-     in both directions and puts the first verb out of reach. */
+
   justify-content: safe center;
   text-align: center;
 }
 #help.shut { display: none; }
 
-/* One column now. The examples are gone -- the call shape says what a verb
-   takes, and a second column of sample lines was repeating it wider. */
 .help-verb {
-  /* A short measure, and shorter than prose usually wants, because the text
-     is CENTRED: a ragged-both-edges block is read by finding each line's
-     start, and the further the starts move the harder that is. Measured in
-     rem so it tracks the 17px text rather than pinning a pixel width. */
+
   max-width: 34rem;
   padding: .55rem 0;
 }
-/* The list centres as a whole rather than each row centring inside a full
-   width box, which would leave the short verbs adrift from the long ones. */
+
 #help-verbs { max-width: 34rem; }
 .help-verb p {
   margin: .15rem 0 0;
@@ -943,87 +484,50 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   font: 600 17px/1.5 ui-monospace, monospace;
 }
 
-
-/* -- compose ---------------------------------------------------------------
-   Centred at the bottom, over the graph. It is not there until you type, and
-   it is the only thing on screen with a solid ground -- what you are typing
-   should be the one place the eye goes. */
 #compose {
   position: fixed; bottom: 5.5rem; left: 50%; transform: translateX(-50%);
   z-index: 15;
-  /* The field's height. One number, so the bar is resized in one place. */
+
   --field-h: 2.6rem;
   min-width: min(22rem, 74vw); max-width: min(32rem, 84vw);
-  /* Set on the bar, so the field and the brackets letter alike -- and the
-     `ch` width the field is measured in follows from it.
-     PARKINSANS, like the rest of the page. It is proportional, so `ch` is the
-     width of a "0" rather than of every character -- see `charWidth`, which
-     measures the WIDEST glyph so the eighty-eight column budget still fits
-     eighty-eight of anything. */
+
   font: 17px/1.5 var(--font-ui);
 }
 #compose.shut { display: none; }
 
-/* THE BOX carries the border and the ground, and the parens sit inside it
-   with the field between them. A GROUND OF ITS OWN: --canvas is the page's
-   colour, so a box painted with it is opaque and still reads as a hole --
-   nothing shows through, but nothing says where the box starts either.
-   --field is a step off the canvas in each theme. */
 #compose-box {
   display: flex; align-items: center;
-  /* min-width:0 on the row so the field's own min-content width cannot push
-     the closing paren out past the border on a long line. */
+
   min-width: 0; overflow: hidden;
   height: var(--field-h); padding: 0 .55rem;
   background: var(--field);
   border: 1px solid var(--line-strong);
 }
 
-/* Fixtures. The same colour as what you type -- they ARE the line, the two
-   characters of it you do not have to write. Only user-select marks them as
-   the page's rather than yours. The closing one HUGS THE TEXT rather than
-   sitting at the far edge, so the pair brackets what you wrote instead of
-   marking the ends of the box. */
 #compose .paren {
   color: var(--ink);
   user-select: none;
   margin: 0 .1rem;
 }
 
-/* TYPING AT A SHELL, not writing a config line. The parens go -- they are the
-   shape of a config call and mean nothing to a terminal -- and the box is
-   free to grow both ways. */
 #compose.typing .paren { display: none; }
-/* WIDER THAN A CONFIG LINE, and the width is app.js's to decide: it sizes
-   the field to a page measure -- the text column of an A4 sheet with its
-   margins, which is the width a line is comfortable to read at. The cap here
-   only stops a narrow window being overrun; app.js holds the same limit, so
-   this is a backstop rather than a second opinion. */
+
 #compose.typing { max-width: 94vw; }
-/* NO FLASH WHILE IT RESIZES. The box changes size on almost every keystroke
-   -- a character wider, or a whole step smaller -- and a transition on those
-   turns each one into a little animation that is still running when the next
-   arrives. Nothing here animates; the size is simply what it is. */
+
 #compose.typing #compose-box, #compose.typing #compose-input {
   transition: none;
 }
 #compose.typing #compose-box {
-  /* Top-aligned, so a box several lines tall grows downward from where the
-     first line was rather than centring and pushing the first line up. */
+
   align-items: flex-start;
   height: auto; min-height: var(--field-h);
   padding: .35rem .55rem;
 }
 #compose.typing #compose-input {
-  /* SCROLLS PAST SEVEN LINES. sizeCompose caps the height there; this is
-     what happens to the rest. */
+
   overflow-y: auto;
   white-space: pre-wrap; word-break: break-word;
-  /* A THINNER BAR. The default is built for a page, and this is a field a
-     few lines tall -- at that size the standard width is a stripe down the
-     side of what you are writing. `thin` is the standards property; the
-     -webkit rules below are what actually applies in this browser, and both
-     are here so neither engine is the odd one out. */
+
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
 }
@@ -1038,23 +542,16 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 }
 
 #compose-input {
-  /* Sized to its content by sizeCompose, and allowed to shrink no further
-     than the box: flex-shrink keeps a long line inside the border, and the
-     text scrolls within the field once it gets there. */
+
   flex: 0 1 auto; min-width: 0;
-  /* No padding: the width is set in `ch` from the character count, and any
-     padding on top of that pushes the text under the opening paren. The
-     gap to the brackets comes from their own margin instead. */
+
   border: 0; background: none; outline: none; padding: 0;
   font: inherit; color: var(--ink);
-  /* It is a textarea now: none of these are an input's defaults. */
+
   resize: none; overflow: hidden; white-space: pre;
   line-height: 1.45; display: block;
 }
 
-/* The complaint, under the line it is about. The FIELD turns red rather than
-   growing an icon: there is one thing here to be wrong, so saying WHICH
-   thing would be saying nothing. */
 #compose-fault {
   margin: .4rem 0 0; padding: 0 .7rem;
   font: 12px/1.45 var(--font-ui);
@@ -1067,41 +564,19 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   background: var(--bad-wash);
 }
 
-
-/* -- animate ---------------------------------------------------------------
-   A node whose file moved since the last drawing arrives with a fill and the
-   class `fresh`; this fades the fill out and leaves the outline the node
-   always had. The fill is in the SVG rather than added here, so a node still
-   reads as changed for the instant before the animation starts -- and if the
-   drawing is saved or printed, the marks are in it.
-
-   On the POLYGON and ELLIPSE, not the group: graphviz puts the shape inside
-   a <g class="node fresh">, and the fill belongs to the shape. */
 #graph svg g.fresh ellipse,
 #graph svg g.fresh polygon,
 #graph svg g.fresh path {
   animation: flash 3s ease-in-out forwards;
 }
 
-/* IN AND OUT IN EQUAL TIME, and never to full. The fill rises to just over
-   half and comes back down over the same stretch, so a change registers as
-   a node briefly breathing rather than as one being lit up -- and a graph
-   where several files moved at once does not strobe.
-
-   `ease-in-out` on both halves for the same reason the timing is symmetric:
-   an ease-out ramp arrives instantly and leaves slowly, which reads as a
-   flash even when the peak is low. */
 @keyframes flash {
   from { fill-opacity: 0; }
   50% { fill-opacity: .55; }
-  /* To none, which is what an unchanged node wears. `forwards` holds the end
-     state so a node does not snap back. */
+
   to { fill-opacity: 0; }
 }
 
-/* A redraw replaces the whole SVG, so the animation restarts by construction
-   -- there is no state to reset. Respect a reader who asked for less motion:
-   the fill still appears and still fades, just without the tween. */
 @media (prefers-reduced-motion: reduce) {
   #graph svg g.fresh ellipse,
   #graph svg g.fresh polygon,
@@ -1111,39 +586,16 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   }
 }
 
-/* -- completions -----------------------------------------------------------
-   ABOVE the bar. The bar sits 5.5rem off the bottom with the graph behind
-   it, so a list dropping down would cover the part you are looking at while
-   you filter it.
-
-   Absolutely positioned rather than in flow, so opening it does not move the
-   field -- the thing you are typing in should not jump when a list appears
-   under your hands. */
 #compose-list {
   position: absolute; bottom: 100%; left: 0; right: 0;
   margin: 0; padding: 0; list-style: none;
-  /* BEST MATCH AT THE TOP, and the rows in the order they are ranked. The
-     list reads down the way a list reads, so ctrl-n walking down the rows
-     walks down the ranking too. */
+
   display: flex; flex-direction: column;
-  /* A flex item shrinks to fit by default, so eight rows squeeze into the
-     five-row box rather than overflowing it. Told not to, the box overflows
-     and scrolls. */
-  /* FIVE ROWS, then scroll. Enough to see the shape of what matched without
-     the list becoming the page. */
-  /* Five WHOLE rows: a row is its line-height plus its padding, and the
-     border sits outside both -- leaving either out clips the fifth row
-     rather than showing it. ONE border, not two: the bottom edge is the
-     field's, so budgeting for both leaves a sliver of a sixth row showing
-     under the cap. */
+
   max-height: calc(5 * (1.9em + .2rem) + 1px);
   overflow-y: auto;
   background: var(--field);
-  /* FLUSH to the field, and ONE LINE where they meet rather than two: the
-     list's bottom edge and the box's top edge are the same 1px, so the
-     seam does not read thicker than the border around either of them. The
-     zero comes AFTER the shorthand -- written before it, the shorthand
-     puts the bottom border back and the pair stack into a 2px line. */
+
   border: 1px solid var(--line-strong);
   border-bottom: 0;
   font: inherit;
@@ -1160,31 +612,11 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
 }
-/* HOVER ONLY WHILE THE MOUSE IS IN USE. `:hover` is a state the browser
-   holds at the pointer's last position, and the cursor hiding while you type
-   does not clear it -- so a row stayed lit under an invisible pointer,
-   competing with the row ctrl-n had actually moved to. The class is added on
-   a real mouse move and dropped on the next keystroke; see app.js. */
+
 #compose.mousing #compose-list li:hover { background: var(--wash); }
-/* The row ctrl-n moved to. Its text is already in the field, so this marks
-   where you are in the list rather than offering something to accept. */
+
 #compose-list li.at { background: var(--wash-strong); }
 
-/* -- find ------------------------------------------------------------------
-   At the top, where the compose bar is at the bottom: they are both a line
-   you type into over the drawing, and putting them at opposite ends means
-   neither covers the other when both are up. */
-/* IN THE CORNER WITH THE MARKS, on their line and to the left of the `+`.
-   A search field, a new terminal and the help are the same kind of thing --
-   small errands that are not the drawing -- so they keep each other company
-   rather than being scattered around the edges.
-   
-   THE SAME BOTTOM AS THE MARKS, which is not the same number: their inset is
-   written as `12px - .35rem` because the padding under each glyph is a hit
-   target rather than spacing, so their boxes reach lower than the gap
-   suggests. This one has no padding to take off, so it takes theirs. The
-   `3.4rem` clears both glyphs, which sit at the same inset plus their own
-   widths. */
 #find {
   position: fixed;
   bottom: calc(12px - .35rem);
@@ -1201,8 +633,7 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   background: var(--field);
   border: 1px solid var(--line-strong);
 }
-/* NOTHING MATCHED reads on the field itself, the same way a refused config
-   line does -- there is one thing here to be wrong. */
+
 #find.empty #find-box {
   border-color: var(--bad);
   background: var(--bad-wash);
@@ -1215,8 +646,6 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
 }
 #find-input::placeholder { color: var(--ink); opacity: .4; }
 
-/* Which hit you are on. Only shown when there is more than one, so a single
-   match does not get a "1/1" that says nothing. */
 #find-count {
   flex: none;
   font: 12px/1 var(--font-ui);
@@ -1224,45 +653,25 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   font-variant-numeric: tabular-nums;
 }
 
-/* THE ARROW. Drawn into the svg in its own units, so it pans and zooms with
-   the node it points at. Red because nothing else in the drawing is: the
-   palette is the config's, and a colour no box can be given cannot be
-   confused for one that was. */
 .find-shaft {
   stroke: #e5484d;
   stroke-width: 6;
-  /* SQUARE ENDS. A butt cap stops exactly on the coordinate it is given,
-     which is what the geometry in app.js is written against -- the shaft is
-     cut to meet the head's base, and a cap that runs past that pushes stroke
-     up inside the triangle. */
+
   stroke-linecap: butt;
-  /* NO `vector-effect` HERE. It exempts a stroke from the transform, and the
-     arrow's whole size comes from a counter-scale -- so the filled head
-     shrank with the zoom while the exempt shaft did not, and the two drifted
-     apart in opposite directions. Scaled like everything else, they hold
-     their proportions and the counter-scale keeps them constant on screen. */
+
 }
 .find-head { fill: #e5484d; }
 
-/* The arrow ARRIVES rather than appearing: a mark that fades in is a mark you
-   watch land, which is what tells you where to look. Short, because the
-   answer should not be behind an animation. */
 #find-arrow {
   animation: arrive .22s ease-out;
 }
-/* RE-POINTED, NOT ARRIVED. The same mark redrawn at the same node -- a
-   keystroke refining the query, an Enter on a lone hit, a watcher redraw --
-   is not a landing, and replaying the fade made the arrow flash. find.js
-   marks those `settled`. */
+
 #find-arrow.settled { animation: none; }
 @keyframes arrive {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 
-/* The node itself, so the arrow is confirmed by what it points at rather
-   than being the only mark. The shape only -- not the text, which stays the
-   colour it was drawn. */
 #graph svg g.node.found ellipse,
 #graph svg g.node.found polygon,
 #graph svg g.node.found path {
@@ -1270,22 +679,14 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   stroke-width: 2.5;
 }
 
-/* The find bar's completions. The MIRROR of the compose list: that one opens
-   upward from a bar at the bottom, this one drops from a bar at the top, so
-   in both cases the list grows away from the edge it is against and the field
-   keeps its place. */
 #find-list {
-  /* ABOVE THE FIELD, now that the bar is at the bottom of the page: a list
-     dropping down from here would run off the edge. Absolute, so opening it
-     does not move the field -- the thing you are typing in should not jump
-     when a list appears under your hands. */
+
   position: absolute; bottom: 100%; left: 0; right: 0;
   margin: 0; padding: 0; list-style: none;
   max-height: calc(5 * (1.9em + .2rem) + 1px);
   overflow-y: auto;
   background: var(--field);
-  /* Flush to the field, sharing the one border where they meet -- the
-     BOTTOM edge here, since the list now sits on top of it. */
+
   border: 1px solid var(--line-strong);
   border-bottom: 0;
   font: inherit;
@@ -1300,96 +701,48 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis;
 }
-/* Hover only while the mouse is in use; a cursor hidden by typing must stop
-   lighting rows. Same reason as the compose list. */
+
 #find.mousing #find-list li:hover { background: var(--wash); }
 #find-list li.at { background: var(--wash-strong); }
 
-/* -- the terminal panes -----------------------------------------------------
-   A monospace grid the emulator paints into. Classes rather than ids because
-   there are two of these now -- the agent harness and the dev repl are the
-   same pane pointed at different endpoints. The panel gets a ground of its
-   own rather than following the page: a terminal is its own surface, and the
-   emulator's palette is picked to read against it -- each scheme's :root
-   block states the ground and the 16 colours together.
-
-   That ground is translucent, and the WHOLE panel wears it -- bar included.
-   A solid bar over a see-through body reads as two windows stacked, not as
-   one see-through window. */
 .term {
   --gutter: 0px;
   color: var(--term-ink);
-  /* NO BACKGROUND ON THE PANEL. The panel is a column whose bar keeps its
-     own narrow width while the body stretches -- so a ground painted here
-     covers the panel's full width at the bar's height, and the strip beside
-     the tab was a pane of translucent white over the graph with nothing on
-     it. The base rule says the panel is transparent for exactly this
-     reason; the two pieces paint themselves, below. */
+
 }
-/* The terminal's ground, on the parts that ARE the terminal. */
+
 .term > .bar, .term > .panel-body { background: var(--term); }
-/* THE TAB IS A TAB, whatever is under it. `--gutter: 0` above is for the
-   BODY -- a screen of characters should meet its edges rather than sit
-   inset -- and it took the bar's padding with it, so a terminal's title
-   pressed against both sides while visualize's had room. The body sets its
-   own padding just below; this gives the bar back the one every other tab
-   has. */
+
 .term > .bar { padding-left: .5rem; padding-right: .5rem; }
-/* No foot rule here either: an open tab has no bottom border at all,
-   whatever ground it stands on. See the note beside
-   `.panel:not(.shut) > .bar`. */
 
-/* THE SELECTED TAB, in the same maroon as the selected config line -- the two
-   mark the same idea, so they are the same colour.
-   
-   ON THE BAR, because the bar IS the tab: a shut panel is nothing else, and
-   an outline round the whole panel would jump from a tab-sized mark to a
-   window-sized one on opening.
-   
-   `border-color` rather than an `outline`, so the maroon replaces the edge
-   the tab already has instead of drawing a second line outside it -- which
-   at this size reads as a thicker border, not a coloured one. The bottom
-   edge is left to the rule above: an OPEN tab merges into its window, and a
-   maroon line across that seam would put back the very rule that one
-   removes. */
 .term .panel-body { padding: .35rem .5rem; }
-/* THE SCREEN IS THE SCROLLER, and the body around it is not.
 
-   Ghostty's renderer VIRTUALIZES scrollback: it asks its own element for
-   `scrollTop` and `clientHeight` and builds DOM only for the rows those two
-   numbers cover, holding the rest open with spacers. That only works if the
-   element it measures is the one that actually scrolls.
-
-   Left inside the panel's own scrolling, `.screen` grew to its full height
-   with `overflow: visible` and a `scrollTop` frozen at 0 -- so the renderer
-   concluded every row was visible and rebuilt the whole history on each
-   keystroke, a cost that grows with the session. The body gives up its
-   overflow here; the vendored sheet supplies the screen's, via the
-   `has-scrollback` class wterm toggles for itself. */
 .term .panel-body { overflow: hidden; display: flex; }
 .term .screen { flex: 1; min-height: 0; }
-/* WHAT THE VENDORED SHEET WANTS TO LOOK LIKE, AND WE DO NOT. It ships a
-   VS Code theme, 12px of padding, a rounded corner and a drop shadow -- a
-   terminal meant to sit alone on a page rather than inside a panel that
-   already draws its own edges. The structure underneath it is what we
-   linked it for, so the looks are overridden here rather than edited out of
-   a file the vendoring script rewrites.
 
-   THE OVERFLOW IS LEFT ALONE on purpose. `.wterm.has-scrollback` is what
-   gives the scroller its `overflow-y`, and wterm toggles that class itself
-   when the first line rolls off the top -- so a fresh terminal has no
-   scrollbar and one with history does, without this file deciding. */
 .term .screen.wterm {
+  --term-fg: var(--term-ink);
+  --term-bg: var(--term-ground);
+  --term-cursor: var(--term-cursor-color);
+  --term-color-0: var(--term-black);
+  --term-color-1: var(--term-red);
+  --term-color-2: var(--term-green);
+  --term-color-3: var(--term-yellow);
+  --term-color-4: var(--term-blue);
+  --term-color-5: var(--term-magenta);
+  --term-color-6: var(--term-cyan);
+  --term-color-7: var(--term-white);
+  --term-color-8: var(--term-bright-black);
+  --term-color-9: var(--term-bright-red);
+  --term-color-10: var(--term-bright-green);
+  --term-color-11: var(--term-bright-yellow);
+  --term-color-12: var(--term-bright-blue);
+  --term-color-13: var(--term-bright-magenta);
+  --term-color-14: var(--term-bright-cyan);
+  --term-color-15: var(--term-bright-white);
   padding: 0; border-radius: 0; box-shadow: none;
-  background: transparent; color: var(--term-ink);
-  /* THE ROW HEIGHT IS A SHARED NUMBER, and this is where the sharing
-     happens. The vendored sheet defaults it to 17px and sizes `.term-row`
-     from it; the pane divides its own body height by a MEASURED character
-     box to decide how many rows to ask for. Left at 17 those two disagree,
-     and a terminal that believes it has one more row than it can show is
-     exactly the off-by-a-row scroll this file just stopped having. Pinned to
-     our own font-size x line-height (12 x 1.35), which is what the probe in
-     panes.js measures. */
+  background: var(--term-bg); color: var(--term-fg);
+
   --term-row-height: 16.2px;
   --term-font-size: 12px;
   --term-line-height: 1.35;
@@ -1400,16 +753,9 @@ body.carrying, body.carrying * { cursor: grabbing !important; user-select: none;
   font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--term-ink); white-space: pre; tab-size: 8;
 }
-/* WHAT USED TO BE HERE was a rule for every part of a screen this file drew
-   itself -- history rows, the live rows, a wide-character box, the cursor
-   cell. Ghostty's renderer draws all of that now (see term.js), under its
-   own class names, so those rules matched nothing and have gone.
 
-   The font and colour in the rule above are NOT among them. wterm's grid
-   inherits both, and its cell metrics are measured from the computed font --
-   so that rule is what decides how many columns fit, and the pane's own
-   measurement agrees with it only because they read the same declaration. */
 .screen .term-cursor { background: var(--term-ink); color: var(--term-ground); }
 .screen:focus .term-cursor { animation: blink 1.1s steps(1) infinite; }
 @keyframes blink { 50% { background: transparent; color: inherit; } }
 
+.term .screen.wterm ::selection { background: var(--term-selection); }

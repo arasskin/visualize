@@ -1,21 +1,4 @@
 #!/bin/sh
-#
-# Compile the vendored Janet runtime, if it is not already compiled.
-#
-#     ./build          compile bin/janet when it is missing or stale
-#     ./build --force  compile it regardless
-#     ./build --clean  delete it
-#
-# The runtime is `vendor/janet/` -- the official amalgamated distribution,
-# three files, no dependencies beyond libc and a C99 compiler. It is IN THIS
-# REPOSITORY rather than fetched, so a clone builds offline and builds the
-# same runtime a year from now.
-#
-# STALENESS IS BY TIMESTAMP against the vendored sources, not by version
-# string: the question this answers is "was this binary built from the source
-# sitting next to it", and comparing mtimes answers exactly that. Editing a
-# vendored file or checking out a different version rebuilds; running ./build
-# twice does not.
 
 set -e
 
@@ -41,7 +24,6 @@ case "${1:-}" in
     ;;
 esac
 
-# Already built, and newer than everything it was built from.
 if [ "$force" -eq 0 ] && [ -x "$janet_out" ]; then
   stale=0
   for file in "$janet_src/janet.c" "$janet_src/janet.h" "$janet_src/shell.c"; do
@@ -68,13 +50,6 @@ command -v "$CC" >/dev/null 2>&1 || {
 
 echo "compiling janet from external-src/janet..."
 
-# -lm is the only library Janet actually needs everywhere; -lpthread and -ldl
-# are separate libraries on Linux and already inside libc on macOS, where
-# passing them is harmless. Tried together first, then without, so one
-# command covers both without probing the platform.
-#
-# 2>/dev/null on the first attempt only: a real compile error should be
-# visible, and it will be, because the fallback prints it.
 if ! "$CC" -O2 -std=c99 -fPIC -o "$janet_out" \
       "$janet_src/janet.c" "$janet_src/shell.c" -I"$janet_src" \
       -lm -lpthread -ldl 2>/dev/null; then

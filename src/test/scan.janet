@@ -1,9 +1,3 @@
-# The parser engine and the specs that ride on it.
-#
-# The Swift cases here are the ones that were WRONG at some point during the
-# port, kept so they cannot go wrong again quietly. Each is a false edge the
-# graph would otherwise have drawn with total confidence.
-
 (import ../visualize/parser :as parser)
 (import ../visualize/scan)
 (import ../visualize/parsers/swift)
@@ -32,27 +26,22 @@ typealias Handler = () -> Void
          (sorted (got :declares))))
 
 (t/test "an extension declares NOTHING"
-  # The bug this exists for: `private extension Color` handed the file
-  # ownership of Color and invented edges from every file using a SwiftUI
-  # colour. Extending someone else's type is the common case in Swift.
+
   (def got (swift "private extension Color { var x: Int { 1 } }\n"))
   (t/is= [] (sorted (got :declares))))
 
 (t/test "`import struct Foundation.Data` declares nothing"
-  # It contains the word `struct`, so an unanchored declaration pattern reads
-  # it as declaring Foundation -- handing the framework node to whichever file
-  # imported it.
+
   (def got (swift "import struct Foundation.Data\n"))
   (t/is= [] (got :declares))
   (t/is= ["Foundation"] (got :imports) "the node is the framework, not the symbol"))
 
 (t/test "a declaration must start a line"
-  # A keyword inside an expression is not a declaration.
+
   (t/is= [] ((swift "let x = makeStruct Thing\n") :declares)))
 
 (t/test "comments and string literals never produce references"
-  # The reason this matters: a Swift file embedding a JS program in a string
-  # contains capitalised words that are not Swift references to anything.
+
   (def got (swift ``
 // mentions FakeType
 /* mentions BlockFake */
@@ -65,8 +54,7 @@ let real = RetailerConfig()
           (string ghost " must not be a reference"))))
 
 (t/test "blanking noise preserves every byte offset"
-  # Replaced with spaces rather than deleted, so a token can never be glued to
-  # its neighbour: Foo"bar"Baz must not become FooBaz.
+
   (def text `Foo"bar"Baz`)
   (def clean (parser/blank-noise (swift/spec :noise) text))
   (t/is= (length text) (length clean))
@@ -81,17 +69,11 @@ from . import sibling
 `` "t.py"))
   (t/ok (index-of "os" (got :imports)))
   (t/ok (index-of "otto.store" (got :imports)) "dotted modules stay whole")
-  # BOTH READINGS, because the syntax does not say which one it is: `Cart`
-  # here is a class, but `cart` in `from otto.mcp import cart` is a file, and
-  # the two lines are the same shape. The scan keeps whichever names a file
-  # -- see "an imported name that is a class is not a node" below.
+
   (t/ok (index-of "otto.store.Cart" (got :imports)) "the symbol reading too"))
 
 (t/test "a parenthesised import list spans lines"
-  # THE FORM A LONG IMPORT IS ACTUALLY WRITTEN IN, and the line-anchored
-  # pattern this replaced could only ever see its first line -- so
-  # `store_order` and `store_retailer` below were silently dropped, and the
-  # files they name looked like nothing imported them.
+
   (def got (parser/run python/spec ``
 from otto import (
     store_cart,
@@ -109,10 +91,7 @@ from otto import (
   (t/ok (not (index-of "otto.sc" (got :imports))) "not the local name"))
 
 (t/test "an import that IS a string literal survives the noise pass"
-  # THE BUG THIS EXISTS FOR: blanking string literals before reading imports
-  # erased every import in Go and JavaScript, because in both languages the
-  # module path is a quoted string. Declarations and references still get the
-  # strings blanked; imports get only the comments blanked. See src/parser.janet.
+
   (def got (parser/run go/spec ``
 import "fmt"
 
@@ -137,9 +116,7 @@ const char *note = "#include <InAString.h>";
   (t/is= ["Servo" "pins"] (sorted (got :imports))))
 
 (t/test "arduino declares the names another tab can call"
-  # A sketch's tabs are concatenated before compiling, so a second tab's
-  # function is callable from the first with no include anywhere -- these
-  # names are the only thing those edges can be drawn from.
+
   (def got (parser/run arduino/spec ``
 struct Reading { int raw; };
 class Motor { public: void spin(); };
@@ -157,10 +134,7 @@ String label() { return "x"; }
          (sorted (got :declares))))
 
 (t/test "arduino declares neither setup, loop, nor a control-flow keyword"
-  # setup and loop are called by the runtime rather than by another tab, so
-  # owning them would make every tab depend on whichever one defined them.
-  # The rest are the false declarations a looser pattern invents: `if (x)`
-  # reads exactly like a call, and `for (int i = 0; ...)` like a definition.
+
   (def got (parser/run arduino/spec ``
 void setup() { }
 void loop() { }
@@ -172,8 +146,7 @@ digitalWrite(LED, HIGH);
   (t/is= [] (sorted (got :declares))))
 
 (t/test "arduino claims sketches and leaves C and C++ alone"
-  # .h and .cpp belong to every project in the world, not to Arduino --
-  # claiming them would scan this repo's own janet.c as a sketch.
+
   (t/ok (parser/claims? arduino/spec "blink/blink.ino"))
   (t/ok (parser/claims? arduino/spec "old/sketch.pde"))
   (t/ok (not (parser/claims? arduino/spec "external-src/janet/janet.c")))
@@ -198,15 +171,7 @@ const fs = require('fs')
   (t/ok (not (index-of "T" (got :imports))) "the binding is not the module"))
 
 (t/test "a node name is the path, dotted"
-  # ONE SPELLING. The name, the label and the config prefix are all the
-  # dotted path now: a node reads `src.visualize.color`, answers to
-  # `src.visualize.color`, and is grouped by typing what is on it. Names used
-  # to flatten to underscores while labels showed slashes, so a path had
-  # three forms and only one was ever visible.
-  #
-  # Import specifiers are the hard cases: `github.com/lib/pq`, `./store`,
-  # `@scope/pkg` -- and a directory called `demo-api`, whose hyphen is part
-  # of one name rather than a separator between two.
+
   (t/is= "demo-api.worker.js" (scan/node-name "demo-api/worker.js")
          "a hyphen is part of the name, not a separator")
   (t/is= "OttoClip.CartWebView.swift" (scan/node-name "OttoClip/CartWebView.swift"))
@@ -228,10 +193,7 @@ const fs = require('fs')
           (string name " must not start with a dot"))))
 
 (t/test "a relative import resolves to the file it names"
-  # Flattened as written, `../visualize/color` becomes the node `___visualize_color`
-  # -- a phantom external nothing matches, instead of an edge to the
-  # visualize/color the scan already found. Which file it means depends on
-  # where the importer sits.
+
   (t/is= "visualize/color" (scan/resolve-relative "test/scan.janet" "../visualize/color"))
   (t/is= "visualize/b" (scan/resolve-relative "visualize/a.janet" "./b"))
   (t/is= "x" (scan/resolve-relative "a/b/c.js" "../../x"))
@@ -250,8 +212,7 @@ const fs = require('fs')
          (parser/run fake "anything at all" "a.x")))
 
 (t/test "html reads what a page pulls in"
-  # NODE NAMES, not the specifiers read -- see the css test above and the
-  # :imports-are contract in parser.janet.
+
   (defn imports [text] (((html/spec :parse) text "page.html") :imports))
 
   (t/is= ["theme" "app"]
@@ -261,35 +222,25 @@ const fs = require('fs')
   (t/is= ["clip" "thumb"]
          (sort (imports `<video poster="thumb.jpg" src="clip.mp4"></video>`)))
 
-  # A LINK TO ANOTHER PAGE IS NAVIGATION, not a dependency: a site whose
-  # every page links every other draws a mesh saying only that a nav bar
-  # exists. `href` is a file everywhere EXCEPT on an anchor.
   (t/is= [] (imports `<a href="about.html">about</a>`))
   (t/is= ["theme"]
          (imports `<a href="about.html">x</a><link href="theme.css">`)
          "which is decided by the tag, not the attribute")
 
-  # Not files.
   (t/is= [] (imports `<script src="https://cdn.example.com/lib.js"></script>`))
   (t/is= [] (imports `<link href="//cdn.example.com/f.css">`))
   (t/is= [] (imports `<img src="data:image/png;base64,iVBOR">`))
   (t/is= [] (imports `<a href="#top">top</a>`))
-  # A TEMPLATE HOLE IS NOT A FILENAME. A page the server fills in before
-  # serving carries {{...}} where a value will go; this one drew a node
-  # called FAVICON, as though the page depended on a file by that name.
+
   (t/is= [] (imports `<link rel="icon" href="{{FAVICON}}">`))
   (t/is= ["style"]
          (imports `<link rel="icon" href="{{FAVICON}}"><link href="style.css">`)
          "and the hole beside a real file does not take it with it")
 
-  # A query is not part of the name, and a site-absolute path is read as a
-  # sibling: the server maps / to the directory the page sits in.
   (t/is= ["favicon"] (imports `<link rel="icon" href="/favicon.ico?v=2">`)))
 
 (t/test "css references other files three ways"
-  # A PARSER ANSWERS IN NODE NAMES, not in the specifier it read -- see the
-  # :imports-are contract in parser.janet. The stylesheet under test sits at
-  # `sheet.css`, so its siblings are named by their bare stem.
+
   (defn imports [text] (((css/spec :parse) text "sheet.css") :imports))
 
   (t/is= ["base"] (imports `@import "base.css";`) "another stylesheet")
@@ -300,12 +251,10 @@ const fs = require('fs')
   (t/is= ["spaced"] (imports `.a { background: url( spaced.png ); }`)
          "the spaces inside url() are syntax, not name")
 
-  # `url(#blur)` names an SVG filter in the same document, not a file.
   (t/is= [] (imports `.e { filter: url(#blur); }`))
   (t/is= [] (imports `.c { background: url(https://cdn.example.com/x.png); }`))
   (t/is= [] (imports `.d { background: url(data:image/gif;base64,R0lGOD); }`))
 
-  # A COMMENTED-OUT IMPORT IS NOT ONE.
   (t/is= [] (imports `/* @import "off.css"; */`))
   (t/is= ["on"] (imports `/* off */ @import "on.css";`)))
 
@@ -320,39 +269,26 @@ auth  the login service
 database  where things are kept
     disk
 ``))
-  # PREFIXED BY THE FILE, on its stem: two files may each describe an `auth`
-  # without colliding. The extension is reported separately and drawn under
-  # the label, so it is not in the name.
+
   (t/is= ["demo.auth" "demo.database" "demo.crypto" "demo.disk"] (got :nodes))
   (t/is= "visualize" (got :extension))
-  # EVERY LABEL MENTIONED IS A NODE, including one that never opens a block
-  # of its own -- `disk` is named under `database` and nothing else.
+
   (t/is= [["demo.auth" "demo.database"]
           ["demo.auth" "demo.crypto"]
           ["demo.database" "demo.disk"]]
          (got :edges))
 
-  # The description after a label is read but not drawn, so a label with one
-  # and a label without produce the same node.
   (t/is= ["demo.a" "demo.b"] ((read-it "a  some prose\n    b\n") :nodes))
   (t/is= ["demo.a" "demo.b"] ((read-it "a\n    b\n") :nodes))
 
-  # A comment is not a block, and an indented line with no block above it is
-  # a dependency of nothing rather than of whatever came before the comment.
   (t/is= [] ((read-it "# just a note\n") :nodes))
   (t/is= [] ((read-it "    orphan\n") :edges))
 
-  # A label depending on itself says nothing, and is not drawn.
   (t/is= [] ((read-it "a  x\n    a\n") :edges))
 
-  # A block runs until the next heading: a blank line inside one does not
-  # end it.
   (t/is= [["demo.a" "demo.b"] ["demo.a" "demo.c"]]
          ((read-it "a  x\n    b\n\n    c\n") :edges))
 
-  # INDENTATION IS ANY LEADING SPACE OR TAB, in any amount -- and it does not
-  # NEST. A line indented further still belongs to the nearest heading above
-  # it, because the format is one level deep.
   (t/is= [["demo.a" "demo.b"]] ((read-it "a\n\tb\n") :edges) "a tab indents")
   (t/is= [["demo.a" "demo.b"]] ((read-it "a\n b\n") :edges) "one space indents")
   (t/is= [["demo.a" "demo.b"] ["demo.a" "demo.c"]]
@@ -360,13 +296,7 @@ database  where things are kept
          "deeper indentation is not nesting"))
 
 (t/test "an import is relative to its own project, not to the scan root"
-  # POINTED AT A DIRECTORY OF PROJECTS, which is what a workspace is. A
-  # python import inside one of them is written from THAT project's root:
-  # `otto.store` in `shop/` means `shop/otto/store.py`, whose node name
-  # carries the `shop.` the import never mentions.
-  #
-  # Those names matched nothing and became externals, sitting on the graph
-  # beside `os` and `json`.
+
   (def root (string (os/getenv "TMPDIR") "vz-sub-" (string (os/time))))
   (os/mkdir root)
   (os/mkdir (string root "/shop"))
@@ -382,13 +312,7 @@ database  where things are kept
   (t/is= [["shop.main.py" "shop.otto.store.py"]] (g :edges)))
 
 (t/test "a tail that two projects share resolves to neither"
-  # THE RULE EVERY OTHER LOOKUP HERE FOLLOWS. Two projects both holding
-  # `otto/store.py` cannot be told apart by a name that says neither, so the
-  # reference stays external rather than being attributed to whichever was
-  # read first. Losing an edge says nothing false; inventing one does.
-  # THE IMPORTER IS IN NEITHER, so the sibling rule cannot settle it: a file
-  # that imports `otto.store` from its own directory means the one beside
-  # it, and this one has no `otto` beside it at all.
+
   (def root (string (os/getenv "TMPDIR") "vz-amb-" (string (os/time))))
   (os/mkdir root)
   (each p ["/a" "/a/otto" "/b" "/b/otto" "/c"] (os/mkdir (string root p)))
@@ -401,17 +325,13 @@ database  where things are kept
   (t/is= ["?.otto.store"] ext "ambiguous, so it stays a name from outside"))
 
 (t/test "a python package is the directory's __init__.py"
-  # `import otto.texting` NAMES A DIRECTORY in python, not a module file,
-  # and what runs is the `__init__.py` inside it. Without this the import
-  # matched nothing and drew a node beside the very file it meant.
+
   (def root (string (os/getenv "TMPDIR") "vz-pkg-" (string (os/time))))
   (os/mkdir root)
   (os/mkdir (string root "/otto"))
   (os/mkdir (string root "/otto/texting"))
   (spit (string root "/otto/texting/__init__.py") "x = 1\n")
-  # THE IMPORTER SITS OUTSIDE the package it names: a file's own package is
-  # not drawn as a dependency of it (see "a file's own package" below), so an
-  # importer inside `otto/texting/` would prove nothing about resolution.
+
   (spit (string root "/otto/cli.py") "import otto.texting\n")
 
   (def g (scan/scan root))
@@ -419,8 +339,6 @@ database  where things are kept
   (t/is= [] ext "the package resolved rather than becoming an external")
   (t/is= [["otto.cli.py" "otto.texting.__init__.py"]] (g :edges))
 
-  # AND FROM A SUBPROJECT'S OWN ROOT, where the import says nothing about
-  # where the project sits -- the same tail rule the module lookup follows.
   (def sub (string (os/getenv "TMPDIR") "vz-pkgsub-" (string (os/time))))
   (os/mkdir sub)
   (os/mkdir (string sub "/shop"))
@@ -434,19 +352,14 @@ database  where things are kept
   (t/is= [["shop.main.py" "shop.otto.texting.__init__.py"]] (g2 :edges)))
 
 (t/test "a bare import is the module beside it"
-  # THE DIRECTORY A SCRIPT RUNS FROM IS ON PYTHON'S PATH, so `import db` in
-  # `src/main.py` means the `db.py` sitting next to it. Without this the
-  # name fell through to the global fallbacks, which called it ambiguous --
-  # a tree can hold several files ending in `db`, and two of them here were
-  # `.db` DATABASES rather than modules -- and drew an external instead.
+
   (def root (string (os/getenv "TMPDIR") "vz-sib-" (string (os/time))))
   (os/mkdir root)
   (os/mkdir (string root "/src"))
   (os/mkdir (string root "/data"))
   (spit (string root "/src/db.py") "x = 1\n")
   (spit (string root "/src/main.py") "import db\n")
-  # A decoy with the same leaf, elsewhere, of the kind that made the global
-  # lookup give up.
+
   (spit (string root "/data/db.py") "y = 2\n")
 
   (def g (scan/scan root))
@@ -456,18 +369,7 @@ database  where things are kept
          "and it is the sibling, not the file with the same name elsewhere"))
 
 (t/test "an imported name that is a class is not a node"
-  # `from otto.models import Cart` and `from otto.mcp import cart` ARE THE
-  # SAME LINE as far as the syntax goes: a module, `import`, a name. Python
-  # tells them apart by looking -- a submodule if one exists, an attribute
-  # otherwise -- so the parser reports both readings and the resolution here
-  # keeps whichever names a file.
-  #
-  # THE BUG THIS EXISTS FOR came in two halves. Reading only the module lost
-  # `otto/mcp/cart.py` and every store beside it, so real files looked
-  # unimported. Reading both and externalising the misses drew a `?.` node
-  # for every class and type in the tree -- three hundred and sixty of them
-  # on one project, `?.otto.models.FetchFn` sitting beside `otto.models.py`
-  # itself. A name whose own prefix resolved is a symbol, and is dropped.
+
   (def root (string (os/getenv "TMPDIR") "vz-cls-" (string (os/time))))
   (os/mkdir root)
   (os/mkdir (string root "/otto"))
@@ -488,17 +390,7 @@ database  where things are kept
          "the class invented no external"))
 
 (t/test "a package-qualified import resolves against the package root"
-  # `from otto import db` inside `otto/store_cart.py` means `otto/db.py` --
-  # the name resolved against the importer's GRANDparent, not its own
-  # directory. Checking only the immediate directory built
-  # `...otto.otto.db`, which exists nowhere, so the name fell through to the
-  # global fallbacks.
-  #
-  # AND THE FALLBACKS CANNOT ANSWER IT, which is why this matters at a scan
-  # root holding more than one project: `otto.db` also names three SQLITE
-  # DATABASES here, so the by-leaf map calls it ambiguous and gives up --
-  # correctly, since it has no way to know which was meant. The file one
-  # directory up from the importer is not ambiguous at all.
+
   (def root (string (os/getenv "TMPDIR") "vz-anc-" (string (os/time))))
   (os/mkdir root)
   (os/mkdir (string root "/shop"))
@@ -507,7 +399,7 @@ database  where things are kept
   (spit (string root "/shop/otto/__init__.py") "")
   (spit (string root "/shop/otto/db.py") "x = 1\n")
   (spit (string root "/shop/otto/store_cart.py") "from otto import db\n")
-  # The decoys that make the global lookup ambiguous.
+
   (spit (string root "/shop/data/otto.db") "")
   (spit (string root "/shop/data/otto.db-wal") "")
 
@@ -519,19 +411,7 @@ database  where things are kept
         "and nothing was invented as an external"))
 
 (t/test "a third-party package does not collide with a local one"
-  # `from mcp.server.fastmcp import FastMCP` means the INSTALLED mcp
-  # library. A project that happens to hold an `otto/mcp/` package must not
-  # capture it -- and the graph was disagreeing with itself about the one
-  # import, keeping `?.mcp.server.fastmcp` external while drawing an edge to
-  # the local `otto/mcp/` for the bare prefix `mcp`.
-  #
-  # TWO LOOSE MATCHES DID IT. The package map indexes every suffix of a
-  # package's name, so `otto/mcp/__init__.py` answers to a bare `mcp`; and
-  # the sibling walk climbed past the package root, which python has not
-  # done since PEP 328 removed implicit relative imports -- from inside a
-  # package `import json` is the stdlib, never the file beside it. Both are
-  # right for a name a file actually wrote, and wrong for a prefix nobody
-  # wrote.
+
   (def root (string (os/getenv "TMPDIR") "vz-coll-" (string (os/time))))
   (os/mkdir root)
   (os/mkdir (string root "/otto"))
@@ -551,11 +431,7 @@ database  where things are kept
         "and the library stayed external"))
 
 (t/test "a package-qualified import still reaches its parent package"
-  # The restriction above must not cost the parent edges: `from
-  # otto.product_reads.shopify import read` depends on
-  # `otto/product_reads/__init__.py`, because python runs it on the way.
-  # That name is inferred too, so it resolves by the EXACT package map --
-  # matched on the whole path rather than on a suffix of it.
+
   (def root (string (os/getenv "TMPDIR") "vz-par-" (string (os/time))))
   (os/mkdir root)
   (os/mkdir (string root "/otto"))
@@ -573,14 +449,7 @@ database  where things are kept
         "and the package python ran to reach it"))
 
 (t/test "a file's own package is not drawn as a dependency of it"
-  # Python runs `otto/mcp/__init__.py` before `otto/mcp/core.py`, so it is a
-  # real import and pydeps reports it -- but on a DRAWING it says nothing the
-  # picture is not already saying. The two sit in the same box, and every
-  # module in a package would get the identical arrow to the box it is drawn
-  # inside: seventy seven such edges on shoppingagent, all noise.
-  #
-  # A DIFFERENT PACKAGE'S `__init__.py` IS A REAL EDGE and stays. It crosses
-  # from one box to another, which is what the drawing exists to show.
+
   (def root (string (os/getenv "TMPDIR") "vz-own-" (string (os/time))))
   (os/mkdir root)
   (os/mkdir (string root "/otto"))
@@ -603,17 +472,7 @@ database  where things are kept
         "and a sibling module is untouched"))
 
 (t/test "an import resolves only to a file its language could load"
-  # `otto.sh` is a bash launcher sitting beside the `otto/` package. Stripping
-  # its extension leaves the stem `otto`, the same stem the package has, so
-  # `from otto import db` resolved to the SHELL SCRIPT -- and every python
-  # file in the project drew an edge to it. Ninety one of them on
-  # shoppingagent.
-  #
-  # A stem match is not enough: an import names a file its own language can
-  # LOAD, and python loads .py files. Checked once where the target is
-  # decided, so every route to it -- stem, sibling, package, tail, leaf --
-  # obeys the same rule, and a rejected target falls through to the external
-  # branch exactly as an unmatched name does.
+
   (def root (string (os/getenv "TMPDIR") "vz-lang-" (string (os/time))))
   (os/mkdir root)
   (os/mkdir (string root "/otto"))
@@ -629,10 +488,6 @@ database  where things are kept
   (t/ok (index-of "caller.py -> otto.db.py" edges)
         "and the module it actually meant still resolves")
 
-  # A LANGUAGE THAT SAYS NOTHING KEEPS THE OLD BEHAVIOUR. Only python
-  # declares a restriction, because it is the one whose imports are modules
-  # rather than paths; a stylesheet naming a font and a page naming a script
-  # are cross-kind on purpose and are not made to enumerate the web.
   (def web (string (os/getenv "TMPDIR") "vz-web-" (string (os/time))))
   (os/mkdir web)
   (spit (string web "/page.html")
@@ -644,17 +499,10 @@ database  where things are kept
         "html still reaches a stylesheet"))
 
 (t/test "a reference into a pruned directory draws nothing"
-  # The walk prunes `public/`, `.venv/`, `dist/` and the rest, so a file
-  # inside one is not in the tree. A reference to it matched nothing and was
-  # invented as an EXTERNAL -- which says the opposite of what is true: the
-  # file is right there, and the scan chose not to look. Skipping a directory
-  # AND drawing nodes for what it holds is the worst of both.
+
   (def root (string (os/getenv "TMPDIR") "vz-prune-" (string (os/time))))
   (os/mkdir root)
-  # `dist` rather than `public`: a directory named for what it SERVES holds
-  # sources as often as output, and `public` was taken off the skip list
-  # when it turned out to be hiding a served stylesheet. `dist` names the
-  # output itself and is skipped by every spec that has an opinion.
+
   (os/mkdir (string root "/dist"))
   (spit (string root "/dist/app.css") "body{}\n")
   (spit (string root "/page.html")
@@ -666,9 +514,7 @@ database  where things are kept
   (t/is= [] (g :edges) "and no edge was drawn to it"))
 
 (t/test "a url the page computes at runtime is not a path"
-  # `src="${esc(t.image)}"` is a template literal the browser fills in, and
-  # reading it as a path invented `esc/t` -- a node named after the escaping
-  # helper that happened to sit inside the braces.
+
   (def root (string (os/getenv "TMPDIR") "vz-tmpl-" (string (os/time))))
   (os/mkdir root)
   (spit (string root "/page.html")
@@ -685,10 +531,7 @@ database  where things are kept
          "and the one real reference still resolves"))
 
 (t/test "a shell assignment is not a command"
-  # `css=otto/resources/public/app.css` opens a line with something that
-  # looks exactly like a slashed path in command position, and reading it as
-  # one made `css` a DIRECTORY: the value became
-  # `css.otto.resources.public.app`, a node for a path that exists nowhere.
+
   (def root (string (os/getenv "TMPDIR") "vz-assign-" (string (os/time))))
   (os/mkdir root)
   (os/mkdir (string root "/lib"))
@@ -704,11 +547,7 @@ database  where things are kept
         "and a real source line still resolves"))
 
 (t/test "a reference that resolves to no name draws nothing"
-  # `. ./.env` names a dotfile the walk skips, and `.env` has no stem at all
-  # -- `stem` reads the whole name as an extension and returns "". What
-  # survived was the DIRECTORY it was resolved against, so the reference
-  # collapsed to the importing file's own parent and drew an external named
-  # after the folder the script is sitting in.
+
   (def root (string (os/getenv "TMPDIR") "vz-dot-" (string (os/time))))
   (os/mkdir root)
   (os/mkdir (string root "/proj"))
@@ -721,18 +560,7 @@ database  where things are kept
   (t/is= [] (g :edges)))
 
 (t/test "a package beside the importer resolves, and a library still does not"
-  # `from otto import ...` in `shoppingagent/tests/` means the
-  # `shoppingagent/otto/` package. The sibling walk only ever asked about
-  # file STEMS, so a package -- which is a directory -- was invisible to it,
-  # and the bare key `otto` is ambiguous across a tree where two projects
-  # have one. Thirty five test files drew `?.otto` for a package sitting one
-  # directory up.
-  #
-  # AND THE CANDIDATE HAS TO BE FILTERED AS IT IS FOUND. `otto.sh` has the
-  # stem `shoppingagent.otto`, so the stem lookup answered first, the walk
-  # stopped, and the language check then rejected the shell script -- turning
-  # the whole lookup into a miss while the package the next line would have
-  # found sat unexamined.
+
   (def root (string (os/getenv "TMPDIR") "vz-sib-" (string (os/time))))
   (os/mkdir root)
   (os/mkdir (string root "/otto"))
@@ -748,11 +576,6 @@ database  where things are kept
   (t/ok (not (some |(string/find "otto.sh" $) edges))
         "and the shell script sharing its stem did not win")
 
-  # THE LIBRARY CASE MUST STILL FAIL. `from mcp.server.fastmcp import X`
-  # yields the INFERRED prefix `mcp`, which nobody wrote; letting that reach
-  # a sibling package captures a local `otto/mcp/` for a name meaning the
-  # installed library. A name the file wrote gets the package lookup; one
-  # nobody wrote does not.
   (def lib (string (os/getenv "TMPDIR") "vz-lib-" (string (os/time))))
   (os/mkdir lib)
   (os/mkdir (string lib "/otto"))
@@ -770,12 +593,7 @@ database  where things are kept
         "the local package did not capture the library's name"))
 
 (t/test "a symbol whose module is the file beside it is not a node"
-  # `from search import search_products` in `src/main.py` names the
-  # `search.py` sitting beside it. The symbol reading `search.search_products`
-  # is dropped when its PREFIX resolves -- but the prefix was looked for in
-  # the maps alone, and a bare sibling name is in no map: only the walk finds
-  # it. So `?.search.search_products` was drawn next to the very file it came
-  # out of.
+
   (def root (string (os/getenv "TMPDIR") "vz-sym-" (string (os/time))))
   (os/mkdir root)
   (os/mkdir (string root "/src"))
@@ -798,28 +616,19 @@ database  where things are kept
             [icare.ui.normalized-ast :refer [ast->ast-store]]))
 ` "t.cljd"))
   (def found (got :imports))
-  # A COMMENTED-OUT REQUIRE IS NOT ONE -- this exact line sits inside a live
-  # :require form in the project that motivated the spec.
+
   (t/ok (not (index-of "icare.benchmarks" found)) "the ;; line said nothing")
-  # THE DASH IS THE FILE'S UNDERSCORE: clojure munges namespaces onto disk.
+
   (t/ok (index-of "icare.ui.normalized_ast" found) "munged to match the file")
-  # STRING REQUIRES BECOME GROUPABLE NAMES, and platform ones arrive
-  # ALREADY MARKED: `package:` and `dart:` name what pub and the runtime
-  # ship, no tree holds either, and saying so here is what keeps the scan
-  # from going looking -- `dart.ui` once fell through to the leaf match and
-  # found `icare/ui.cljd`, a cycle no clojure compiler would accept.
+
   (t/ok (index-of "?.flutter.material" found) "package: and .dart trimmed, marked")
   (t/ok (index-of "?.dart.ui" found) "dart: likewise")
-  # THE :refer VECTOR HOLDS SYMBOLS THAT ARE NOT REQUIRES.
+
   (t/ok (not (index-of "scale_down_fade_animation" found)) "refer names skipped")
   (t/ok (index-of "icare.ui.shared" found)))
 
 (t/test "a clojuredart require finds its file from the source root"
-  # `icare.ui.shared` is written from `src/app/src/`, three directories deep
-  # in the project -- the same tail rule every module import follows. And
-  # `cljd-out` is the transpiler's OUTPUT: `cljd.flutter` is a library from
-  # deps.edn, and its compiled copy under lib/ was capturing the name that
-  # should have stayed an external.
+
   (def root (string (os/getenv "TMPDIR") "vz-cljd-" (string (os/time))))
   (os/mkdir root)
   (each d ["/src" "/src/app" "/src/app/src" "/src/app/src/icare"
@@ -836,3 +645,22 @@ database  where things are kept
         "the munged require found the file under the source root")
   (t/ok (index-of "src.app.src.icare.ui.cljd -> ?.cljd.flutter" edges)
         "and the library stayed external, its transpiled copy unseen"))
+
+(t/test "fingerprints track names and individual files without aggregate collisions"
+  (def root (string (os/getenv "TMPDIR" "/tmp/") "vz-fingerprint-" (os/getpid)))
+  (os/mkdir root)
+  (defer (do (each name (os/dir root) (os/rm (string root "/" name)))
+             (os/rmdir root))
+    (spit (string root "/a.js") "one")
+    (spit (string root "/c.js") "three")
+    (def before (scan/fingerprint root))
+    (t/is= before (scan/fingerprint root) "unchanged scans compare equal")
+    (os/rename (string root "/a.js") (string root "/b.js"))
+    (def renamed (scan/fingerprint root))
+    (t/ok (not= before renamed) "same-length rename changes the fingerprint")
+    (spit (string root "/b.js") "three")
+    (spit (string root "/c.js") "one")
+    (def edited (scan/fingerprint root))
+    (t/ok (not= renamed edited) "opposing size changes cannot cancel out")
+    (os/rm (string root "/c.js"))
+    (t/ok (not= edited (scan/fingerprint root)) "deletion changes the fingerprint")))

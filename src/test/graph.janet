@@ -1,13 +1,8 @@
-# The config file on disk.
-
 (import ../visualize/graph)
 (import ../visualize/config)
 (import ../visualize/scan)
 (import ./harness :as t)
 
-# The three steps the server takes for one drawing: read the config, run it,
-# render it. Here rather than in graph, because graph draws a PARSED config
-# and knows nothing about files.
 (defn- drawn [tree path]
   (def lines (config/read-config path))
   (def [state problems] (config/run lines))
@@ -15,24 +10,19 @@
   [lines problems ok result])
 
 (t/test "animate flashes what moved since the last drawing"
-  # NOTHING ON THE FIRST DRAW: there is no previous one to differ from, and
-  # flashing the whole graph on load would say only that the graph exists.
+
   (def conf "/tmp/visualize-animate-test.conf")
   (spit conf "(animate)\n")
-  # A FRESH SCAN PER DRAWING, the way the server does it after the watcher
-  # says the source moved. Nothing is cached between them, so what the
-  # drawing compares against is the drawing before it and nothing else.
+
   (def first-draw (drawn (scan/scan ".") conf))
   (t/is= 0 (length (string/find-all "node fresh" (string (first-draw 3))))
          "the first drawing flashes nothing")
 
-  # A file written since then is new to this drawing.
   (os/touch "src/visualize/color.janet")
   (def second-draw (drawn (scan/scan ".") conf))
   (t/is= 1 (length (string/find-all `class="node fresh"` (string (second-draw 3))))
          "one file moved, one node flashes")
 
-  # And without the verb, nothing is marked however much moved.
   (spit conf "(lines)\n")
   (os/touch "src/visualize/select.janet")
   (def unasked (drawn (scan/scan ".") conf))
@@ -41,8 +31,7 @@
   (os/rm conf))
 
 (t/test "a nested box becomes a nested cluster"
-  # graphviz draws nested clusters natively; the work is emitting the
-  # nesting rather than a flat partition that had to pick one box per node.
+
   (def dir "/tmp/visualize-nested-boxes")
   (defn clear []
     (each entry (try (os/dir dir) ([_] []))
@@ -63,18 +52,12 @@
   (t/is= ["cluster_api" "cluster_api.v1"] (sort clusters)
          "both boxes are drawn, not just the one declared first")
 
-  # Each cluster wears its OWN colour. An outer box may hold nothing but
-  # inner boxes, whose nodes wear the inner colour, so reading a hue off a
-  # member would paint the outer rectangle in the wrong ink.
   (t/ok (string/find "#22a6f2" svg) "the outer box is blue")
   (t/ok (string/find "#ff4d6d" svg) "and the inner one red")
   (clear))
 
 (t/test "a line count is written out in full"
-  # No `1.3k`: abbreviating rounds away the difference between files a
-  # hundred lines apart, which is the comparison the number is on the box to
-  # support. Asserted on the drawing rather than on a formatter, since the
-  # label is the thing that has to be right.
+
   (def conf "/tmp/visualize-lines-test.conf")
   (spit conf "(lines)\n")
   (def svg (string ((drawn (scan/scan ".") conf) 3)))
@@ -82,21 +65,12 @@
         "no k-abbreviated count")
   (t/ok (nil? (peg/find ~(* (some (range "09")) "." (some (range "09")) "k") svg))
         "and nothing rounded to a tenth")
-  # And a real count is on the drawing, so the assertions above are not
-  # passing because nothing was labelled at all.
+
   (t/ok (peg/find ~(* ">" (some (range "09")) "<") svg) "counts are drawn")
   (os/rm conf))
 
 (t/test "a drawing of a stale tree does not consume the flash"
-  # THE DEFERRED FLASH. The server holds the scanned tree and the watcher
-  # polls, so between an edit and the tick that notices it there is a
-  # window. A drawing made in that window sees the OLD stamps: the edited
-  # file looks unchanged, and recording those stamps as seen meant the flash
-  # arrived on whatever redraw came after the tick -- a file nobody was
-  # working on appearing to flash out of nowhere.
-  #
-  # Fixed by checking the tree per draw rather than only when the watcher
-  # fires; this asserts the behaviour that fix produces.
+
   (def dir "/tmp/visualize-stale-tree")
   (defn clear []
     (each entry (try (os/dir dir) ([_] []))
@@ -115,20 +89,17 @@
                      (string ((drawn tree conf) 3)))))
 
   (fresh-in (scan/scan dir))
-  # An edit the held tree has not seen yet.
+
   (spit (string dir "/b.py") "x = 222222\n")
-  # A FRESH SCAN is what the server now does per draw, so the edit is caught
-  # by the drawing that follows it rather than by a later one.
+
   (t/is= ["b.py"] (fresh-in (scan/scan dir)))
   (t/is= [] (fresh-in (scan/scan dir)) "and is not shown twice")
   (clear))
 
 (t/test "a file added, edited or removed between drawings"
-  # A TREE OF ITS OWN, so adding and removing files is not done to the repo
-  # the suite is running out of.
+
   (def dir "/tmp/visualize-animate-tree")
-  # Removed file by file: this Janet has no recursive rmdir, and the tree is
-  # flat by construction.
+
   (defn clear []
     (each entry (try (os/dir dir) ([_] []))
       (os/rm (string dir "/" entry)))
@@ -145,29 +116,36 @@
                                  "<title>" (<- (some (if-not "<" 1)))) 1))
                      (string ((drawn (scan/scan dir) conf) 3)))))
 
-  # THE BASELINE IS PER PROCESS, not per tree -- "since you last looked" is
-  # a question about this session. The test above drew this repository, so
-  # the first drawing of a DIFFERENT tree finds every node new, which is
-  # correct and is why this one is discarded rather than asserted on.
   (flashed)
   (t/is= [] (flashed) "a second drawing of an unchanged tree flashes nothing")
 
-  # A FILE THAT DID NOT EXIST is new to this drawing.
   (spit (string dir "/c.py") "import a\n")
   (t/is= ["c.py"] (flashed) "a new file flashes")
 
   (t/is= [] (flashed) "and stops once it has been seen")
 
-  # WITHIN THE SAME SECOND, which is the case animate exists for: save a
-  # file and the watcher redraws a moment later. mtime counts whole seconds,
-  # so the size is what catches this.
   (spit (string dir "/b.py") "x = 222222222\n")
   (t/is= ["b.py"] (flashed) "an edit inside one second still flashes")
 
-  # A REMOVED FILE flashes nothing -- it is not there to flash, and the
-  # nodes that remain have not moved.
   (os/rm (string dir "/c.py"))
   (t/is= [] (flashed))
 
   (clear))
+
+(t/test "aliased folded nodes keep their final name component instead of an extension"
+  (def tree {:nodes [{:name "src.visualize.parsers.janet.janet" :label "janet\n.janet" :ours true}
+                     {:name "src.visualize.parsers.python.janet" :label "python\n.janet" :ours true}]
+             :edges [] :ours {} :stamps {}
+             :sizes {"src.visualize.parsers.janet.janet" 400
+                     "src.visualize.parsers.python.janet" 341}})
+  (each sized [false true]
+    (def state (config/new-state))
+    (put state :aliases [{:alias "~" :prefix "src.visualize"}])
+    (put state :folded ["src.visualize.parsers"])
+    (put state :sized sized)
+    (def [ok svg] (graph/render-svg tree state))
+    (t/ok ok)
+    (t/ok (string/find ">parsers</text>" svg) "parsers remains part of the folded name")
+    (t/ok (not (string/find ">.parsers" svg)) "a folded node has no extension row")
+    (when sized (t/ok (string/find ">741</text>" svg) "the aggregate line count stays separate"))))
 

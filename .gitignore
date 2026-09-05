@@ -1,16 +1,5 @@
-# The compiled runtime. `./build` makes it from vendor/janet in a few seconds,
-# so it is a build artifact rather than source -- and a committed binary would
-# be wrong for whichever platform did not build it.
 bin/
 
-# Written into whatever directory is being scanned. One lands here whenever
-# visualize is pointed at its own repo.
-#
-# Anchored, so it means this one file and not any visualize.conf deeper in
-# the tree -- and the name no longer collides with src/visualize/config.janet,
-# which an unanchored `config.janet` once swallowed whole.
 /visualize.conf
 
-# Scratch scripts. The scanner skips dot-directories, so a probe here is not
-# a node in the graph it is measuring -- which a file in the repo root is.
 .probe/

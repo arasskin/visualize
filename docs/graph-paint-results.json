@@ -1,0 +1,798 @@
+{
+  "environment": "Headless Chrome 152 on macOS arm64, 1440x1000, DPR 1, light theme. Isolated source copy with the current graph configuration; 90 input updates per gesture. Trace timings include instrumentation overhead and input dispatch pacing is not a smoothness benchmark.",
+  "runs": [
+    {
+      "trace": "/tmp/visualize-paint-trace.json",
+      "graph": {
+        "nodes": 42,
+        "edges": 57,
+        "elements": 560,
+        "width": "2613pt",
+        "height": "656pt"
+      },
+      "results": [
+        {
+          "name": "pan",
+          "stats": {
+            "Paint": {
+              "count": 182,
+              "totalMs": 47.846,
+              "p95Ms": 0.48,
+              "maxMs": 1.363
+            },
+            "Layout": {
+              "count": 90,
+              "totalMs": 71.258,
+              "p95Ms": 1.411,
+              "maxMs": 1.725
+            },
+            "UpdateLayoutTree": {
+              "count": 92,
+              "totalMs": 23.727,
+              "p95Ms": 0.411,
+              "maxMs": 0.976
+            },
+            "RasterTask": {
+              "count": 1260,
+              "totalMs": 31.392,
+              "p95Ms": 0.054,
+              "maxMs": 0.147
+            },
+            "FireAnimationFrame": {
+              "count": 90,
+              "totalMs": 4.905,
+              "p95Ms": 0.08,
+              "maxMs": 0.103
+            },
+            "svgPaints": 91,
+            "textLayoutInvalidations": 16830
+          }
+        },
+        {
+          "name": "zoom",
+          "stats": {
+            "Paint": {
+              "count": 272,
+              "totalMs": 79.812,
+              "p95Ms": 0.581,
+              "maxMs": 0.676
+            },
+            "Layout": {
+              "count": 90,
+              "totalMs": 146.694,
+              "p95Ms": 2.148,
+              "maxMs": 2.946
+            },
+            "UpdateLayoutTree": {
+              "count": 105,
+              "totalMs": 37.452,
+              "p95Ms": 0.693,
+              "maxMs": 2.447
+            },
+            "RasterTask": {
+              "count": 1219,
+              "totalMs": 172.116,
+              "p95Ms": 0.41,
+              "maxMs": 0.791
+            },
+            "FireAnimationFrame": {
+              "count": 90,
+              "totalMs": 12.217,
+              "p95Ms": 0.198,
+              "maxMs": 0.891
+            },
+            "svgPaints": 91,
+            "textLayoutInvalidations": 16830
+          }
+        },
+        {
+          "name": "zoom-with-search",
+          "stats": {
+            "Paint": {
+              "count": 272,
+              "totalMs": 75.08,
+              "p95Ms": 0.557,
+              "maxMs": 0.682
+            },
+            "Layout": {
+              "count": 90,
+              "totalMs": 127.897,
+              "p95Ms": 1.91,
+              "maxMs": 3.028
+            },
+            "UpdateLayoutTree": {
+              "count": 92,
+              "totalMs": 34.553,
+              "p95Ms": 0.482,
+              "maxMs": 0.871
+            },
+            "RasterTask": {
+              "count": 1246,
+              "totalMs": 129.156,
+              "p95Ms": 0.319,
+              "maxMs": 0.486
+            },
+            "FireAnimationFrame": {
+              "count": 90,
+              "totalMs": 12.633,
+              "p95Ms": 0.179,
+              "maxMs": 0.585
+            },
+            "svgPaints": 91,
+            "textLayoutInvalidations": 16830
+          }
+        },
+        {
+          "name": "zoom-frozen-arrow",
+          "stats": {
+            "Paint": {
+              "count": 272,
+              "totalMs": 77.069,
+              "p95Ms": 0.594,
+              "maxMs": 0.712
+            },
+            "Layout": {
+              "count": 90,
+              "totalMs": 121.481,
+              "p95Ms": 1.953,
+              "maxMs": 2.328
+            },
+            "UpdateLayoutTree": {
+              "count": 92,
+              "totalMs": 31.748,
+              "p95Ms": 0.496,
+              "maxMs": 2.165
+            },
+            "RasterTask": {
+              "count": 1219,
+              "totalMs": 136.914,
+              "p95Ms": 0.318,
+              "maxMs": 0.944
+            },
+            "FireAnimationFrame": {
+              "count": 90,
+              "totalMs": 10.442,
+              "p95Ms": 0.148,
+              "maxMs": 0.585
+            },
+            "svgPaints": 91,
+            "textLayoutInvalidations": 16830
+          }
+        },
+        {
+          "name": "zoom-without-hit-paths",
+          "stats": {
+            "Paint": {
+              "count": 272,
+              "totalMs": 72.492,
+              "p95Ms": 0.556,
+              "maxMs": 0.66
+            },
+            "Layout": {
+              "count": 90,
+              "totalMs": 127.595,
+              "p95Ms": 2.091,
+              "maxMs": 2.898
+            },
+            "UpdateLayoutTree": {
+              "count": 92,
+              "totalMs": 33.543,
+              "p95Ms": 0.682,
+              "maxMs": 2.094
+            },
+            "RasterTask": {
+              "count": 1219,
+              "totalMs": 132.608,
+              "p95Ms": 0.328,
+              "maxMs": 0.606
+            },
+            "FireAnimationFrame": {
+              "count": 90,
+              "totalMs": 11.059,
+              "p95Ms": 0.205,
+              "maxMs": 0.768
+            },
+            "svgPaints": 91,
+            "textLayoutInvalidations": 16830
+          }
+        }
+      ]
+    },
+    {
+      "trace": "/tmp/visualize-paint-wrapper-trace.json",
+      "graph": {
+        "nodes": 42,
+        "edges": 57,
+        "elements": 560,
+        "width": "2613pt",
+        "height": "656pt"
+      },
+      "results": [
+        {
+          "name": "wrapper-pan",
+          "stats": {
+            "Paint": {
+              "count": 64,
+              "totalMs": 29.778,
+              "p95Ms": 0.824,
+              "maxMs": 0.91
+            },
+            "Layout": {
+              "count": 1,
+              "totalMs": 0.711,
+              "p95Ms": 0.711,
+              "maxMs": 0.711
+            },
+            "UpdateLayoutTree": {
+              "count": 93,
+              "totalMs": 8.074,
+              "p95Ms": 0.077,
+              "maxMs": 2.137
+            },
+            "RasterTask": {
+              "count": 57,
+              "totalMs": 4.705,
+              "p95Ms": 0.165,
+              "maxMs": 0.186
+            },
+            "FireAnimationFrame": {
+              "count": 90,
+              "totalMs": 6.822,
+              "p95Ms": 0.111,
+              "maxMs": 0.129
+            },
+            "svgPaints": 0,
+            "textLayoutInvalidations": 187
+          }
+        },
+        {
+          "name": "wrapper-zoom",
+          "stats": {
+            "Paint": {
+              "count": 363,
+              "totalMs": 79.861,
+              "p95Ms": 0.586,
+              "maxMs": 0.764
+            },
+            "Layout": {
+              "count": 180,
+              "totalMs": 131.583,
+              "p95Ms": 1.785,
+              "maxMs": 1.931
+            },
+            "UpdateLayoutTree": {
+              "count": 105,
+              "totalMs": 8.544,
+              "p95Ms": 0.087,
+              "maxMs": 2.111
+            },
+            "RasterTask": {
+              "count": 1224,
+              "totalMs": 152.618,
+              "p95Ms": 0.381,
+              "maxMs": 0.805
+            },
+            "FireAnimationFrame": {
+              "count": 90,
+              "totalMs": 9.553,
+              "p95Ms": 0.129,
+              "maxMs": 1.114
+            },
+            "svgPaints": 0,
+            "textLayoutInvalidations": 16830
+          }
+        }
+      ]
+    },
+    {
+      "variant": "inner-group",
+      "trace": "/tmp/visualize-paint-group-trace.json",
+      "metadata": {
+        "platform": "darwin",
+        "arch": "arm64",
+        "workload": "graph navigation",
+        "viewport": {
+          "width": 1440,
+          "height": 1000,
+          "deviceScaleFactor": 1
+        },
+        "colorScheme": "light",
+        "variant": "current",
+        "browser": {
+          "protocolVersion": "1.3",
+          "product": "Chrome/152.0.7977.82",
+          "revision": "@d04cdb24d67b081f6cf80200ffc5233f44b61109",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+          "jsVersion": "15.2.124.21"
+        },
+        "graph": {
+          "nodes": 42,
+          "edges": 57,
+          "elements": 562,
+          "width": "100%",
+          "height": "100%"
+        },
+        "searchArrow": true
+      },
+      "graph": {
+        "nodes": 42,
+        "edges": 57,
+        "elements": 562,
+        "width": "100%",
+        "height": "100%"
+      },
+      "results": [
+        {
+          "name": "pan",
+          "stats": {
+            "Paint": {
+              "count": 182,
+              "totalMs": 59.383,
+              "p95Ms": 0.609,
+              "maxMs": 0.68
+            },
+            "Layout": {
+              "count": 90,
+              "totalMs": 3.361,
+              "p95Ms": 0.06,
+              "maxMs": 0.076
+            },
+            "UpdateLayoutTree": {
+              "count": 92,
+              "totalMs": 7.513,
+              "p95Ms": 0.071,
+              "maxMs": 2.123
+            },
+            "RasterTask": {
+              "count": 190,
+              "totalMs": 45.867,
+              "p95Ms": 0.518,
+              "maxMs": 0.889
+            },
+            "FireAnimationFrame": {
+              "count": 90,
+              "totalMs": 6.14,
+              "p95Ms": 0.103,
+              "maxMs": 0.142
+            },
+            "EventDispatch": {
+              "count": 286,
+              "totalMs": 8.691,
+              "p95Ms": 0.087,
+              "maxMs": 0.224
+            },
+            "svgPaints": 0,
+            "textLayoutInvalidations": 0
+          }
+        },
+        {
+          "name": "zoom",
+          "stats": {
+            "Paint": {
+              "count": 272,
+              "totalMs": 64.838,
+              "p95Ms": 0.609,
+              "maxMs": 0.787
+            },
+            "Layout": {
+              "count": 90,
+              "totalMs": 175.493,
+              "p95Ms": 2.921,
+              "maxMs": 3.823
+            },
+            "UpdateLayoutTree": {
+              "count": 116,
+              "totalMs": 11.368,
+              "p95Ms": 0.074,
+              "maxMs": 2.653
+            },
+            "RasterTask": {
+              "count": 382,
+              "totalMs": 94.41,
+              "p95Ms": 0.992,
+              "maxMs": 2.404
+            },
+            "FireAnimationFrame": {
+              "count": 90,
+              "totalMs": 8.822,
+              "p95Ms": 0.126,
+              "maxMs": 0.203
+            },
+            "EventDispatch": {
+              "count": 90,
+              "totalMs": 13.747,
+              "p95Ms": 0.165,
+              "maxMs": 3.027
+            },
+            "svgPaints": 0,
+            "textLayoutInvalidations": 16830
+          }
+        },
+        {
+          "name": "zoom-with-search",
+          "stats": {
+            "Paint": {
+              "count": 272,
+              "totalMs": 71.254,
+              "p95Ms": 0.632,
+              "maxMs": 0.96
+            },
+            "Layout": {
+              "count": 90,
+              "totalMs": 166.649,
+              "p95Ms": 3.094,
+              "maxMs": 4.381
+            },
+            "UpdateLayoutTree": {
+              "count": 92,
+              "totalMs": 12.58,
+              "p95Ms": 0.148,
+              "maxMs": 2.244
+            },
+            "RasterTask": {
+              "count": 382,
+              "totalMs": 68.425,
+              "p95Ms": 0.612,
+              "maxMs": 1.289
+            },
+            "FireAnimationFrame": {
+              "count": 90,
+              "totalMs": 10.672,
+              "p95Ms": 0.164,
+              "maxMs": 0.222
+            },
+            "EventDispatch": {
+              "count": 94,
+              "totalMs": 13.13,
+              "p95Ms": 0.175,
+              "maxMs": 2.46
+            },
+            "svgPaints": 0,
+            "textLayoutInvalidations": 16830
+          }
+        },
+        {
+          "name": "zoom-frozen-arrow",
+          "stats": {
+            "Paint": {
+              "count": 272,
+              "totalMs": 87.815,
+              "p95Ms": 0.737,
+              "maxMs": 1.023
+            },
+            "Layout": {
+              "count": 90,
+              "totalMs": 205.606,
+              "p95Ms": 3.939,
+              "maxMs": 5.313
+            },
+            "UpdateLayoutTree": {
+              "count": 92,
+              "totalMs": 10.24,
+              "p95Ms": 0.122,
+              "maxMs": 2.677
+            },
+            "RasterTask": {
+              "count": 382,
+              "totalMs": 87.409,
+              "p95Ms": 0.802,
+              "maxMs": 1.387
+            },
+            "FireAnimationFrame": {
+              "count": 90,
+              "totalMs": 11.145,
+              "p95Ms": 0.215,
+              "maxMs": 0.739
+            },
+            "EventDispatch": {
+              "count": 90,
+              "totalMs": 15.485,
+              "p95Ms": 0.249,
+              "maxMs": 2.906
+            },
+            "svgPaints": 0,
+            "textLayoutInvalidations": 16830
+          }
+        },
+        {
+          "name": "zoom-without-hit-paths",
+          "stats": {
+            "Paint": {
+              "count": 272,
+              "totalMs": 86.565,
+              "p95Ms": 0.598,
+              "maxMs": 0.72
+            },
+            "Layout": {
+              "count": 90,
+              "totalMs": 210.399,
+              "p95Ms": 3.271,
+              "maxMs": 3.728
+            },
+            "UpdateLayoutTree": {
+              "count": 92,
+              "totalMs": 10.6,
+              "p95Ms": 0.091,
+              "maxMs": 2.97
+            },
+            "RasterTask": {
+              "count": 382,
+              "totalMs": 94.586,
+              "p95Ms": 1.0,
+              "maxMs": 1.504
+            },
+            "FireAnimationFrame": {
+              "count": 90,
+              "totalMs": 11.189,
+              "p95Ms": 0.193,
+              "maxMs": 0.348
+            },
+            "EventDispatch": {
+              "count": 94,
+              "totalMs": 15.621,
+              "p95Ms": 0.206,
+              "maxMs": 3.169
+            },
+            "svgPaints": 0,
+            "textLayoutInvalidations": 16830
+          }
+        }
+      ]
+    },
+    {
+      "variant": "temporary-css-gesture",
+      "trace": "/tmp/visualize-paint-gesture-trace.json",
+      "metadata": {
+        "platform": "darwin",
+        "arch": "arm64",
+        "workload": "graph navigation",
+        "viewport": {
+          "width": 1440,
+          "height": 1000,
+          "deviceScaleFactor": 1
+        },
+        "colorScheme": "light",
+        "variant": "current",
+        "browser": {
+          "protocolVersion": "1.3",
+          "product": "Chrome/152.0.7977.82",
+          "revision": "@d04cdb24d67b081f6cf80200ffc5233f44b61109",
+          "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+          "jsVersion": "15.2.124.21"
+        },
+        "graph": {
+          "nodes": 42,
+          "edges": 57,
+          "elements": 562,
+          "width": "100%",
+          "height": "100%"
+        },
+        "searchArrow": true
+      },
+      "graph": {
+        "nodes": 42,
+        "edges": 57,
+        "elements": 562,
+        "width": "100%",
+        "height": "100%"
+      },
+      "results": [
+        {
+          "name": "pan",
+          "stats": {
+            "Paint": {
+              "count": 82,
+              "totalMs": 32.376,
+              "p95Ms": 0.694,
+              "maxMs": 0.753
+            },
+            "Layout": {
+              "count": 2,
+              "totalMs": 1.49,
+              "p95Ms": 1.442,
+              "maxMs": 1.442
+            },
+            "UpdateLayoutTree": {
+              "count": 92,
+              "totalMs": 7.742,
+              "p95Ms": 0.078,
+              "maxMs": 2.125
+            },
+            "RasterTask": {
+              "count": 52,
+              "totalMs": 13.183,
+              "p95Ms": 0.438,
+              "maxMs": 0.531
+            },
+            "FireAnimationFrame": {
+              "count": 90,
+              "totalMs": 6.636,
+              "p95Ms": 0.12,
+              "maxMs": 0.144
+            },
+            "EventDispatch": {
+              "count": 234,
+              "totalMs": 8.8,
+              "p95Ms": 0.094,
+              "maxMs": 0.286
+            },
+            "textLayoutInvalidations": 187,
+            "textInvalidationsBeforeLastInput": 187
+          }
+        },
+        {
+          "name": "zoom",
+          "stats": {
+            "Paint": {
+              "count": 363,
+              "totalMs": 62.582,
+              "p95Ms": 0.554,
+              "maxMs": 0.636
+            },
+            "Layout": {
+              "count": 182,
+              "totalMs": 109.713,
+              "p95Ms": 1.703,
+              "maxMs": 2.111
+            },
+            "UpdateLayoutTree": {
+              "count": 116,
+              "totalMs": 10.053,
+              "p95Ms": 0.078,
+              "maxMs": 2.176
+            },
+            "RasterTask": {
+              "count": 972,
+              "totalMs": 142.35,
+              "p95Ms": 0.445,
+              "maxMs": 1.483
+            },
+            "FireAnimationFrame": {
+              "count": 90,
+              "totalMs": 7.597,
+              "p95Ms": 0.122,
+              "maxMs": 0.162
+            },
+            "EventDispatch": {
+              "count": 98,
+              "totalMs": 12.048,
+              "p95Ms": 0.147,
+              "maxMs": 2.733
+            },
+            "textLayoutInvalidations": 17017,
+            "textInvalidationsBeforeLastInput": 16643
+          }
+        },
+        {
+          "name": "zoom-with-search",
+          "stats": {
+            "Paint": {
+              "count": 363,
+              "totalMs": 57.662,
+              "p95Ms": 0.552,
+              "maxMs": 0.647
+            },
+            "Layout": {
+              "count": 182,
+              "totalMs": 81.382,
+              "p95Ms": 1.406,
+              "maxMs": 1.469
+            },
+            "UpdateLayoutTree": {
+              "count": 96,
+              "totalMs": 8.061,
+              "p95Ms": 0.066,
+              "maxMs": 2.104
+            },
+            "RasterTask": {
+              "count": 976,
+              "totalMs": 96.663,
+              "p95Ms": 0.313,
+              "maxMs": 0.78
+            },
+            "FireAnimationFrame": {
+              "count": 90,
+              "totalMs": 7.159,
+              "p95Ms": 0.112,
+              "maxMs": 0.149
+            },
+            "EventDispatch": {
+              "count": 97,
+              "totalMs": 10.438,
+              "p95Ms": 0.13,
+              "maxMs": 2.44
+            },
+            "textLayoutInvalidations": 17017,
+            "textInvalidationsBeforeLastInput": 16643
+          }
+        },
+        {
+          "name": "zoom-frozen-arrow",
+          "stats": {
+            "Paint": {
+              "count": 363,
+              "totalMs": 68.669,
+              "p95Ms": 0.581,
+              "maxMs": 0.641
+            },
+            "Layout": {
+              "count": 182,
+              "totalMs": 101.193,
+              "p95Ms": 1.429,
+              "maxMs": 1.78
+            },
+            "UpdateLayoutTree": {
+              "count": 92,
+              "totalMs": 8.968,
+              "p95Ms": 0.071,
+              "maxMs": 2.335
+            },
+            "RasterTask": {
+              "count": 976,
+              "totalMs": 99.7,
+              "p95Ms": 0.336,
+              "maxMs": 1.285
+            },
+            "FireAnimationFrame": {
+              "count": 90,
+              "totalMs": 8.023,
+              "p95Ms": 0.125,
+              "maxMs": 0.142
+            },
+            "EventDispatch": {
+              "count": 97,
+              "totalMs": 11.767,
+              "p95Ms": 0.145,
+              "maxMs": 2.695
+            },
+            "textLayoutInvalidations": 17017,
+            "textInvalidationsBeforeLastInput": 16643
+          }
+        },
+        {
+          "name": "zoom-without-hit-paths",
+          "stats": {
+            "Paint": {
+              "count": 363,
+              "totalMs": 77.848,
+              "p95Ms": 0.575,
+              "maxMs": 0.665
+            },
+            "Layout": {
+              "count": 182,
+              "totalMs": 117.114,
+              "p95Ms": 1.474,
+              "maxMs": 2.153
+            },
+            "UpdateLayoutTree": {
+              "count": 92,
+              "totalMs": 9.096,
+              "p95Ms": 0.074,
+              "maxMs": 2.117
+            },
+            "RasterTask": {
+              "count": 967,
+              "totalMs": 102.774,
+              "p95Ms": 0.372,
+              "maxMs": 1.29
+            },
+            "FireAnimationFrame": {
+              "count": 90,
+              "totalMs": 8.726,
+              "p95Ms": 0.128,
+              "maxMs": 0.138
+            },
+            "EventDispatch": {
+              "count": 98,
+              "totalMs": 12.384,
+              "p95Ms": 0.142,
+              "maxMs": 2.433
+            },
+            "textLayoutInvalidations": 17017,
+            "textInvalidationsBeforeLastInput": 16643
+          }
+        }
+      ]
+    }
+  ]
+}
