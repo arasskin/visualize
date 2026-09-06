@@ -126,6 +126,9 @@ export class WasmBridge {
     synchronizedOutputGeneration() {
         return this.exports.getSynchronizedOutputGeneration();
     }
+    kittyKeyboardFlags() {
+        return this.exports.getKittyKeyboardFlags?.() ?? 0;
+    }
     getTitle() {
         if (this.exports.getTitleChanged() === 0)
             return null;

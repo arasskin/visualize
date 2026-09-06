@@ -47,9 +47,9 @@ function compile(el) {
   return item;
 }
 
-function drawItem(ctx, item, mode, alpha = 1) {
+function drawItem(ctx, item, mode, alpha = 1, matrix = item.matrix) {
   ctx.save();
-  const m = item.matrix;
+  const m = matrix;
   ctx.transform(m.a, m.b, m.c, m.d, m.e, m.f);
   ctx.globalAlpha *= item.opacity * alpha;
   ctx.lineWidth = mode === 'found' ? 2.5 : mode === 'hover' ? 2.4 : item.lineWidth;
@@ -104,6 +104,7 @@ export function createRenderer(svg, repaint) {
   const ctx = canvas.getContext('2d');
   const probe = document.createElement('canvas').getContext('2d');
   let items = [], overview = null, detail = null, arrow = [], selected = null, hovered = null;
+  let arrowScale = 1, arrowBox = null;
   let revision = 0, detailRevision = -1, detailView = '';
   const flashStart = performance.now();
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
@@ -127,9 +128,13 @@ export function createRenderer(svg, repaint) {
     overview = null; detail = null;
     repaint();
   }
-  function bounds(el) {
+  function bounds(el, scale = arrowScale) {
     if (!el) return null;
-    if (el.id === 'find-arrow') return rectangle(el.getBBox(), el.getCTM());
+    if (el.id === 'find-arrow' && arrowBox && arrow.length) {
+      const ratio = arrowScale / scale, m = arrow[0].matrix;
+      return { x: m.e + (arrowBox.x - m.e) * ratio, y: m.f + (arrowBox.y - m.f) * ratio,
+        width: arrowBox.width * ratio, height: arrowBox.height * ratio };
+    }
     if (!boxes.has(el)) boxes.set(el, rectangle(el.getBBox(), el.getCTM()));
     return boxes.get(el);
   }
@@ -179,7 +184,11 @@ export function createRenderer(svg, repaint) {
     ctx.globalAlpha = 1;
     if (hovered) for (const item of items) if (item.edge === hovered) drawItem(ctx, item, 'hover');
     if (selected) for (const item of items) if (item.node === selected && item.path) drawItem(ctx, item, 'found');
-    for (const item of arrow) drawItem(ctx, item);
+    for (const item of arrow) {
+      const m = item.matrix, ratio = arrowScale / scale;
+      drawItem(ctx, item, undefined, 1,
+        { a: m.a * ratio, b: m.b * ratio, c: m.c * ratio, d: m.d * ratio, e: m.e, f: m.f });
+    }
     const elapsed = performance.now() - flashStart;
     if (!navigating && elapsed < 3000 && !reducedMotion.matches && items.some(i => i.fresh)) {
       for (const item of items) if (item.fresh && item.path) drawItem(ctx, item, 'flash', .55 * Math.sin(Math.PI * elapsed / 3000));
@@ -197,9 +206,11 @@ export function createRenderer(svg, repaint) {
     }
     return null;
   }
-  function selection(node, element) {
+  function selection(node, element, scale = 1) {
     selected = node;
     arrow = element ? [...element.querySelectorAll('path,line,polygon')].map(compile).filter(Boolean) : [];
+    arrowScale = scale;
+    arrowBox = element ? rectangle(element.getBBox(), element.getCTM()) : null;
     repaint();
   }
   function hover(edge) { if (hovered !== edge) { hovered = edge; repaint(); } }

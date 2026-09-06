@@ -67,12 +67,17 @@ export function makePanel(root, options = {}) {
          const w = Math.max(options.minWidth || 240, from.w + dx);
          const h = Math.max(options.minHeight || 120, from.h + dy);
          root.style.width = w + 'px';
+         if (panel.shut) {
+           if (onRail(panel)) packRail();
+           return;
+         }
          root.style.height = h + 'px';
          if (options.onResize) options.onResize(w, h);
 
          showEdges(nearEdges(root));
        },
        () => {
+         if (panel.shut) return;
 
          const landing = nearEdges(root);
          if (landing.length) {

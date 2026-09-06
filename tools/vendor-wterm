@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-version="${1:-0.3.4}"
+version="${1:-0.5.0}"
 here=$(cd "$(dirname "$0")/.." && pwd)
 web="$here/external-src/wterm"
 mkdir -p "$web"

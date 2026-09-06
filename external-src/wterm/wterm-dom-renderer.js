@@ -1,3 +1,4 @@
+import { GraphicsLayer } from "./wterm-dom-graphics-layer.js";
 const DEFAULT_COLOR = 256;
 const FLAG_BOLD = 0x01;
 const FLAG_DIM = 0x02;
@@ -75,6 +76,15 @@ function buildCellStyle(fg, bg, flags, fgRgb, bgRgb) {
     if (flags & FLAG_INVISIBLE)
         style += "visibility:hidden;";
     return style;
+}
+// Cell colors are normally inline styles so each run can be painted without
+// extra classes. Cursor styles need to remain overridable by the focused
+// cursor rule, though, so move only those two declarations to custom
+// properties when a cursor span reuses a cell style.
+function cursorCellStyle(style) {
+    return style
+        .replace(/(^|;)color:/g, "$1--term-cell-fg:")
+        .replace(/(^|;)background:/g, "$1--term-cell-bg:");
 }
 function appendRun(parent, text, style) {
     const span = document.createElement("span");
@@ -213,7 +223,11 @@ function getBlockBackground(cp, fg, bg) {
     }
 }
 export class Renderer {
-    constructor(container) {
+    get hasImageFlow() {
+        return (this.container.parentElement?.classList.contains("has-image-flow") ??
+            false);
+    }
+    constructor(container, options = {}) {
         this.rows = 0;
         this.cols = 0;
         this.rowEls = [];
@@ -228,6 +242,7 @@ export class Renderer {
         this._scrollbackTopSpacer = null;
         this._scrollbackBottomSpacer = null;
         this.container = container;
+        this.graphics = new GraphicsLayer(container, options);
     }
     setup(cols, rows) {
         this.cols = cols;
@@ -253,6 +268,7 @@ export class Renderer {
             this.rowEls.push(rowEl);
         }
         this.container.appendChild(fragment);
+        this.graphics.setup();
         this.prevCursorRow = -1;
         this.prevCursorCol = -1;
     }
@@ -293,8 +309,9 @@ export class Renderer {
                         ? `<span style="${runStyle}">${escapeHTML(before)}</span>`
                         : `<span>${escapeHTML(before)}</span>`;
                 }
-                content += runStyle
-                    ? `<span class="term-cursor" style="${runStyle}">${escapeHTML(cursorChar)}</span>`
+                const cursorStyle = cursorCellStyle(runStyle);
+                content += cursorStyle
+                    ? `<span class="term-cursor" style="${cursorStyle}">${escapeHTML(cursorChar)}</span>`
                     : `<span class="term-cursor">${escapeHTML(cursorChar)}</span>`;
                 if (after) {
                     content += runStyle
@@ -331,7 +348,9 @@ export class Renderer {
                 // would shorten the row.
                 const continuesWide = col > 0 && (getCell(col - 1).width ?? 1) === 2;
                 if (!continuesWide) {
-                    appendStyledSpan(col === cursorCol ? "term-cursor" : "", "", " ", cellLinkKey, cellLinkUri);
+                    const style = buildCellStyle(cell.fg, cell.bg, cell.flags, cell.fgRgb, cell.bgRgb);
+                    const cursor = col === cursorCol;
+                    appendStyledSpan(cursor ? "term-cursor" : "", cursor ? cursorCellStyle(style) : style, " ", cellLinkKey, cellLinkUri);
                 }
                 runStyle = "";
                 runLinkKey = "";
@@ -348,7 +367,9 @@ export class Renderer {
                 // continuation is outside the row. Drawing the pair here would spill
                 // a second column past the row.
                 if (col + 1 >= this.cols) {
-                    appendStyledSpan(col === cursorCol ? "term-cursor" : "", "", " ", cellLinkKey, cellLinkUri);
+                    const style = buildCellStyle(cell.fg, cell.bg, cell.flags, cell.fgRgb, cell.bgRgb);
+                    const cursor = col === cursorCol;
+                    appendStyledSpan(cursor ? "term-cursor" : "", cursor ? cursorCellStyle(style) : style, " ", cellLinkKey, cellLinkUri);
                     runStyle = "";
                     runLinkKey = "";
                     runLinkUri = undefined;
@@ -359,10 +380,9 @@ export class Renderer {
                 }
                 const ch = cell.chars ?? (cp >= 32 ? String.fromCodePoint(cp) : " ");
                 const style = buildCellStyle(cell.fg, cell.bg, cell.flags, cell.fgRgb, cell.bgRgb);
-                const cls = cursorCol >= col && cursorCol < col + 2
-                    ? "term-wide term-cursor"
-                    : "term-wide";
-                appendStyledSpan(cls, style, ch, cellLinkKey, cellLinkUri);
+                const cursor = cursorCol >= col && cursorCol < col + 2;
+                const cls = cursor ? "term-wide term-cursor" : "term-wide";
+                appendStyledSpan(cls, cursor ? cursorCellStyle(style) : style, ch, cellLinkKey, cellLinkUri);
                 runStyle = "";
                 runLinkKey = "";
                 runLinkUri = undefined;
@@ -377,7 +397,10 @@ export class Renderer {
                 const cls = col === cursorCol ? "term-block term-cursor" : "term-block";
                 const bg = getBlockBackground(cp, colors.fg, colors.bg);
                 const dim = cell.flags & FLAG_DIM ? "opacity:0.5;" : "";
-                appendContent(`<span class="${cls}" style="background:${bg};${dim}"></span>`, cellLinkKey, cellLinkUri);
+                const blockStyle = col === cursorCol
+                    ? `--term-cell-bg:${bg};${dim}`
+                    : `background:${bg};${dim}`;
+                appendContent(`<span class="${cls}" style="${blockStyle}"></span>`, cellLinkKey, cellLinkUri);
                 runStyle = "";
                 runLinkKey = "";
                 runLinkUri = undefined;
@@ -568,5 +591,19 @@ export class Renderer {
             }
         }
         core.clearDirty();
+        this.graphics.reconcile(core, {
+            scrollTop: viewport?.scrollTop ?? 0,
+            clientHeight: viewport?.clientHeight ?? 0,
+            rowHeight: viewport?.rowHeight ?? 0,
+            charWidth: viewport?.charWidth ?? 0,
+            overscanRows: viewport?.overscanRows ?? DEFAULT_SCROLLBACK_OVERSCAN_ROWS,
+            scrollbackCount: core.getScrollbackCount(),
+        });
+    }
+    destroy() {
+        this.graphics.destroy();
+        this.container.innerHTML = "";
+        this.rowEls = [];
+        this._scrollbackRowEls = [];
     }
 }

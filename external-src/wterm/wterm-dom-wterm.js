@@ -4,6 +4,8 @@ import { InputHandler } from "./wterm-dom-input.js";
 import { DebugAdapter } from "./wterm-dom-debug.js";
 import { isLinkActivationModifier } from "./wterm-dom-hyperlink.js";
 const SYNCHRONIZED_OUTPUT_TIMEOUT_MS = 1000;
+const PROGRAMMATIC_SCROLL_TOLERANCE = 1;
+const WINDOW_SIZE_QUERIES = ["\x1b[14t", "\x1b[16t"];
 export class WTerm {
     constructor(element, options = {}) {
         this.bridge = null;
@@ -23,9 +25,12 @@ export class WTerm {
         this._pendingResizeScrollTop = null;
         this._rowHeight = 0;
         this._charWidth = 0;
+        this._windowSizeQueryBuffer = "";
         this.element = element;
         this._coreOption = options.core;
         this.wasmUrl = options.wasmUrl;
+        this.maxImageWidth = options.maxImageWidth;
+        this.maxImageHeight = options.maxImageHeight;
         this.cols = options.cols || 80;
         this.rows = options.rows || 24;
         this.autoResize = options.autoResize !== false;
@@ -65,8 +70,13 @@ export class WTerm {
         this._onScroll = () => {
             if (this._pendingResizeScrollTop !== null)
                 return;
+            if (this._shouldScrollToBottom && this._isScrolledToBottom()) {
+                this._programmaticScrollTop = null;
+                return;
+            }
             if (this._programmaticScrollTop !== null &&
-                this.element.scrollTop === this._programmaticScrollTop) {
+                Math.abs(this.element.scrollTop - this._programmaticScrollTop) <=
+                    PROGRAMMATIC_SCROLL_TOLERANCE) {
                 this._programmaticScrollTop = null;
                 return;
             }
@@ -94,7 +104,10 @@ export class WTerm {
             }
             this._setRowHeight();
             this._measureCharSize();
-            this.renderer = new Renderer(this._container);
+            this.renderer = new Renderer(this._container, {
+                maxImageWidth: this.maxImageWidth,
+                maxImageHeight: this.maxImageHeight,
+            });
             this.renderer.setup(this.cols, this.rows);
             this.input = new InputHandler(this.element, (data) => {
                 this._scrollToBottom();
@@ -127,19 +140,15 @@ export class WTerm {
         return el.scrollHeight - el.scrollTop - el.clientHeight < 5;
     }
     _scrollToBottom() {
-        const el = this.element;
-        const maxScroll = el.scrollHeight - el.clientHeight;
-        if (maxScroll <= 0) {
-            this._setScrollTop(0);
-            return;
-        }
-        this._setScrollTop(maxScroll);
+        this._setScrollTop(this.element.scrollHeight);
     }
     _setScrollTop(value) {
-        if (this.element.scrollTop === value)
-            return;
-        this._programmaticScrollTop = value;
+        const before = this.element.scrollTop;
         this.element.scrollTop = value;
+        const after = this.element.scrollTop;
+        if (after === before)
+            return;
+        this._programmaticScrollTop = after;
     }
     write(data) {
         if (!this.bridge)
@@ -147,6 +156,7 @@ export class WTerm {
         if (this.debug)
             this.debug.traceWrite(data);
         this._shouldScrollToBottom = this._isScrolledToBottom();
+        const windowSizeQueries = this._collectWindowSizeQueries(data);
         let deliveryError;
         let hasDeliveryError = false;
         const drain = () => {
@@ -170,6 +180,17 @@ export class WTerm {
             this._scheduleRender();
         }
         drain();
+        for (const query of windowSizeQueries) {
+            try {
+                this.onData?.(this._windowSizeResponse(query));
+            }
+            catch (error) {
+                if (!hasDeliveryError) {
+                    hasDeliveryError = true;
+                    deliveryError = error;
+                }
+            }
+        }
         if (hasDeliveryError)
             throw deliveryError;
     }
@@ -317,11 +338,12 @@ export class WTerm {
             clientHeight: this.element.clientHeight,
             rowHeight,
             scrollbackDiscardedCount: discardedCount,
+            charWidth: this._charWidth,
         });
         if (this.debug) {
             this.debug.recordRender(performance.now() - t0, dirtyCount);
         }
-        const hasScrollback = scrollbackCount > 0;
+        const hasScrollback = scrollbackCount > 0 || this.renderer.hasImageFlow;
         this.element.classList.toggle("has-scrollback", hasScrollback);
         if (this._shouldScrollToBottom) {
             this._scrollToBottom();
@@ -332,7 +354,7 @@ export class WTerm {
             this._setScrollTop(pendingScrollTop);
         }
         else if (!hasScrollback && this.element.scrollTop !== 0) {
-            this.element.scrollTop = 0;
+            this._setScrollTop(0);
         }
         const title = this.bridge.getTitle();
         if (title !== null && this.onTitle) {
@@ -359,6 +381,72 @@ export class WTerm {
             }
         }
         return { hasError, error: firstError };
+    }
+    /**
+     * Kitty uses xterm window reports to discover the pixel geometry needed for
+     * image placement. The core intentionally does not know about the browser
+     * viewport, so these two queries are answered at the DOM boundary.
+     */
+    _collectWindowSizeQueries(data) {
+        const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+        const input = this._windowSizeQueryBuffer + text;
+        this._windowSizeQueryBuffer = "";
+        const queries = [];
+        let index = 0;
+        while (index < input.length) {
+            const query = WINDOW_SIZE_QUERIES.find((candidate) => input.startsWith(candidate, index));
+            if (query) {
+                queries.push(query === "\x1b[14t" ? 14 : 16);
+                index += query.length;
+            }
+            else {
+                index++;
+            }
+        }
+        // Keep only a possible prefix of a query so an escape sequence split
+        // across WebSocket/WASM writes is recognized on the next write.
+        for (let start = Math.max(0, input.length - 4); start < input.length; start++) {
+            const suffix = input.slice(start);
+            if (suffix.length < 5 &&
+                WINDOW_SIZE_QUERIES.some((candidate) => candidate.startsWith(suffix))) {
+                this._windowSizeQueryBuffer = suffix;
+                break;
+            }
+        }
+        return queries;
+    }
+    _windowSizeResponse(query) {
+        const { width, height } = this._pixelSize();
+        if (query === 14) {
+            return `\x1b[4;${height};${width}t`;
+        }
+        const cellWidth = Math.max(1, Math.round(this._charWidth));
+        const cellHeight = Math.max(1, Math.round(this._rowHeight));
+        return `\x1b[6;${cellHeight};${cellWidth}t`;
+    }
+    _pixelSize() {
+        const style = getComputedStyle(this.element);
+        const horizontalPadding = (parseFloat(style.paddingLeft) || 0) +
+            (parseFloat(style.paddingRight) || 0);
+        const verticalPadding = (parseFloat(style.paddingTop) || 0) +
+            (parseFloat(style.paddingBottom) || 0);
+        let width = this.element.clientWidth - horizontalPadding;
+        let height = this.element.clientHeight - verticalPadding;
+        if (width <= 0 || height <= 0) {
+            const rect = this.element.getBoundingClientRect();
+            width = rect.width - horizontalPadding;
+            height = rect.height - verticalPadding;
+        }
+        // A hidden element has no layout box. The measured cell geometry still
+        // gives Kitty a useful answer while the terminal is being mounted.
+        if (width <= 0 && this._charWidth > 0)
+            width = this.cols * this._charWidth;
+        if (height <= 0 && this._rowHeight > 0)
+            height = this.rows * this._rowHeight;
+        return {
+            width: Math.max(1, Math.round(width)),
+            height: Math.max(1, Math.round(height)),
+        };
     }
     _lockHeight() {
         const rh = this._rowHeight || 17;
@@ -429,12 +517,15 @@ export class WTerm {
     }
     destroy() {
         this._destroyed = true;
+        this._windowSizeQueryBuffer = "";
         this._cancelScheduledRender();
         this._cancelSynchronizedOutputFallback();
         if (this.resizeObserver)
             this.resizeObserver.disconnect();
         if (this.input)
             this.input.destroy();
+        this.renderer?.destroy();
+        this.renderer = null;
         this.element.removeEventListener("click", this._onClickFocus);
         this.element.removeEventListener("scroll", this._onScroll);
         this.element.ownerDocument.removeEventListener("keydown", this._onModifierChange);

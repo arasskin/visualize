@@ -51,7 +51,7 @@ try {
   for (const part of ['src', 'external-src', 'tools']) await cp(join(repo, part), join(root, 'project', part), { recursive: true });
   const config = (await readFile(join(repo, 'visualize.conf'), 'utf8')).split('\n').filter(line => !line.startsWith('@visualize')).join('\n');
   await writeFile(join(root, 'project', 'visualize.conf'), config);
-  await writeFile(join(root, 'bin', 'open'), '#!/bin/sh\nfor browser_arg do\n  case "$browser_arg" in\n    http://*|https://*) printf "%s" "$browser_arg" > "$VZ_BENCH_URL" ;;\n    --app=*) printf "%s" "${browser_arg#--app=}" > "$VZ_BENCH_URL" ;;\n  esac\ndone\n', { mode: 0o755 });
+  await writeFile(join(root, 'bin', 'open'), '#!/bin/sh\nfor browser_arg do\n  browser_arg=${browser_arg%%#*}\n  case "$browser_arg" in\n    http://*|https://*) printf "%s" "$browser_arg" > "$VZ_BENCH_URL" ;;\n    --app=*) printf "%s" "${browser_arg#--app=}" > "$VZ_BENCH_URL" ;;\n  esac\ndone\n', { mode: 0o755 });
   const core = join(repo, 'src/visualize/core.janet');
   const serverOptions = {
     cwd: repo, stdio: ['ignore', 'pipe', 'pipe'],

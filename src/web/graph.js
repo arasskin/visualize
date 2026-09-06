@@ -58,7 +58,7 @@ export function drawing() {
 }
 
 export function screenBounds(el) {
-  const bounds = drawing()?.bounds(el);
+  const bounds = drawing()?.bounds(el, scale);
   if (!bounds) return null;
   const origin = pane.getBoundingClientRect();
   const left = origin.left + tx + bounds.x * scale;
@@ -67,7 +67,7 @@ export function screenBounds(el) {
     right: left + bounds.width * scale, bottom: top + bounds.height * scale };
 }
 
-export function selectGraphNode(node, arrow) { drawing()?.selection(node, arrow); }
+export function selectGraphNode(node, arrow) { drawing()?.selection(node, arrow, scale); }
 export function hoverGraphEdge(edge) { drawing()?.hover(edge); }
 export function edgeAt(x, y) { return drawing()?.hit((x - tx) / scale, (y - ty) / scale, scale); }
 

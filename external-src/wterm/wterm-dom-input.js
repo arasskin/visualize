@@ -1,4 +1,5 @@
 import { isLinkActivationModifier } from "./wterm-dom-hyperlink.js";
+import { encodeKittyKey, KITTY_REPORT_ALL, KITTY_REPORT_EVENTS, } from "./wterm-dom-kitty-keys.js";
 const NORMAL_KEYS = {
     ArrowUp: "\x1b[A",
     ArrowDown: "\x1b[B",
@@ -42,6 +43,9 @@ export class InputHandler {
         this.composing = false;
         this.mouseButtons = 0;
         this.focused = false;
+        this.suppressedKeyUps = new Set();
+        this.pressedModifiers = new Set();
+        this.deliveredKeys = new Set();
         this.element = element;
         this.onData = onData;
         this.getBridge = getBridge;
@@ -73,6 +77,7 @@ export class InputHandler {
         s.background = "transparent";
         element.appendChild(this.textarea);
         this._onKeyDown = this.handleKeyDown.bind(this);
+        this._onKeyUp = this.handleKeyUp.bind(this);
         this._onPaste = this.handlePaste.bind(this);
         this._onCompositionStart = this.handleCompositionStart.bind(this);
         this._onCompositionEnd = this.handleCompositionEnd.bind(this);
@@ -89,6 +94,8 @@ export class InputHandler {
             this.focused = false;
             this.element.classList.remove("focused");
             this.stopMouseCapture();
+            this.pressedModifiers.clear();
+            this.deliveredKeys.clear();
             if (this.getBridge()?.focusEvents?.())
                 this.onData("\x1b[O");
         };
@@ -107,6 +114,7 @@ export class InputHandler {
         };
         this._onWheel = (event) => this.handleMouse(event, "wheel");
         this.textarea.addEventListener("keydown", this._onKeyDown);
+        this.textarea.addEventListener("keyup", this._onKeyUp);
         this.textarea.addEventListener("paste", this._onPaste);
         this.textarea.addEventListener("compositionstart", this._onCompositionStart);
         this.textarea.addEventListener("compositionend", this._onCompositionEnd);
@@ -121,6 +129,7 @@ export class InputHandler {
     }
     destroy() {
         this.textarea.removeEventListener("keydown", this._onKeyDown);
+        this.textarea.removeEventListener("keyup", this._onKeyUp);
         this.textarea.removeEventListener("paste", this._onPaste);
         this.textarea.removeEventListener("compositionstart", this._onCompositionStart);
         this.textarea.removeEventListener("compositionend", this._onCompositionEnd);
@@ -134,18 +143,33 @@ export class InputHandler {
         this.textarea.remove();
     }
     handleKeyDown(e) {
-        if (this.composing)
-            return;
-        if ((e.metaKey || e.ctrlKey) && e.key === "c") {
-            const sel = window.getSelection();
-            if (sel && sel.toString().length > 0)
-                return;
+        const keyId = e.code || e.key;
+        const physicalModifier = /^(Shift|Control|Alt|Meta)(Left|Right)$/.test(e.code);
+        if (physicalModifier) {
+            this.pressedModifiers.add(e.code);
         }
-        if ((e.metaKey || e.ctrlKey) && e.key === "v") {
+        if (this.composing) {
+            this.suppressedKeyUps.add(keyId);
+            return;
+        }
+        const bridge = this.getBridge();
+        const kittyFlags = bridge?.kittyKeyboardFlags?.() ?? 0;
+        const kittyOwnsModifier = physicalModifier && Boolean(kittyFlags & KITTY_REPORT_ALL);
+        const delivered = this.deliveredKeys.has(keyId);
+        if (!delivered && (e.metaKey || e.ctrlKey) && e.key === "c") {
+            const sel = window.getSelection();
+            if (sel && sel.toString().length > 0) {
+                this.suppressedKeyUps.add(keyId);
+                return;
+            }
+        }
+        if (!delivered && (e.metaKey || e.ctrlKey) && e.key === "v") {
+            this.suppressedKeyUps.add(keyId);
             this.textarea.focus();
             return;
         }
-        if (e.metaKey && !e.ctrlKey) {
+        if (!delivered && !kittyOwnsModifier && e.metaKey && !e.ctrlKey) {
+            this.suppressedKeyUps.add(keyId);
             if (e.key === "Backspace") {
                 e.preventDefault();
                 this.onData("\x15");
@@ -162,10 +186,37 @@ export class InputHandler {
             }
             return;
         }
+        this.suppressedKeyUps.delete(keyId);
         e.preventDefault();
+        if (kittyFlags !== 0) {
+            const seq = encodeKittyKey(e, kittyFlags, e.repeat ? "repeat" : "press", this.pressedModifiers, bridge?.cursorKeysApp?.() ?? false);
+            if (seq) {
+                this.deliveredKeys.add(keyId);
+                this.onData(seq);
+            }
+            return;
+        }
         const seq = this.keyToSequence(e);
         if (seq)
             this.onData(seq);
+    }
+    handleKeyUp(e) {
+        const keyId = e.code || e.key;
+        this.pressedModifiers.delete(e.code);
+        this.deliveredKeys.delete(keyId);
+        if (this.suppressedKeyUps.delete(keyId))
+            return;
+        if (this.composing)
+            return;
+        const bridge = this.getBridge();
+        const kittyFlags = bridge?.kittyKeyboardFlags?.() ?? 0;
+        if (!(kittyFlags & KITTY_REPORT_EVENTS))
+            return;
+        const seq = encodeKittyKey(e, kittyFlags, "release", this.pressedModifiers, bridge?.cursorKeysApp?.() ?? false);
+        if (!seq)
+            return;
+        e.preventDefault();
+        this.onData(seq);
     }
     handlePaste(e) {
         e.preventDefault();

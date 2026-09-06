@@ -1,1 +1,1 @@
-export { GhosttyCore } from "./wterm-ghostty-ghostty-core.js";
+export { GhosttyCore, MAX_IMAGE_BYTES } from "./wterm-ghostty-ghostty-core.js";

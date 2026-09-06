@@ -59,7 +59,7 @@ try {
   await mkdir(join(root, 'project'));
   await mkdir(join(root, 'bin'));
   await writeFile(join(root, 'project', 'main.js'), 'export const a = 1;\n');
-  await writeFile(join(root, 'bin', 'open'), '#!/bin/sh\nfor browser_arg do\n  case "$browser_arg" in\n    http://*|https://*) printf "%s" "$browser_arg" > "$VZ_BENCH_URL" ;;\n    --app=*) printf "%s" "${browser_arg#--app=}" > "$VZ_BENCH_URL" ;;\n  esac\ndone\n', { mode: 0o755 });
+  await writeFile(join(root, 'bin', 'open'), '#!/bin/sh\nfor browser_arg do\n  browser_arg=${browser_arg%%#*}\n  case "$browser_arg" in\n    http://*|https://*) printf "%s" "$browser_arg" > "$VZ_BENCH_URL" ;;\n    --app=*) printf "%s" "${browser_arg#--app=}" > "$VZ_BENCH_URL" ;;\n  esac\ndone\n', { mode: 0o755 });
   let core = join(repo, 'src/visualize/core.janet');
   if (process.env.LATENCY_VARIANT === 'backlog-counter') {
     const variant = join(root, 'variant');

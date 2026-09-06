@@ -201,7 +201,11 @@ button:disabled { opacity: .5; cursor: progress; }
 }
 
 .panel.shut { height: auto !important; }
-.panel.shut .panel-body, .panel.shut .grip { display: none; }
+.panel.shut .panel-body { display: none; }
+.panel.shut .grip {
+  top: 0; bottom: 0; width: 8px; height: auto; z-index: 2;
+  cursor: ew-resize; background: none;
+}
 
 .panel > .bar, .panel > .panel-body, .panel > .grip { align-self: stretch; }
 

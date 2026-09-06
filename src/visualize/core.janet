@@ -10,7 +10,6 @@
 (import ./http)
 (import ./trace)
 (import ./json)
-(import ./browser)
 
 (import ./config)
 (import ./worker)
@@ -61,6 +60,7 @@
   (string base "/visualize-" (string/format "%08x" digest) tag))
 
 (defn main [& args]
+  (def launch-args args)
 
   (when (= (get args 1) "--supervise")
     (def path (or (get args 2) (error "usage: visualize --supervise <socket-path>")))
@@ -86,6 +86,7 @@
   (def graph-worker (worker/start root (fn [value] (set source-generation value))))
 
   (def token (make-token))
+  (var stopping false)
 
   (def page-born (os/time))
 
@@ -222,6 +223,7 @@
   (defn config-edit [body] (:call graph-worker :edit (json/decode body)))
 
   (defn handler [request]
+    (when stopping (break ["503 Service Unavailable" "text/plain" "server stopping"]))
     (def path (without-query (request :path)))
     (def method (request :method))
 
@@ -385,8 +387,10 @@
 
   (os/sigaction :int
     (fn []
+      (set stopping true)
       (print)
       (each client (values panes) (try (:shutdown client) ([_] nil)))
+      (:stop graph-worker)
       (os/exit 0)))
 
   (def keyboard?
@@ -414,8 +418,19 @@
     (ev/go
       (fn []
         (ev/take eof-chan)
-        (print "server stopped; terminals kept -- run visualize again to reattach")
-        (os/exit 0))))
+        (set stopping true)
+        (print "restarting server; terminal sessions kept")
+        (:stop graph-worker)
+        (os/posix-exec ["/bin/sh" "-c"
+          ``for restart_fd in /dev/fd/*; do
+  restart_fd=${restart_fd##*/}
+  case "$restart_fd" in
+    0|1|2|*[!0-9]*) ;;
+    *) eval "exec $restart_fd>&-" ;;
+  esac
+done
+exec "$@"``
+          "visualize-restart" (string here "/../external-src/janet/janet") ;launch-args]))))
 
   (defn align-word
     [word to]
@@ -424,10 +439,10 @@
   (print "visualize: " root " on " url)
   (print (align-word "config: " "visualize: ") config-path)
   (print (align-word "parsers: " "visualize: ") (string/join (scan/languages) ", "))
-  (print "ctrl-c kills everything.")
-  (print "ctrl-d kills only the server.")
+  (print "ctrl-c stops the server and terminal sessions.")
+  (print "ctrl-d restarts the server, keeping terminal sessions.")
 
   (trace/heartbeat)
 
-  (os/spawn (browser/command url) :pd)
+  (os/spawn ["open" url] :pd)
   (accept-loop))
