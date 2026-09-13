@@ -1,6 +1,6 @@
-(import ../visualize/graph)
-(import ../visualize/config)
-(import ../visualize/scan)
+(import ../../src.server/graph)
+(import ../../src.server/config)
+(import ../../src.server/scan)
 (import ./harness :as t)
 
 (defn- drawn [tree path]
@@ -18,13 +18,13 @@
   (t/is= 0 (length (string/find-all "node fresh" (string (first-draw 3))))
          "the first drawing flashes nothing")
 
-  (os/touch "src/visualize/color.janet")
+  (os/touch "src.server/color.janet")
   (def second-draw (drawn (scan/scan ".") conf))
   (t/is= 1 (length (string/find-all `class="node fresh"` (string (second-draw 3))))
          "one file moved, one node flashes")
 
   (spit conf "(lines)\n")
-  (os/touch "src/visualize/select.janet")
+  (os/touch "src.server/select.janet")
   (def unasked (drawn (scan/scan ".") conf))
   (t/is= 0 (length (string/find-all "fresh" (string (unasked 3))))
          "the flash is the verb's, not the watcher's")
@@ -133,15 +133,15 @@
   (clear))
 
 (t/test "aliased folded nodes keep their final name component instead of an extension"
-  (def tree {:nodes [{:name "src.visualize.parsers.janet.janet" :label "janet\n.janet" :ours true}
-                     {:name "src.visualize.parsers.python.janet" :label "python\n.janet" :ours true}]
+  (def tree {:nodes [{:name "src.server.parsers.janet.janet" :label "janet\n.janet" :ours true}
+                     {:name "src.server.parsers.python.janet" :label "python\n.janet" :ours true}]
              :edges [] :ours {} :stamps {}
-             :sizes {"src.visualize.parsers.janet.janet" 400
-                     "src.visualize.parsers.python.janet" 341}})
+             :sizes {"src.server.parsers.janet.janet" 400
+                     "src.server.parsers.python.janet" 341}})
   (each sized [false true]
     (def state (config/new-state))
-    (put state :aliases [{:alias "~" :prefix "src.visualize"}])
-    (put state :folded ["src.visualize.parsers"])
+    (put state :aliases [{:alias "~" :prefix "src.server"}])
+    (put state :folded ["src.server.parsers"])
     (put state :sized sized)
     (def [ok svg] (graph/render-svg tree state))
     (t/ok ok)

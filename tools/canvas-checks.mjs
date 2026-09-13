@@ -47,18 +47,18 @@ class CDP {
 try {
   await mkdir(join(root, 'project'));
   await mkdir(join(root, 'bin'));
-  for (const part of ['src', 'external-src', 'tools']) await cp(join(repo, part), join(root, 'project', part), { recursive: true });
+  for (const part of ['src', 'src.server', 'src.mcp', 'src.vterm', 'src.wterm', 'src.graphviz', 'external-src', 'tools']) await cp(join(repo, part), join(root, 'project', part), { recursive: true });
   const config = (await readFile(join(repo, 'visualize.conf'), 'utf8')).split('\n').filter(line => !line.startsWith('@visualize')).join('\n');
   await writeFile(join(root, 'project', 'visualize.conf'), config);
   await writeFile(join(root, 'bin', 'open'), '#!/bin/sh\nfor browser_arg do\n  browser_arg=${browser_arg%%#*}\n  case "$browser_arg" in\n    http://*|https://*) printf "%s" "$browser_arg" > "$VZ_BENCH_URL" ;;\n    --app=*) printf "%s" "${browser_arg#--app=}" > "$VZ_BENCH_URL" ;;\n  esac\ndone\n', { mode: 0o755 });
-  const core = join(repo, 'src/visualize/core.janet');
+  const core = join(repo, 'src.server/core.janet');
   const serverOptions = {
     cwd: repo, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, VISUALIZE_TRACE: process.env.VISUALIZE_TRACE || '1', VISUALIZE_HARNESS: '/bin/cat',
+    env: { ...process.env, VISUALIZE_TRACE: process.env.VISUALIZE_TRACE || '1',
       PATH: join(root, 'bin') + ':' + process.env.PATH, VZ_BENCH_URL: join(root, 'url') },
   };
   function startServer() {
-    server = spawn(join(repo, 'external-src/janet/janet'), [core, join(root, 'project'), '--no-dev'], serverOptions);
+    server = spawn(join(repo, 'external-src/janet/janet'), [core, join(root, 'project'), '--no-dev', '--command', 'exec /bin/cat'], serverOptions);
     for (const stream of [server.stdout, server.stderr]) stream.on('data', b => logs.push(String(b)));
   }
   startServer();
@@ -86,6 +86,7 @@ try {
   const failures = [];
   socket.addEventListener('message', e => { const m=JSON.parse(e.data); if(m.method==='Runtime.exceptionThrown') failures.push(m.params); });
   await sleep(1000);
+  await cdp.evaluate('window.__renderTrace.start()');
   const checks = await cdp.evaluate(`(async () => {
     const g = await import('/graph.js');
     const f = await import('/find.js');
@@ -169,6 +170,15 @@ try {
   const released=await cdp.evaluate('(async()=>{const g=await import("/graph.js");return !g.navigating&&!g.dragging;})()');
   if(!released)throw new Error('Native canvas drag did not end');
   console.log('Retina rendering, theme changes, and native canvas dragging passed.');
+  const trace = await cdp.evaluate('({report: window.__renderTrace.stop(), samples: window.__renderTrace.snapshot()})');
+  for (const kind of ['geometry-rebuild', 'raster', 'canvas-composite', 'overlays', 'canvas-render', 'graph-repaint', 'selection-compile', 'edge-hit', 'pan-handler', 'input-to-render', 'raf-wait']) {
+    if (!trace.samples.some(sample => sample.kind === kind)) throw new Error('Missing render trace phase: ' + kind);
+  }
+  if (trace.samples.some(sample => !Number.isFinite(sample.ms) || sample.ms < 0)) throw new Error('Invalid render trace duration');
+  const stopped = await cdp.evaluate('(async()=>{const before=window.__renderTrace.snapshot().length;(await import("/graph.js")).repaint();return before===window.__renderTrace.snapshot().length})()');
+  if (!stopped) throw new Error('Stopped render trace kept recording');
+  await writeFile(output + '.trace.json', JSON.stringify(trace, null, 2));
+  console.log('Render trace phases and stop behavior passed.');
   const shot=await cdp.send('Page.captureScreenshot',{format:'png'});
   await writeFile(output,Buffer.from(shot.data,'base64'));
   if(failures.length)throw new Error(JSON.stringify(failures));

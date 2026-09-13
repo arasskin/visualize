@@ -1,4 +1,4 @@
-(import ../visualize/trace)
+(import ../../src.server/trace)
 (import ./harness :as t)
 
 (t/test "measurement preserves results and errors"

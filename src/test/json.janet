@@ -1,4 +1,4 @@
-(import ../visualize/json)
+(import ../../src.server/json)
 (import ./harness :as t)
 
 (t/test "scalars encode as JSON, not as Janet"
@@ -83,3 +83,9 @@
   (def hairy (string "plain " (string/from-bytes 0x1b) "[0m <script>&\"\\ "
                      (string/from-bytes 0) "end"))
   (t/is= hairy (json/decode (json/encode hairy))))
+
+(t/test "MCP JSON rejects malformed input and decodes surrogate pairs"
+  (t/is= "🚀" (json/decode `"\ud83d\ude80"`))
+  (each invalid [`"unfinished` `"\q"` `"\u123"` `"\ud83d"` `"\ude80"`
+                 `"\ud83d\u1234"` `{"a":1} trailing` `01` `+1` `1.` `[1,]` `{a:1}`]
+    (t/ok (try (do (json/decode invalid) false) ([_] true)) invalid)))

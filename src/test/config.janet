@@ -1,5 +1,5 @@
-(import ../visualize/config)
-(import ../visualize/color)
+(import ../../src.server/config)
+(import ../../src.server/color)
 (import ./harness :as t)
 
 (defn- run [& lines] (config/run lines))
@@ -69,8 +69,8 @@
 
 (t/test "a bare name is a literal, and quoting is for awkward ones"
 
-  (t/is= ["src.visualize"] ((state-of "(hide src.visualize)") :hidden))
-  (t/is= ["src.visualize"] ((state-of `(hide "src.visualize")`) :hidden))
+  (t/is= ["src.server"] ((state-of "(hide src.server)") :hidden))
+  (t/is= ["src.server"] ((state-of `(hide "src.server")`) :hidden))
   (t/is= ["a name with spaces"] ((state-of `(hide "a name with spaces")`) :hidden))
   (t/is= ["src.test"] ((state-of "(hide src/test)") :hidden)
          "a slash is taken too, since a path is a natural thing to type"))
@@ -156,16 +156,16 @@
   (t/ok (string/find "parentheses" (naked 0))))
 
 (t/test "a prefix binds a token to a path"
-  (def state (state-of "(prefix ~ src.visualize)"))
-  (t/is= [{:alias "~" :prefix "src.visualize"}] (state :aliases))
+  (def state (state-of "(prefix ~ src.server)"))
+  (t/is= [{:alias "~" :prefix "src.server"}] (state :aliases))
 
   (t/is= "@" (get-in (state-of "(prefix @ src)") [:aliases 0 :alias]))
   (t/is= "lib" (get-in (state-of "(prefix lib deps.vendor)") [:aliases 0 :alias])))
 
 (t/test "a bound prefix expands in later names"
-  (def state (state-of "(prefix ~ src.visualize)" "(hide ~.color)" "(only ~)"))
-  (t/is= ["src.visualize.color"] (state :hidden))
-  (t/is= ["src.visualize"] (state :only))
+  (def state (state-of "(prefix ~ src.server)" "(hide ~.color)" "(only ~)"))
+  (t/is= ["src.server.color"] (state :hidden))
+  (t/is= ["src.server"] (state :only))
 
   (def grouped (state-of "(prefix ~ src)" "(box ~.test 22a6f2)"))
   (t/is= "src.test" (get-in grouped [:groups 0 :prefix]))
@@ -173,12 +173,12 @@
 
 (t/test "the longest alias wins"
 
-  (def state (state-of "(prefix ~ src)" "(prefix ~~ src.visualize)"
+  (def state (state-of "(prefix ~ src)" "(prefix ~~ src.server)"
                        "(hide ~.test)" "(hide ~~.color)"))
-  (t/is= ["src.test" "src.visualize.color"] (state :hidden))
-  (def other (state-of "(prefix ~~ src.visualize)" "(prefix ~ src)"
+  (t/is= ["src.test" "src.server.color"] (state :hidden))
+  (def other (state-of "(prefix ~~ src.server)" "(prefix ~ src)"
                        "(hide ~~.color)"))
-  (t/is= ["src.visualize.color"] (other :hidden)))
+  (t/is= ["src.server.color"] (other :hidden)))
 
 (t/test "rebinding a token is refused"
 
@@ -273,9 +273,9 @@
 
 (t/test "a prefix binds before any line that uses it"
 
-  (def below (state-of "(hide ~.color)" "(prefix ~ src.visualize)"))
-  (t/is= ["src.visualize.color"] (below :hidden))
-  (def above (state-of "(prefix ~ src.visualize)" "(hide ~.color)"))
+  (def below (state-of "(hide ~.color)" "(prefix ~ src.server)"))
+  (t/is= ["src.server.color"] (below :hidden))
+  (def above (state-of "(prefix ~ src.server)" "(hide ~.color)"))
   (t/is= (above :hidden) (below :hidden) "the same file either way round")
 
   (def together (state-of "(hide ~.a)" "(prefix ~ src) (hide ~.b)"))
@@ -316,6 +316,8 @@
 (t/test "the editor's actions are the ones the page can send"
   (t/is= ["a" "b"] (config/edit ["a" "b"] "run" -1))
   (t/is= ["b"] (config/edit ["a" "b"] "delete" 0))
+  (t/is= [] (config/edit ["a"] "delete" 0)
+         "deleting the final line leaves an empty file")
   (t/is= ["a" "b"] (config/edit ["a" "b"] "delete" 9)
          "an index off the end deletes nothing")
   (t/is= ["a" "" "b"] (config/edit ["a" "b"] "insert-above" 1))
@@ -492,6 +494,20 @@
                                 (string root "/visualize.conf")) root))
   (t/ok (some |(string/find "@childA" $) (state2 :hidden))
         "written without the trailing dot, it is still scoped"))
+
+(t/test "pane placements round trip without replacing other metadata"
+  (def positions {"config" ["bottom" 0] "harness" ["top" 1] "3" ["floating" 240 180]})
+  (def lines ["(lines)" "@visualize terminal 3 socket /tmp/x.sock" "@visualize label 3 work"
+              "@visualize placement old top 0"])
+  (def saved (config/remember-placements lines positions))
+  (t/is= positions (config/placements saved))
+  (t/is= saved (config/remember-placements saved positions))
+  (t/ok (some |(= $ "(lines)") saved))
+  (t/ok (some |(string/find "terminal 3 socket" $) saved))
+  (t/is= "work" (get (config/labels saved) "3"))
+  (t/is= @{} (config/placements ["@visualize placement a top nope"
+    "@visualize placement b bottom -1" "@visualize placement c floating 20"
+    "@visualize placement d top 1.5" "@visualize placement e nowhere 2"])))
 
 (t/test "a label is what a pane has been called by hand"
 

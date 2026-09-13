@@ -1,6 +1,5 @@
-(import ../visualize/json)
-(import ../visualize/term/client :as term)
-(import ../visualize/term/host :as term-host)
+(import ../../src.server/json)
+(import ../../src.server/term/client :as term)
 (import ./harness :as check)
 
 (def- root (os/realpath (string (dyn :current-file) "/../../..")))
@@ -9,7 +8,7 @@
 (def client
   (term/make-client
     socket [(string root "/external-src/janet/janet")
-            (string root "/src/visualize/core.janet")
+            (string root "/src.server/core.janet")
             "--supervise" socket]))
 
 (defn- start [& args] (:start client ;args))
@@ -231,7 +230,7 @@
   (def restarted
     (term/make-client
       socket [(string root "/external-src/janet/janet")
-            (string root "/src/visualize/core.janet")
+            (string root "/src.server/core.janet")
               "--supervise" socket]))
   (def now (:state restarted))
   (check/ok (now :running) "the session is still running for a new client")
@@ -327,18 +326,6 @@
   (check/ok found "the keystroke still reached the program")
   (stop))
 
-(check/test "the DA1 scanner counts queries and carries a split one"
-
-  (check/is= [1 ""] (term-host/da1-queries "" "\e[c"))
-  (check/is= [1 ""] (term-host/da1-queries "" "before \e[0c after"))
-  (check/is= [2 ""] (term-host/da1-queries "" "\e[c\e[c"))
-  (check/is= [0 "\e["] (term-host/da1-queries "" "output ends \e["))
-  (check/is= [1 ""] (term-host/da1-queries "\e[" "c and more"))
-  (check/is= [0 "\e[0"] (term-host/da1-queries "\e[" "0"))
-  (check/is= [1 ""] (term-host/da1-queries "\e[0" "c"))
-  (check/is= [0 ""] (term-host/da1-queries "" "\e[0m is a colour, not a query"))
-  (check/is= [0 ""] (term-host/da1-queries "\e[" "2J is a clear, not a query")))
-
 (check/test "a DA1 query is answered, page or no page"
 
   (start ["/bin/sh" "-c"
@@ -424,6 +411,52 @@
   (check/is= "U1RSRUFNX1JFQURZ" (get bytes "text"))
   (def rejected (json/decode (:raw-send client "BAD" nil true (initial :generation))))
   (check/is= "terminal session changed" (get rejected "error"))
+  (stop))
+
+(check/test "screen publication waits for synchronized output to finish"
+  (def started (start ["/bin/sh" "-c"
+    "printf '\\033[?2026hPARTIAL'; sleep 0.3; printf ' COMPLETE\\033[?2026l'; sleep 5"] (os/cwd) 4 40))
+  (def [found _] (wait-for |(string/find "PARTIAL" $)))
+  (check/ok found)
+  (def screen (json/decode (:raw-screen client 0 (started :generation) 0)))
+  (check/is= 1 (get-in screen ["screen" "version"]))
+  (check/ok (string/find "PARTIAL COMPLETE" (get (:capture client) "text"))
+            "an immediately requested screen must not expose the partial frame")
+  (check/is= 4 (length (get-in screen ["screen" "lines"])))
+  (def delta (json/decode (:raw-screen client (screen "at") (started :generation) 0)))
+  (check/is= [] (get-in delta ["screen" "lines"]))
+  (stop))
+
+(check/test "native replies reach the PTY without a browser during synchronized output"
+  (start ["/bin/sh" "-c"
+    "stty raw -echo; printf '\\033[?2026h\\033[6n'; head -c 6 >/dev/null; printf 'ANSWERED\\033[?2026l'; sleep 5"] (os/cwd) 4 40)
+  (def [found _] (wait-for |(string/find "ANSWERED" $)))
+  (check/ok found)
+  (check/ok (string/has-prefix? "ANSWERED" (get (:capture client) "text")))
+  (stop))
+
+(check/test "screen readers get a full snapshot after a supervisor session replacement"
+  (def initial (start ["/bin/cat"] (os/cwd) 4 40))
+  (def screen (json/decode (:raw-screen client 0 (initial :generation))))
+  (def delivered (ev/chan 1))
+  (ev/go (fn [] (ev/give delivered (:raw-screen client (screen "at") (initial :generation) 1000))))
+  (ev/sleep 0.02)
+  (def next (start ["/bin/cat"] (os/cwd) 6 50))
+  (def replacement (json/decode (ev/take delivered)))
+  (check/is= (next :generation) (replacement "generation"))
+  (check/is= 6 (length (get-in replacement ["screen" "lines"])))
+  (check/is= 50 (get-in replacement ["screen" "cols"]))
+  (stop))
+
+(check/test "supervisor enforces Computer ownership after manual replacement"
+  (:start-once client ["/bin/cat"] (os/cwd) 24 80 nil "computer")
+  (check/is= "computer" (get (:request client {"op" "state"}) "owner"))
+  (def replacement (start ["/bin/cat"] (os/cwd) 24 80))
+  (check/is= nil (get (:request client {"op" "state"}) "owner"))
+  (check/ok (try
+    (do (:request client {"op" "shutdown" "owner" "computer" "generation" (replacement :generation)}) false)
+    ([_] true)))
+  (check/ok ((state) :running) "a denied cleanup leaves the user session running")
   (stop))
 
 (check/test "shutdown ends the supervisor and takes the socket with it"

@@ -1,14 +1,16 @@
-(import ../visualize/parser :as parser)
-(import ../visualize/scan)
-(import ../visualize/parsers/swift)
-(import ../visualize/parsers/clojure)
-(import ../visualize/parsers/python)
-(import ../visualize/parsers/go)
-(import ../visualize/parsers/arduino)
-(import ../visualize/parsers/html :as html)
-(import ../visualize/parsers/css :as css)
-(import ../visualize/parsers/javascript :as js)
-(import ../visualize/parsers/visualize-lang :as vz)
+(import ../../src.server/parser :as parser)
+(import ../../src.server/scan)
+(import ../../src.server/select)
+(import ../../src.server/parsers/swift)
+(import ../../src.server/parsers/clojure)
+(import ../../src.server/parsers/python)
+(import ../../src.server/parsers/go)
+(import ../../src.server/parsers/arduino)
+(import ../../src.server/parsers/html :as html)
+(import ../../src.server/parsers/css :as css)
+(import ../../src.server/parsers/javascript :as js)
+(import ../../src.server/parsers/visualize-lang :as vz)
+(import ../../src.server/parsers/visualize-bash :as bash)
 (import ./harness :as t)
 
 (defn- swift [text] (parser/run swift/spec text "T.swift"))
@@ -213,17 +215,17 @@ const fs = require('fs')
 
 (t/test "html reads what a page pulls in"
 
-  (defn imports [text] (((html/spec :parse) text "page.html") :imports))
+  (defn imports [text] (((html/spec :parse) text "page.html") :assets))
 
-  (t/is= ["theme" "app"]
+  (t/is= ["theme.css" "./app.js"]
          (imports `<link rel="stylesheet" href="theme.css"><script src="./app.js"></script>`)
          "a stylesheet and a script")
-  (t/is= ["logo"] (imports `<img src="logo.png">`) "and an image")
-  (t/is= ["clip" "thumb"]
+  (t/is= ["logo.png"] (imports `<img src="logo.png">`) "and an image")
+  (t/is= ["clip.mp4" "thumb.jpg"]
          (sort (imports `<video poster="thumb.jpg" src="clip.mp4"></video>`)))
 
   (t/is= [] (imports `<a href="about.html">about</a>`))
-  (t/is= ["theme"]
+  (t/is= ["theme.css"]
          (imports `<a href="about.html">x</a><link href="theme.css">`)
          "which is decided by the tag, not the attribute")
 
@@ -233,11 +235,85 @@ const fs = require('fs')
   (t/is= [] (imports `<a href="#top">top</a>`))
 
   (t/is= [] (imports `<link rel="icon" href="{{FAVICON}}">`))
-  (t/is= ["style"]
+  (t/is= ["style.css"]
          (imports `<link rel="icon" href="{{FAVICON}}"><link href="style.css">`)
          "and the hole beside a real file does not take it with it")
 
-  (t/is= ["favicon"] (imports `<link rel="icon" href="/favicon.ico?v=2">`)))
+  (t/is= ["/favicon.ico"] (imports `<link rel="icon" href="/favicon.ico?v=2">`)))
+
+(t/test "html assets preserve extensions and resolve static roots without guessing ambiguous files"
+  (def path "src/web/index.html")
+  (def parsed (parser/run html/spec ``
+<link href="/wterm.css?v=2#theme">
+<script src="./app.js"></script>
+<link href="/style.css">
+<img src="/icons/logo.svg">
+<img src="/duplicate.png">
+<img src="./missing.png">
+<script type="importmap">{"imports":{"@wterm/dom":"/wterm-dom.js"}}</script>
+`` path))
+  (def g (scan/build [(merge parsed {:rel path :lang "html"})
+                     {:rel "src.wterm/wterm.css"}
+                     {:rel "src.wterm/wterm.js"}
+                     {:rel "src.wterm/wterm-dom.js"}
+                     {:rel "src/web/app.js" :lang "javascript" :imports ["wterm.dom"]}
+                     {:rel "src/web/style.css"}
+                     {:rel "style.css"}
+                     {:rel "public/icons/logo.svg"}
+                     {:rel "elsewhere/logo.svg"}
+                     {:rel "one/duplicate.png"}
+                     {:rel "two/duplicate.png"}
+                     {:rel "elsewhere/missing.png"}]))
+  (t/is= [["src.web.app.js" "src.wterm.wterm-dom.js"]
+          ["src.web.index.html" "?.src.web.duplicate"]
+          ["src.web.index.html" "?.src.web.missing"]
+          ["src.web.index.html" "public.icons.logo.svg"]
+          ["src.web.index.html" "src.web.app.js"]
+          ["src.web.index.html" "src.wterm.wterm.css"]
+          ["src.web.index.html" "style.css"]]
+         (g :edges)))
+
+(t/test "the visualize html entrypoint resolves the vendored terminal stylesheet"
+  (def path "src/web/index.html")
+  (def parsed (parser/run html/spec (slurp path) path))
+  (def g (scan/build [(merge parsed {:rel path :lang "html"})
+                     {:rel "src.wterm/wterm.css"}
+                     {:rel "src.wterm/wterm-dom.js"}
+                     {:rel "src/web/style.css"}
+                     {:rel "src/web/app.js" :lang "javascript" :imports ["wterm.dom"]}]))
+  (t/ok (index-of ["src.web.index.html" "src.wterm.wterm.css"] (g :edges)))
+  (t/ok (index-of ["src.web.app.js" "src.wterm.wterm-dom.js"] (g :edges)))
+  (t/ok (not (find |(= ($ :name) "?.src.web.wterm") (g :nodes)))))
+
+(t/test "folded line counts include unparsed text and trailing blank lines but exclude binaries"
+  (def root (string "/tmp/vz-line-counts-" (os/getpid)))
+  (os/mkdir root)
+  (os/mkdir (string root "/external-src"))
+  (def inputs {"bridge.c" "int main(void) {\n  return 0;\n}\n\n"
+               "bridge.h" "int main(void);"
+               "README.md" "# Bridge\n\n"
+               "empty.c" ""
+               "blank.h" "\n"
+               "parsed.janet" "(def a 1)\n\n"
+               "program" "\x00\x01\n\n"
+               "large.c" (string (string/repeat "x" 65535) "\nlast\n\n")})
+  (defer (do (eachp [name _] inputs (os/rm (string root "/external-src/" name)))
+             (os/rmdir (string root "/external-src"))
+             (os/rmdir root))
+    (eachp [name text] inputs (spit (string root "/external-src/" name) text))
+    (def g (scan/scan root))
+    (def sizes (g :sizes))
+    (t/is= 4 (sizes "external-src.bridge.c"))
+    (t/is= 1 (sizes "external-src.bridge.h"))
+    (t/is= 2 (sizes "external-src.README.md"))
+    (t/is= 0 (sizes "external-src.empty.c"))
+    (t/is= 1 (sizes "external-src.blank.h"))
+    (t/is= 2 (sizes "external-src.parsed.janet"))
+    (t/is= nil (sizes "external-src.program"))
+    (t/is= 3 (sizes "external-src.large.c"))
+    (def [folded totals] (select/fold g ["external-src" "external-src.bridge"] sizes))
+    (t/is= 1 (length (folded :nodes)))
+    (t/is= 13 (totals "external-src"))))
 
 (t/test "css references other files three ways"
 
@@ -448,6 +524,16 @@ database  where things are kept
   (t/ok (index-of "otto.caller.py -> otto.reads.__init__.py" edges)
         "and the package python ran to reach it"))
 
+(t/test "a qualified external symbol does not fall back to a local leaf file"
+  (def root (string (os/getenv "TMPDIR") "vz-leaf-" (string (os/time))))
+  (os/mkdir root)
+  (spit (string root "/www_stasheherbags_com.py") "from mcp import search\n")
+  (spit (string root "/search.py") "def search(): pass\n")
+  (def g (scan/scan root))
+  (def edges (map |(string (first $) " -> " (get $ 1)) (g :edges)))
+  (t/ok (not (index-of "www_stasheherbags_com.py -> search.py" edges))
+        "an imported symbol cannot invent a dependency by leaf filename"))
+
 (t/test "a file's own package is not drawn as a dependency of it"
 
   (def root (string (os/getenv "TMPDIR") "vz-own-" (string (os/time))))
@@ -546,6 +632,58 @@ database  where things are kept
   (t/ok (index-of "run.sh -> lib.util.sh" edges)
         "and a real source line still resolves"))
 
+(t/test "shell assignments retain their boundaries after an unknown variable"
+  (def text ``
+unknown="$RUNTIME_ROOT/generated"
+scripts=./scripts
+more="${scripts}/more"
+source "$unknown/missing.sh"
+source "$scripts/helper.sh"
+source "${more}/worker.sh"
+``)
+  (t/is= ["project.scripts.helper" "project.scripts.more.worker"]
+         ((parser/run bash/spec text "project/run.sh") :imports)))
+
+(t/test "shell directory aliases resolve relative to the script that defines them"
+  (def text ``
+local_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+tools="$local_root/../tools"
+source "${tools}/helper.sh"
+"$local_root/child.task.sh"
+``)
+  (t/is= ["tools.helper" "nested.child.task"]
+         ((parser/run bash/spec text "nested/build") :imports)))
+
+(t/test "continued compiler arguments are not executable dependencies"
+  (def text ``
+here=$(cd "$(dirname "$0")" && pwd)
+source "$here/setup.sh"
+"${CC:-cc}" -O2 \
+  "$here/bridge.c" \
+  "$here/lib/xmlparse.c" "$here/lib/xmlrole.c" \
+  -o "$here/program"
+"$here/verify.sh"
+``)
+  (t/is= ["native.setup" "native.verify"]
+         ((parser/run bash/spec text "native/build") :imports)))
+
+(t/test "the native Graphviz build does not invent executable paths from C inputs"
+  (def root (string "/tmp/vz-native-build-scan-" (os/getpid)))
+  (os/mkdir root)
+  (os/mkdir (string root "/src.graphviz"))
+  (defer (do
+           (os/rm (string root "/src.graphviz/build"))
+           (os/rm (string root "/run.sh"))
+           (os/rmdir (string root "/src.graphviz"))
+           (os/rmdir root))
+    (spit (string root "/src.graphviz/build") (slurp "src.graphviz/build"))
+    (spit (string root "/run.sh") "#!/bin/sh\n./src.graphviz/build\n")
+    (def g (scan/scan root))
+    (t/is= [] (filter |(not ($ :ours)) (g :nodes))
+           "no phantom Expat or bridge nodes")
+    (t/is= [["run.sh" "src.graphviz.build"]] (g :edges)
+           "the actual invocation of the build script still resolves")))
+
 (t/test "a reference that resolves to no name draws nothing"
 
   (def root (string (os/getenv "TMPDIR") "vz-dot-" (string (os/time))))
@@ -627,6 +765,11 @@ database  where things are kept
   (t/ok (not (index-of "scale_down_fade_animation" found)) "refer names skipped")
   (t/ok (index-of "icare.ui.shared" found)))
 
+(t/test "clojuredart reads macro requires"
+  (def got (parser/run clojure/spec
+    "(ns icare.ui (:require-macros [icare.macros :as m]))\n" "ui.cljd"))
+  (t/ok (index-of "icare.macros" (got :imports))))
+
 (t/test "a clojuredart require finds its file from the source root"
 
   (def root (string (os/getenv "TMPDIR") "vz-cljd-" (string (os/time))))
@@ -646,6 +789,33 @@ database  where things are kept
   (t/ok (index-of "src.app.src.icare.ui.cljd -> ?.cljd.flutter" edges)
         "and the library stayed external, its transpiled copy unseen"))
 
+(t/test "a clojuredart source tree resolves nested icare namespaces"
+  (def root (string (os/getenv "TMPDIR") "vz-icare-" (string (os/time))))
+  (os/mkdir root)
+  (each d ["/src" "/src/app" "/src/app/src" "/src/app/src/icare"
+           "/src/app/src/icare/ui" "/src/app/src/icare/ui/screens"
+           "/src/app/src/icare/ui/screens/pages"
+           "/src/app/src/icare/ui/screens/pages/queridos"]
+    (os/mkdir (string root d)))
+  (spit (string root "/src/app/src/icare/ui.cljd")
+        "(ns icare.ui (:require [icare.ui.screens.pages :as pages] [icare.ui.shared :as shared] [cljd.flutter :as f]))\n")
+  (spit (string root "/src/app/src/icare/ui/shared.cljd")
+        "(ns icare.ui.shared (:require [cljd.flutter :as f]))\n")
+  (spit (string root "/src/app/src/icare/ui/screens/pages.cljd")
+        "(ns icare.ui.screens.pages (:require [icare.ui.screens.pages.shared :as shared] [icare.ui.screens.pages.queridos.base :as queridos]))\n")
+  (spit (string root "/src/app/src/icare/ui/screens/pages/shared.cljd")
+        "(ns icare.ui.screens.pages.shared)\n")
+  (spit (string root "/src/app/src/icare/ui/screens/pages/queridos/base.cljd")
+        "(ns icare.ui.screens.pages.queridos.base (:require [icare.ui.physics :as physics]))\n")
+  (spit (string root "/src/app/src/icare/ui/physics.cljd")
+        "(ns icare.ui.physics)\n")
+  (def g (scan/scan root))
+  (def edges (map |(string (first $) " -> " (get $ 1)) (g :edges)))
+  (t/ok (index-of "src.app.src.icare.ui.cljd -> src.app.src.icare.ui.screens.pages.cljd" edges))
+  (t/ok (index-of "src.app.src.icare.ui.screens.pages.cljd -> src.app.src.icare.ui.screens.pages.shared.cljd" edges))
+  (t/ok (index-of "src.app.src.icare.ui.screens.pages.cljd -> src.app.src.icare.ui.screens.pages.queridos.base.cljd" edges))
+  (t/ok (index-of "src.app.src.icare.ui.screens.pages.queridos.base.cljd -> src.app.src.icare.ui.physics.cljd" edges)))
+
 (t/test "fingerprints track names and individual files without aggregate collisions"
   (def root (string (os/getenv "TMPDIR" "/tmp/") "vz-fingerprint-" (os/getpid)))
   (os/mkdir root)
@@ -664,3 +834,58 @@ database  where things are kept
     (t/ok (not= renamed edited) "opposing size changes cannot cancel out")
     (os/rm (string root "/c.js"))
     (t/ok (not= edited (scan/fingerprint root)) "deletion changes the fingerprint")))
+
+(t/test "visualize dependencies resolve only exact project-relative file paths"
+  (def path "plans/flow.visualize")
+  (def parsed ((vz/spec :parse) ``verify
+    a.txt
+    dir/a.txt
+    local.txt
+    dir.a.txt
+    only.txt
+    absent.txt
+local.txt
+`` path))
+  (def g (scan/build [(merge parsed {:rel path :lang "visualize"})
+                     {:rel "a.txt" :lines 1}
+                     {:rel "plans/a.txt" :lines 2}
+                     {:rel "dir/a.txt" :lines 3}
+                     {:rel "local.txt" :lines 4}
+                     {:rel "deep/only.txt" :lines 5}]))
+  (t/is= [["plans.flow.verify" "a.txt"]
+          ["plans.flow.verify" "dir.a.txt"]
+          ["plans.flow.verify" "plans.flow.absent.txt"]
+          ["plans.flow.verify" "plans.flow.dir.a.txt"]
+          ["plans.flow.verify" "plans.flow.local.txt"]
+          ["plans.flow.verify" "plans.flow.only.txt"]]
+         (g :edges))
+  (def by-name (tabseq [node :in (g :nodes)] (node :name) node))
+  (t/is= nil (get by-name "plans.flow.a.txt") "a matching file replaces the implicit local node")
+  (t/is= "a.txt" ((by-name "a.txt") :file))
+  (t/is= "dir/a.txt" ((by-name "dir.a.txt") :file))
+  (t/is= "plans/flow.visualize" ((by-name "plans.flow.local.txt") :file)
+         "an explicit local heading wins even when declared after the reference")
+  (t/is= 1 ((g :sizes) "a.txt")))
+
+(t/test "visualize file matching is case sensitive and preserves dotted filenames"
+  (def path "flow.visualize")
+  (def parsed ((vz/spec :parse) "step\n    dir.a.txt\n    Dir/a.txt\n" path))
+  (def g (scan/build [(merge parsed {:rel path :lang "visualize"})
+                     {:rel "dir.a.txt"} {:rel "dir/b.txt"}]))
+  (t/is= [["flow.step" "dir.a.txt"] ["flow.step" "flow.Dir.a.txt"]] (g :edges)))
+
+(t/test "scanning a visualize file links to files and falls back when they disappear"
+  (def root (string "/tmp/vz-file-dependency-" (os/getpid)))
+  (os/mkdir root)
+  (os/mkdir (string root "/dir"))
+  (def plan (string root "/plan.visualize"))
+  (def target (string root "/dir/a.txt"))
+  (spit plan "verify\n    dir/a.txt\n")
+  (spit target "payload")
+  (defer (do (os/rm plan)
+             (when (os/stat target) (os/rm target))
+             (os/rmdir (string root "/dir"))
+             (os/rmdir root))
+    (t/is= [["plan.verify" "dir.a.txt"]] ((scan/scan root) :edges))
+    (os/rm target)
+    (t/is= [["plan.verify" "plan.dir.a.txt"]] ((scan/scan root) :edges))))

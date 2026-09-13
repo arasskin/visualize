@@ -1,4 +1,4 @@
-(import ../visualize/term/pty)
+(import ../../src.server/term/pty)
 (import ./harness :as t)
 
 (defn- capture

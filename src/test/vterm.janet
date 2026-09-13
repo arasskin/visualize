@@ -1,0 +1,88 @@
+(import ./harness :as check)
+(import ../../src.server/term/vterm)
+
+(check/test "native libvterm shares UTF-8 decoder state across chunks"
+  (each split [1 2 3]
+    (def terminal (vterm/create 4 20))
+    (defer (:close terminal)
+      (def bytes "x█")
+      (:write terminal (string/slice bytes 0 split))
+      (:write terminal (string/slice bytes split))
+      (check/is= "x█\n\n\n" (:capture terminal)))))
+
+(check/test "native resize preserves the cursor following an exact-width line"
+  (def terminal (vterm/create 4 4))
+  (defer (:close terminal)
+    (:write terminal "ABCD\r\nX")
+    (:resize terminal 4 5)
+    (check/is= {"row" 1 "col" 1 "visible" true} ((:snapshot terminal 0) "cursor"))))
+
+(check/test "screen deltas retain damage independently for multiple readers"
+  (def terminal (vterm/create 4 20))
+  (defer (:close terminal)
+    (def baseline (:revision terminal))
+    (:write terminal "\e[2;1Hhello")
+    (def delta (:snapshot terminal baseline))
+    (check/is= [1] (map first (delta "lines")))
+    (check/is= delta (:snapshot terminal baseline))
+    (check/is= [] ((:snapshot terminal (:revision terminal)) "lines"))
+    (:resize terminal 6 30)
+    (check/is= 6 (length ((:snapshot terminal (delta "revision")) "lines")))
+    (check/is= 6 (length ((:snapshot terminal 0) "lines")))) )
+
+(check/test "native input modes and split title propagate to the renderer"
+  (def terminal (vterm/create 4 20))
+  (defer (:close terminal)
+    (:write terminal "\e[?1h\e[?2004h\e[?1002h\e[?1006h\e[?1004h\e]2;test")
+    (:write terminal " title\e\\")
+    (def screen (:snapshot terminal 0))
+    (check/is= [1 1 2 1 1] (screen "modes"))
+    (check/is= "test title" (screen "title"))
+    (:write terminal "\e[?1049hALT")
+    (check/ok ((:snapshot terminal 0) "alternate"))
+    (:write terminal "\e[?1049l")
+    (check/ok (not ((:snapshot terminal 0) "alternate")))))
+
+(check/test "native synchronized output supports mode queries and split sequences"
+  (def terminal (vterm/create 4 20))
+  (defer (:close terminal)
+    (:write terminal "\e[?2026$p")
+    (check/is= "\e[?2026;2$y" (:replies terminal))
+    (:write terminal "\e[?202")
+    (check/ok (not (:synchronized? terminal)))
+    (:write terminal "6hpartial\e[?2026$p\e[6n")
+    (check/ok (:synchronized? terminal))
+    (check/is= "\e[?2026;1$y\e[1;8R" (:replies terminal))
+    (:write terminal " update\e[?2026l")
+    (check/ok (not (:synchronized? terminal)))
+    (check/ok (string/has-prefix? "partial update" (:capture terminal)))
+    (:write terminal "\e[?2026h\ec")
+    (check/ok (not (:synchronized? terminal)) "RIS releases a held update")
+    (:write terminal "\e[?2026h")
+    (ev/sleep 1.02)
+    (check/ok (not (:synchronized? terminal)) "a missing end sequence times out")
+    (:write terminal "\e[?2026$p")
+    (check/is= "\e[?2026;2$y" (:replies terminal))))
+
+(check/test "supervisor query responses use its theme and cell geometry"
+  (def terminal (vterm/create 4 20))
+  (defer (:close terminal)
+    (:theme terminal {"foreground" 1193046 "background" 16777215 "palette" [0 16711680]})
+    (:geometry terminal 9 18)
+    (:write terminal "\e]10;?\e\\\e]11;")
+    (:write terminal "?\a\e]4;1;?\a\e[14t\e[16t\e[18t")
+    (check/is= (string "\e]10;rgb:1212/3434/5656\e\\\e]11;rgb:ffff/ffff/ffff\e\\"
+                       "\e]4;1;rgb:ffff/0000/0000\e\\\e[4;72;180t\e[6;18;9t\e[8;4;20t")
+               (:replies terminal))))
+
+(check/test "scrollback snapshots discard evicted lines and survive alternate screens"
+  (def terminal (vterm/create 4 20))
+  (defer (:close terminal)
+    (for n 0 2010 (:write terminal (string n "\r\n")))
+    (def screen (:snapshot terminal 0))
+    (check/is= 2000 (get-in screen ["history" "count"]))
+    (check/ok (pos? (get-in screen ["history" "start"])))
+    (:write terminal "\e[?1049h\e[?1049l")
+    (check/is= 2000 (get-in (:snapshot terminal 0) ["history" "count"]))
+    (:write terminal "\e[3J")
+    (check/is= 0 (get-in (:snapshot terminal 0) ["history" "count"]))))

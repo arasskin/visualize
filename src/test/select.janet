@@ -1,5 +1,5 @@
-(import ../visualize/select)
-(import ../visualize/color)
+(import ../../src.server/select)
+(import ../../src.server/color)
 (import ./harness :as t)
 
 (defn- sample []
@@ -123,15 +123,15 @@
   (t/is= "a.b" (get-in by-name ["a.b" :name]) "and so is the name"))
 
 (t/test "a prefix shortens the labels it covers"
-  (def aliases [{:alias "~" :prefix "src.visualize"}])
-  (t/is= "~.color" (select/alias-label aliases "src.visualize.color"))
-  (t/is= "~" (select/alias-label aliases "src.visualize") "the path itself")
+  (def aliases [{:alias "~" :prefix "src.server"}])
+  (t/is= "~.color" (select/alias-label aliases "src.server.color"))
+  (t/is= "~" (select/alias-label aliases "src.server") "the path itself")
   (t/is= nil (select/alias-label aliases "src.test") "an unrelated node")
 
-  (t/is= nil (select/alias-label aliases "src.visualizer.x"))
+  (t/is= nil (select/alias-label aliases "src.serverr.x"))
 
-  (def two [{:alias "~~" :prefix "src.visualize"} {:alias "~" :prefix "src"}])
-  (t/is= "~~.color" (select/alias-label two "src.visualize.color"))
+  (def two [{:alias "~~" :prefix "src.server"} {:alias "~" :prefix "src"}])
+  (t/is= "~~.color" (select/alias-label two "src.server.color"))
   (t/is= "~.test" (select/alias-label two "src.test")))
 
 (t/test "fold turns a region into one node"
@@ -170,15 +170,33 @@
   (def [same] (select/fold graph [] {}))
   (t/is= 2 (length (same :nodes))))
 
-(t/test "two folds that overlap take a node once"
+(t/test "outer folds absorb nested folds in either declaration order"
 
   (def graph {:nodes [{:name "a.b.x" :ours true} {:name "a.b.y" :ours true}
                       {:name "a.c" :ours true}]
-              :edges [["a.b.x" "a.c"]]
+              :edges [["a.b.x" "a.c"] ["a.c" "a.b.y"]]
               :ours {"a.b.x" true "a.b.y" true "a.c" true}})
-  (def [out] (select/fold graph ["a" "a.b"] {}))
-  (t/is= ["a"] (map |($ :name) (out :nodes))
-         "the wider one declared first takes everything"))
+  (each prefixes [["a" "a.b"] ["a.b" "a"] ["a/b" "a"]]
+    (def [out sizes] (select/fold graph prefixes {"a.b.x" 10 "a.b.y" 20 "a.c" 30}))
+    (t/is= ["a"] (map |($ :name) (out :nodes)))
+    (t/is= [] (out :edges) "all internal edges disappear")
+    (t/is= {"a" 60} sizes "every member is counted once")))
+
+(t/test "a parent fold absorbs children even when it has no direct files"
+  (def graph {:nodes [{:name "milestone1.X.a" :ours true}
+                      {:name "milestone1.X.b" :ours true}
+                      {:name "outside" :ours true}]
+              :edges [["milestone1.X.a" "outside"] ["milestone1.X.b" "outside"]
+                      ["outside" "milestone1.X.b"]]
+              :ours {"milestone1.X.a" true "milestone1.X.b" true "outside" true}})
+  (def [out sizes] (select/fold graph ["milestone1.X" "milestone1"]
+                              {"milestone1.X.a" 10 "milestone1.X.b" 20 "outside" 5}))
+  (t/is= ["milestone1" "outside"] (map |($ :name) (out :nodes)))
+  (t/is= [["milestone1" "outside"] ["outside" "milestone1"]] (out :edges))
+  (t/is= {"milestone1" 30 "outside" 5} sizes)
+  (def boxes [{:prefix "milestone1" :color "blue"} {:prefix "milestone1.X" :color "red"}])
+  (t/is= ["milestone1"]
+         (map |($ :prefix) (select/boxes-for "milestone1" boxes (graph :ours)))))
 
 (t/test "an external is named with its mark, and only with its mark"
 

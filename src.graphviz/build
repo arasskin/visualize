@@ -1,0 +1,45 @@
+#!/bin/sh
+set -eu
+graphviz_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+graphviz_src="$graphviz_root/../external-src/graphviz"
+expat_src="$graphviz_root/../external-src/expat"
+graphviz_out="$graphviz_root/libvisualize-graphviz.so"
+graphviz_check=0
+case "${1:-}" in
+  --clean) rm -f "$graphviz_out"; exit 0 ;;
+  --check) graphviz_check=1 ;;
+  --force|"") ;;
+  *) echo "usage: src.graphviz/build [--force|--clean|--check]" >&2; exit 2 ;;
+esac
+if [ "$graphviz_check" -eq 0 ] && [ "${1:-}" != --force ] && [ -f "$graphviz_out" ] && ! find "$graphviz_src" "$expat_src" "$graphviz_root/bridge.c" "$graphviz_root/bridge.h" "$graphviz_root/config.h" "$graphviz_root/expat_config.h" "$graphviz_root/build" -type f -newer "$graphviz_out" | read -r graphviz_newer; then
+  exit 0
+fi
+graphviz_tmp=$(mktemp "$graphviz_out.XXXXXX")
+trap 'rm -f "$graphviz_tmp"' EXIT HUP INT TERM
+case $(uname -s) in
+  Darwin) set -- -dynamiclib -Wl,-install_name,@rpath/libvisualize-graphviz.so ;;
+  Linux) set -- -shared -Wl,-z,defs ;;
+  *) echo "Graphviz embedding supports macOS and Linux" >&2; exit 1 ;;
+esac
+if [ "$graphviz_check" -eq 1 ]; then
+  set -- -g -fsanitize=undefined -fno-sanitize-recover=all "$graphviz_root/check.c"
+fi
+echo "compiling embedded Graphviz..."
+"${CC:-cc}" -O2 -std=c11 -D_GNU_SOURCE -fPIC -fvisibility=hidden -DHAVE_EXPAT_CONFIG_H -DXML_STATIC \
+  "$@" -I"$graphviz_root" -I"$graphviz_src" -I"$graphviz_src/lib" -I"$expat_src/lib" \
+  -I"$graphviz_src/lib/cdt" -I"$graphviz_src/lib/cgraph" -I"$graphviz_src/lib/common" \
+  -I"$graphviz_src/lib/gvc" -I"$graphviz_src/lib/pathplan" -I"$graphviz_src/lib/pack" \
+  "$graphviz_root/bridge.c" \
+  "$graphviz_src"/lib/cdt/*.c "$graphviz_src"/lib/cgraph/*.c \
+  "$graphviz_src"/lib/common/*.c "$graphviz_src"/lib/dotgen/*.c \
+  "$graphviz_src"/lib/gvc/*.c "$graphviz_src"/lib/label/*.c \
+  "$graphviz_src"/lib/pack/*.c "$graphviz_src"/lib/pathplan/*.c \
+  "$graphviz_src"/lib/util/*.c "$graphviz_src"/lib/xdot/*.c \
+  "$graphviz_src"/plugin/dot_layout/*.c "$graphviz_src/plugin/core/gvrender_core_svg.c" \
+  "$expat_src/lib/xmlparse.c" "$expat_src/lib/xmlrole.c" "$expat_src/lib/xmltok.c" "$expat_src/lib/random_dev_urandom.c" \
+  -lm -lpthread -o "$graphviz_tmp"
+if [ "$graphviz_check" -eq 1 ]; then
+  "$graphviz_tmp"
+else
+  mv "$graphviz_tmp" "$graphviz_out"
+fi

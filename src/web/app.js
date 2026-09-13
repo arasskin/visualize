@@ -1,3 +1,5 @@
+import './file-command.js';
+import { refreshSession } from './transport.js';
 import { pane, wire as wireGraph, paint, repaint, fit, fitSoon, isTouched, hatchFolded } from './graph.js';
 import {
   find, hits, wire as wireFind, placeArrow, redrawFind, anchorHit, restoreAnchor,
@@ -7,7 +9,7 @@ import { moduleNames, hideEdge, wireEdges, keepEdgeLabel } from './hover.js';
 import {
   configPanel, makeConfigPanel, rail, EDGES,
   selectPane, pickedPanel, revealTab, openTerminal, resnap,
-  startRail, wire as wirePanes,
+  startRail, syncAgentPanes, wire as wirePanes,
 } from './panes.js';
 
 wireGraph({ onRepaint: () => placeArrow(), onNavigate: hideEdge });
@@ -33,13 +35,16 @@ async function watchSource() {
         body: JSON.stringify({ generation: sourceGeneration }),
         signal: AbortSignal.timeout(35000),
       });
+      if (!r.ok) {
+        if (r.status === 403) await refreshSession();
+        throw new Error('source watch failed');
+      }
       const out = await r.json();
       const previous = sourceGeneration;
       const first = sourceGeneration === -1;
       sourceGeneration = out.generation;
 
       if (out.changed && !first) {
-        status.textContent = 'source changed, redrawing...';
         const drawn = await send('run', -1, true);
         if (drawn && Number.isInteger(drawn.generation)) sourceGeneration = drawn.generation;
         else { sourceGeneration = previous; await new Promise(r => setTimeout(r, 50)); }
@@ -52,7 +57,6 @@ async function watchSource() {
   }
 }
 
-const status = document.getElementById('status');
 const panel = document.getElementById('config');
 const bar = document.getElementById('bar');
 const body = document.getElementById('body');
@@ -61,6 +65,7 @@ const rows = document.getElementById('lines');
 const problems = document.getElementById('problems');
 
 let lines = [];
+let configFile = null;
 
 let faults = {};
 let busy = false;
@@ -154,14 +159,6 @@ function draw() {
     rows.appendChild(slot);
   });
 
-  if (!lines.length) {
-    const row = document.createElement('div');
-    row.className = 'row';
-    const add = icon('+', 'add the first line', 'up');
-    add.onclick = () => send('insert-below', -1);
-    row.append(add);
-    rows.appendChild(row);
-  }
 }
 
 function lift(down, at, slot) {
@@ -262,20 +259,17 @@ async function send(action, index, keepView) {
   busy = true;
   draw();
 
-  status.textContent = keepView ? 'drawing...' : 'saving...';
-  const t0 = performance.now();
   try {
 
     const r = await fetch(`/config?k=${encodeURIComponent(window.TOKEN)}`, {
       method: 'POST',
 
-      body: JSON.stringify({ action, index, lines, draw: !!keepView }),
+      body: JSON.stringify({ action, index, lines, file: configFile, draw: !!keepView }),
     });
     const out = await r.json();
 
     if (!out.lines) {
       problems.textContent = out.error || 'request failed';
-      status.textContent = 'error';
     } else {
       lines = out.lines;
 
@@ -302,17 +296,12 @@ async function send(action, index, keepView) {
 
         restoreAnchor(anchor);
       }
-      const count = Object.keys(faults).length;
-      const ms = Math.round(performance.now() - t0);
 
-      status.textContent = count
-        ? `saved, ${count} line${count > 1 ? 's' : ''} failed`
-        : out.svg ? `drawn in ${ms}ms` : 'saved';
+
     }
     return out;
   } catch (e) {
     problems.textContent = e.message;
-    status.textContent = 'error';
   } finally {
     busy = false;
     draw();
@@ -320,7 +309,6 @@ async function send(action, index, keepView) {
 }
 
 const help = document.getElementById('help');
-const helpOpen = document.getElementById('help-open');
 
 function renderHelp() {
   const verbs = window.CONFIG_DOCS || [];
@@ -358,7 +346,6 @@ function shutHelp() {
   helpCloseTarget = null;
 }
 
-helpOpen.addEventListener('click', openHelp);
 
 help.addEventListener('click', (e) => { if (e.target === help) shutHelp(); });
 document.addEventListener('keydown', (e) => {
@@ -842,7 +829,7 @@ function altChord(e) {
   e.preventDefault();
 
   if (newTab) {
-    openTerminal();
+    openTerminal('top');
     return true;
   }
 
@@ -907,16 +894,15 @@ document.addEventListener('keydown', (e) => {
 
 function altWalk(by) {
 
-  const off = rail.indexOf(pickedPanel()) < 0;
-  if (rail.length < (off ? 1 : 2)) return;
-
-  const here = rail.indexOf(pickedPanel());
+  const ordered = ['bottom', 'top'].flatMap(side => rail.filter(p => (p.root.dataset.rail || 'top') === side));
+  const here = ordered.indexOf(pickedPanel());
+  if (ordered.length < (here < 0 ? 1 : 2)) return;
 
   const to = here < 0
-    ? (by > 0 ? 0 : rail.length - 1)
-    : Math.max(0, Math.min(rail.length - 1, here + by));
+    ? (by > 0 ? 0 : ordered.length - 1)
+    : Math.max(0, Math.min(ordered.length - 1, here + by));
   if (to === here) return;
-  const next = rail[to];
+  const next = ordered[to];
 
   const leaving = altPeeked || (altOpened ? altPanel : null);
   if (leaving && leaving !== next) {
@@ -994,26 +980,40 @@ makeConfigPanel(panel, () => {
   (boxes[picked >= 0 ? picked : 0])?.focus();
 });
 
+const configPaneSaved = !!(window.PANE_POSITIONS && window.PANE_POSITIONS.config);
+if (window.START_EMPTY || configPaneSaved) configPanel.showDocument?.(window.CONFIG_FILE);
+else configPanel.root.remove();
+
 wirePanes({
   refitCompose: () => refitCompose(),
 });
 
 lines = window.CONFIG_LINES || [];
-for (const [at, why] of Object.entries(window.CONFIG_PROBLEMS || {})) {
-  faults[Number(at)] = why;
-}
-draw();
-
-if (Object.keys(faults).length) requestAnimationFrame(() => bar.click());
 
 startRail();
 
 watchSource();
+(async () => {
+  let generation = -1;
+  for (;;) {
+    try {
+      const response = await fetch('/panes/watch?k=' + encodeURIComponent(window.TOKEN), {
+        method: 'POST', body: JSON.stringify({ generation }), signal: AbortSignal.timeout(35000),
+      });
+      if (!response.ok) {
+        if (response.status === 403) { await refreshSession(); generation = -1; }
+        throw new Error('pane watch failed');
+      }
+      const out = await response.json();
+      syncAgentPanes(out.ids, out.labels, out.documents, out.harnessRequest);
+      generation = out.generation;
+    } catch (_) { await new Promise(resolve => setTimeout(resolve, 2000)); }
+  }
+})();
 
 wireFind({
   moduleNames,
   help,
   shutHelp,
-  rank,
   prefixCandidates,
 });

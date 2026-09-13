@@ -1,15 +1,16 @@
+import * as renderTrace from './render-trace.js';
 import { createRenderer } from './graph-canvas.js';
 let onRepaint = () => {};
 let onNavigate = () => {};
+let onFileClick = () => {};
 
 export function wire(hooks) {
   if (hooks.onRepaint) onRepaint = hooks.onRepaint;
   if (hooks.onNavigate) onNavigate = hooks.onNavigate;
+  if (hooks.onFileClick) onFileClick = hooks.onFileClick;
 }
 
 export const pane = document.getElementById('graph');
-const zoomLabel = document.getElementById('zoom');
-let zoomFade = null;
 let paintedScale = null;
 let paintedSvg = null;
 let navigationEnd = null;
@@ -71,33 +72,36 @@ export function selectGraphNode(node, arrow) { drawing()?.selection(node, arrow,
 export function hoverGraphEdge(edge) { drawing()?.hover(edge); }
 export function edgeAt(x, y) { return drawing()?.hit((x - tx) / scale, (y - ty) / scale, scale); }
 
+export function fileAt(x, y) {
+  const r = pane.getBoundingClientRect();
+  return drawing()?.fileAt((x - r.left - tx) / scale, (y - r.top - ty) / scale);
+}
+
 export let painting = null;
 
 export function paint() {
   if (painting) return;
+  const queued = renderTrace.begin();
   painting = requestAnimationFrame(() => {
+    renderTrace.end('raf-wait', queued);
     painting = null;
     repaint();
   });
 }
 
 export function repaint() {
+  const traceStart = renderTrace.frameStart();
   const current = drawing();
   if (!current) return;
   const { svg } = current;
   if (!navigating && (svg !== paintedSvg || scale !== paintedScale)) {
     paintedSvg = svg;
     paintedScale = scale;
-    onRepaint();
+    renderTrace.measure('repaint-hook', onRepaint);
   }
   current.render(view(), navigating);
-  const label = Math.round(scale * 100) + '%';
-  if (zoomLabel.textContent !== label) {
-    zoomLabel.textContent = label;
-    zoomLabel.classList.add('active');
-    clearTimeout(zoomFade);
-    zoomFade = setTimeout(() => zoomLabel.classList.remove('active'), 900);
-  }
+  renderTrace.end('graph-repaint', traceStart, { scale, navigating });
+
 }
 
 export function zoomAt(factor, cx, cy) {
@@ -131,32 +135,42 @@ export function fit() {
 }
 
 pane.addEventListener('wheel', (e) => {
+  renderTrace.input(e);
+  const traceStart = renderTrace.begin();
   e.preventDefault();
   const r = pane.getBoundingClientRect();
 
   const k = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.002));
   zoomAt(k, e.clientX - r.left, e.clientY - r.top);
+  renderTrace.end('wheel-handler', traceStart);
 }, { passive: false });
 
 export let dragging = null;
 pane.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
-  dragging = { x: e.clientX - tx, y: e.clientY - ty, pointerId: e.pointerId };
+  dragging = { x: e.clientX - tx, y: e.clientY - ty, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, moved: false };
   beginNavigation();
   pane.setPointerCapture(e.pointerId);
   pane.classList.add('panning');
 });
 pane.addEventListener('pointermove', (e) => {
-  if (!dragging || dragging.pointerId !== e.pointerId) return;
+  if (!dragging) { pane.style.cursor = fileAt(e.clientX, e.clientY) ? 'pointer' : ''; return; }
+  if (dragging.pointerId !== e.pointerId) return;
+  renderTrace.input(e);
+  const traceStart = renderTrace.begin();
+  if (Math.hypot(e.clientX - dragging.startX, e.clientY - dragging.startY) > 4) dragging.moved = true;
   tx = e.clientX - dragging.x;
   ty = e.clientY - dragging.y;
   touched = true;
   paint();
+  renderTrace.end('pan-handler', traceStart);
 });
 for (const done of ['pointerup', 'pointercancel', 'lostpointercapture']) {
   pane.addEventListener(done, (e) => {
     if (!dragging || dragging.pointerId !== e.pointerId) return;
+    const clicked = done === 'pointerup' && !dragging.moved ? fileAt(e.clientX, e.clientY) : null;
     dragging = null;
+    if (clicked) onFileClick(clicked, { x: e.clientX, y: e.clientY });
     pane.classList.remove('panning');
     endNavigation();
   });

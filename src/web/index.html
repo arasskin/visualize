@@ -6,9 +6,7 @@
 <script type="importmap">
 {
   "imports": {
-    "@wterm/core": "/wterm-core.js",
-    "@wterm/dom": "/wterm-dom.js",
-    "@wterm/ghostty": "/wterm-ghostty.js"
+    "@wterm/dom": "/wterm-dom.js"
   }
 }
 </script>
@@ -17,7 +15,6 @@
 <link rel="stylesheet" href="/style.css">
 
 <div id="graph">{{GRAPH}}<div id="edgelabel"></div></div>
-<div id="hud"><span id="zoom"></span><span id="status"></span></div>
 
 <div id="compose" class="shut">
 
@@ -42,8 +39,6 @@
   <ul id="find-list" role="listbox" aria-label="node names"></ul>
 </div>
 
-<button id="term-new" title="new terminal  (ctrl-t, or cmd-t inside one)" aria-label="new terminal">+</button>
-<button id="help-open" title="what the config can say  (? or F1)" aria-label="help">?</button>
 
 <div id="help" class="shut" role="dialog" aria-modal="true" aria-label="config verbs">
   <div id="help-verbs"></div>
@@ -56,6 +51,7 @@
     <span class="label" contenteditable="plaintext-only" spellcheck="false"
           role="textbox" aria-label="note for this tab"></span>
     <span class="state"></span>
+    <button class="tab-close" type="button" title="close terminal" aria-label="Close terminal">×</button>
   </div>
   <div class="panel-body">
     <pre class="screen" tabindex="0" spellcheck="false"></pre>
@@ -68,6 +64,7 @@
     <span class="name">{{CONFIG_NAME}}</span>
     <span class="label" contenteditable="plaintext-only" spellcheck="false"
           role="textbox" aria-label="note for this tab"></span>
+    <button class="tab-close" type="button" title="close configuration" aria-label="Close configuration">×</button>
   </div>
   <div id="body" class="panel-body">
     <div id="lines"></div>
@@ -79,7 +76,10 @@
 
 window.GRAPH_GENERATION = {{GRAPH_GENERATION}};
 window.CONFIG_LINES = {{CONFIG_LINES}};
+window.CONFIG_FILE = {{CONFIG_FILE}};
+window.START_EMPTY = {{START_EMPTY}};
 window.CONFIG_PROBLEMS = {{CONFIG_PROBLEMS}};
+window.PANE_POSITIONS = {{PANE_POSITIONS}};
 window.PANE_LABELS = {{PANE_LABELS}};
 
 window.CONFIG_DOCS = {{CONFIG_DOCS}};
@@ -88,6 +88,8 @@ window.CONFIG_COLOURS = {{CONFIG_COLOURS}};
 
 window.TOKEN = {{TOKEN}};
 
+window.HARNESS_PRESENT = {{HARNESS_PRESENT}};
 window.OPEN_TERMINALS = {{OPEN_TERMINALS}};
 </script>
+<script src="/markdown-it.min.js"></script>
 <script type="module" src="/app.js"></script>

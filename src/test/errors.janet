@@ -1,0 +1,22 @@
+(import ../../src.server/errors)
+(import ../../src.server/json)
+(import ./harness :as t)
+
+(t/test "terminal error logs persist bounded diagnostic fields and rotate"
+  (def dir (string "/tmp/vz-error-test-" (os/getpid)))
+  (def logger (errors/logger dir))
+  (def path (logger :path))
+  (defer (do (os/rm path) (os/rm (string path ".1")) (os/rmdir dir))
+    (:write logger {"pane" "8" "label" "fulfillment" "phase" "resize" "message" "unreachable"
+                    "stack" "wasm resize" "rows" 20 "cols" 112 "text" "must not log output"})
+    (def entry (json/decode (slurp path)))
+    (t/is= "8" (entry "pane"))
+    (t/is= "fulfillment" (entry "label"))
+    (t/is= "resize" (entry "phase"))
+    (t/is= "wasm resize" (entry "stack"))
+    (t/is= nil (entry "text"))
+    (t/ok (number? (entry "recorded")))
+    (spit path (string/repeat "x" 1048577))
+    (:write logger {"message" "after rotation"})
+    (t/is= 1048577 (os/stat (string path ".1") :size))
+    (t/is= "after rotation" ((json/decode (slurp path)) "message"))))

@@ -1,3 +1,4 @@
+import * as renderTrace from './render-trace.js';
 
 function rectangle(box, matrix) {
   const points = [[box.x, box.y], [box.x + box.width, box.y], [box.x, box.y + box.height], [box.x + box.width, box.y + box.height]]
@@ -119,11 +120,22 @@ export function createRenderer(svg, repaint) {
   resize.observe(canvas);
   const observer = new MutationObserver(() => { if (!svg.isConnected) dispose(); });
   observer.observe(svg.parentElement, { childList: true });
+  let fileLabels = [];
   function rebuild() {
     if (disposed || !svg.isConnected) return;
+    const traceStart = renderTrace.begin();
     items = [...svg.querySelectorAll('path,ellipse,polygon,polyline,rect,line,text')]
       .filter(el => !el.closest('defs,#find-arrow') && !el.classList.contains('hit'))
       .map(compile).filter(Boolean);
+    fileLabels = [...svg.querySelectorAll('g.node')].flatMap(node => {
+      const link = node.querySelector('a');
+      const href = link?.getAttribute('xlink:href') || link?.getAttribute('href') || '';
+      if (!href.startsWith('visualize-file:') || node.classList.contains('folded')) return [];
+      const file = href.slice('visualize-file:'.length);
+      const name = node.querySelector('title')?.textContent;
+      return [...node.querySelectorAll('text')].map(el => ({ name, file, box: rectangle(el.getBBox(), el.getCTM()) }));
+    });
+    renderTrace.end('geometry-rebuild', traceStart, { items: items.length, fileLabels: fileLabels.length });
     revision++;
     overview = null; detail = null;
     repaint();
@@ -138,7 +150,9 @@ export function createRenderer(svg, repaint) {
     if (!boxes.has(el)) boxes.set(el, rectangle(el.getBBox(), el.getCTM()));
     return boxes.get(el);
   }
-  function raster(region, density) {
+  function raster(region, density, reason) {
+    const traceStart = renderTrace.begin();
+    let drawn = 0;
     const surface = document.createElement('canvas');
     surface.width = Math.max(1, Math.ceil(region.width * density));
     surface.height = Math.max(1, Math.ceil(region.height * density));
@@ -148,7 +162,9 @@ export function createRenderer(svg, repaint) {
       const b = item.box;
       if (b.x + b.width + 4 < region.x || b.y + b.height + 4 < region.y || b.x - 4 > region.x + region.width || b.y - 4 > region.y + region.height) continue;
       drawItem(c, item);
+      drawn++;
     }
+    renderTrace.end('raster', traceStart, { reason, drawn, items: items.length, width: surface.width, height: surface.height, pixels: surface.width * surface.height });
     return { surface, ...region };
   }
   function render(view, navigating) {
@@ -156,20 +172,24 @@ export function createRenderer(svg, repaint) {
     const { scale, tx, ty } = view;
     const w = viewportWidth, h = viewportHeight;
     if (!w || !h) return;
+    const traceStart = renderTrace.begin();
+    let rebuilt = false;
     const dpr = Math.min(devicePixelRatio || 1, Math.sqrt(16777216 / Math.max(1, w * h)), 8192 / Math.max(1, w, h));
     if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
       canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
     }
-    if (!overview) overview = raster({ x: 0, y: 0, width, height }, Math.min(1, Math.sqrt(4194304 / Math.max(1, width * height)), 4096 / Math.max(width, height)));
+    if (!overview) overview = raster({ x: 0, y: 0, width, height }, Math.min(1, Math.sqrt(4194304 / Math.max(1, width * height)), 4096 / Math.max(width, height)), 'overview');
     const key = [scale, w, h, dpr].join(':');
     const uncovered = !detail || -tx / scale < detail.x || -ty / scale < detail.y || (w - tx) / scale > detail.x + detail.width || (h - ty) / scale > detail.y + detail.height;
     if (!navigating && (detailView !== key || detailRevision !== revision || uncovered)) {
       const pad = 128;
       const region = { x: (-tx - pad) / scale, y: (-ty - pad) / scale, width: (w + pad * 2) / scale, height: (h + pad * 2) / scale };
       const density = Math.min(scale * dpr, Math.sqrt(16777216 / (region.width * region.height)), 8192 / Math.max(region.width, region.height));
-      detail = raster(region, density);
+      detail = raster(region, density, !detail ? 'missing' : detailRevision !== revision ? 'revision' : detailView !== key ? 'scale-or-viewport' : 'uncovered');
+      rebuilt = true;
       detailView = key; detailRevision = revision;
     }
+    const compositeStart = renderTrace.begin();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(dpr * scale, 0, 0, dpr * scale, dpr * tx, dpr * ty);
@@ -181,6 +201,8 @@ export function createRenderer(svg, repaint) {
       ctx.clearRect(detail.x, detail.y, detail.width, detail.height);
       draw(detail);
     }
+    renderTrace.end('canvas-composite', compositeStart);
+    const overlayStart = renderTrace.begin();
     ctx.globalAlpha = 1;
     if (hovered) for (const item of items) if (item.edge === hovered) drawItem(ctx, item, 'hover');
     if (selected) for (const item of items) if (item.node === selected && item.path) drawItem(ctx, item, 'found');
@@ -194,6 +216,8 @@ export function createRenderer(svg, repaint) {
       for (const item of items) if (item.fresh && item.path) drawItem(ctx, item, 'flash', .55 * Math.sin(Math.PI * elapsed / 3000));
       requestAnimationFrame(repaint);
     }
+    renderTrace.end('overlays', overlayStart, { selected: !!selected, hovered: !!hovered, arrow: arrow.length });
+    renderTrace.end('canvas-render', traceStart, { scale, navigating, rebuilt, width: canvas.width, height: canvas.height });
   }
   function hit(x, y, scale) {
     for (let i = items.length - 1; i >= 0; i--) {
@@ -203,6 +227,13 @@ export function createRenderer(svg, repaint) {
       probe.setTransform(1, 0, 0, 1, 0, 0);
       probe.lineWidth = 16 / (scale * Math.hypot(item.matrix.a, item.matrix.b));
       if (probe.isPointInStroke(item.path, point.x, point.y)) return item.edge;
+    }
+    return null;
+  }
+  function fileAt(x, y) {
+    for (const label of fileLabels) {
+      const b = label.box;
+      if (x >= b.x && x <= b.x + b.width && y >= b.y && y <= b.y + b.height) return label;
     }
     return null;
   }
@@ -227,5 +258,5 @@ export function createRenderer(svg, repaint) {
   document.fonts.addEventListener('loadingdone', update);
   document.fonts.ready.then(update);
   rebuild();
-  return { svg, canvas, width, height, unit, render, bounds, hit, selection, hover, rebuild, dispose };
+  return { svg, canvas, width, height, unit, render, bounds, hit: (...args) => renderTrace.measure('edge-hit', () => hit(...args)), fileAt: (...args) => renderTrace.measure('file-hit', () => fileAt(...args)), selection: (...args) => renderTrace.measure('selection-compile', () => selection(...args)), hover, rebuild, dispose };
 }

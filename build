@@ -6,6 +6,9 @@ here=$(cd "$(dirname "$0")" && pwd)
 janet_src="$here/external-src/janet"
 janet_out="$here/external-src/janet/janet"
 
+"$here/src.vterm/build"
+"$here/src.graphviz/build" "$@"
+
 case "${1:-}" in
   --clean)
     rm -f "$janet_out"

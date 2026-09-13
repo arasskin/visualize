@@ -1,0 +1,43 @@
+(import ./libvterm-test-api :as v)
+(import ../src.server/json)
+
+(def results @[])
+(def payload "x█")
+(for split 1 (length payload)
+  (def terminal (v/create 10 80))
+  (assert terminal)
+  (defer (v/release terminal)
+    (v/feed terminal (string/slice payload 0 split))
+    (v/feed terminal (string/slice payload split))
+    (def actual (string/trimr (v/capture terminal) "\n"))
+    (array/push results {"case" "UTF-8 split" "bug" 2163595 "split" split
+                         "expected" payload "actual" actual "passed" (= payload actual)})))
+
+(def terminal (v/create 4 4))
+(assert terminal)
+(defer (v/release terminal)
+  (v/feed terminal "ABCD\r\nX")
+  (assert (= [1 1] (v/position terminal)))
+  (v/resized terminal 4 5)
+  (def pos (v/position terminal))
+  (array/push results {"case" "full-width preceding line resize" "bug" 2037196
+                       "expected" [1 1] "actual" pos "passed" (= pos [1 1])}))
+
+(defn restored [alternate]
+  (def terminal (v/create 6 20))
+  (assert terminal)
+  (defer (v/release terminal)
+    (v/feed terminal "first\r\nsecond\r\nthird\r\nfourth")
+    (when alternate (v/feed terminal "\e[?1049hALT"))
+    (each [rows cols] [[4 12] [10 30] [6 20]] (v/resized terminal rows cols))
+    (when alternate (v/feed terminal "\e[?1049l"))
+    {"screen" (v/capture terminal) "cursor" (v/position terminal)}))
+(def normal (restored false))
+(def alternate (restored true))
+(array/push results {"case" "main-screen preservation during alternate-screen resize" "bug" 1438311
+                     "screen_matches" (= (normal "screen") (alternate "screen"))
+                     "cursor_matches" (= (normal "cursor") (alternate "cursor"))
+                     "passed" (= normal alternate)
+                     "scope" "focused scenario; report contains no exact reproduction"})
+(print (json/encode {"library" v/library "results" results}))
+(assert (every? (map |($ "passed") results)) "native terminal regression")

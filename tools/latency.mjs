@@ -60,26 +60,27 @@ try {
   await mkdir(join(root, 'bin'));
   await writeFile(join(root, 'project', 'main.js'), 'export const a = 1;\n');
   await writeFile(join(root, 'bin', 'open'), '#!/bin/sh\nfor browser_arg do\n  browser_arg=${browser_arg%%#*}\n  case "$browser_arg" in\n    http://*|https://*) printf "%s" "$browser_arg" > "$VZ_BENCH_URL" ;;\n    --app=*) printf "%s" "${browser_arg#--app=}" > "$VZ_BENCH_URL" ;;\n  esac\ndone\n', { mode: 0o755 });
-  let core = join(repo, 'src/visualize/core.janet');
+  let core = join(repo, 'src.server/core.janet');
   if (process.env.LATENCY_VARIANT === 'backlog-counter') {
     const variant = join(root, 'variant');
     await mkdir(variant);
     await cp(join(repo, 'src'), join(variant, 'src'), { recursive: true });
-    await symlink(join(repo, 'external-src'), join(variant, 'external-src'));
-    const host = join(variant, 'src/visualize/term/host.janet');
+    await cp(join(repo, 'src.server'), join(variant, 'src.server'), { recursive: true });
+    for (const dir of ['external-src', 'src.mcp', 'src.vterm', 'src.wterm', 'src.graphviz']) await symlink(join(repo, dir), join(variant, dir));
+    const host = join(variant, 'src.server/term/host.janet');
     let source = await readFile(host, 'utf8');
     source = source.replace('before (length backlog)', 'before (+ base (length backlog))')
       .replaceAll('(= (length backlog) before)', '(= (+ base (length backlog)) before)');
     await writeFile(host, source);
-    core = join(variant, 'src/visualize/core.janet');
+    core = join(variant, 'src.server/core.janet');
   }
   const serverOptions = {
     cwd: repo, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, VISUALIZE_TRACE: process.env.VISUALIZE_TRACE || '1', VISUALIZE_HARNESS: '/bin/cat',
+    env: { ...process.env, VISUALIZE_TRACE: process.env.VISUALIZE_TRACE || '1',
       PATH: join(root, 'bin') + ':' + process.env.PATH, VZ_BENCH_URL: join(root, 'url') },
   };
   function startServer() {
-    server = spawn(join(repo, 'external-src/janet/janet'), [core, join(root, 'project'), '--no-dev'], serverOptions);
+    server = spawn(join(repo, 'external-src/janet/janet'), [core, join(root, 'project'), '--no-dev', '--command', 'exec /bin/cat'], serverOptions);
     for (const stream of [server.stdout, server.stderr]) stream.on('data', b => logs.push(String(b)));
   }
   startServer();

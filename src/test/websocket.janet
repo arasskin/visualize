@@ -1,4 +1,4 @@
-(import ../visualize/websocket :as ws)
+(import ../../src.server/websocket :as ws)
 (import ./harness :as t)
 
 (defn- masked [payload &opt opcode final]
@@ -40,3 +40,26 @@
   (each text ["" "plain" "é" "😀"] (t/ok (ws/utf8? text)))
   (each text ["\xc0\xaf" "\xed\xa0\x80" "\xf4\x90\x80\x80" "\x80" "\xe2\x82"]
     (t/ok (not (ws/utf8? text)))))
+
+(t/test "large reconnect snapshots drain before subsequent output"
+  (def incoming (ev/chan 1))
+  (def writes @[])
+  (def large (string/repeat "x" 2131805))
+  (def followup "next snapshot")
+  (var closed false)
+  (def connection
+    {:write (fn [_ bytes &opt timeout]
+              (unless (string/has-prefix? "HTTP/" bytes)
+                (ev/sleep 0.01)
+                (array/push writes bytes)
+                (when (= 2 (length writes)) (ev/give incoming (masked "" 8)))))
+     :read (fn [&] (ev/take incoming))
+     :close (fn [&] (set closed true))})
+  (ws/serve connection @"" {:headers {"sec-websocket-key" "dGhlIHNhbXBsZSBub25jZQ=="}}
+    (fn [send]
+      (send large)
+      (send followup)
+      {:message (fn [&]) :close (fn [&])}))
+  (t/is= (ws/frame 2 large) (get writes 0))
+  (t/is= (ws/frame 2 followup) (get writes 1))
+  (t/ok closed))

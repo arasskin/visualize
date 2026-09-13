@@ -1,4 +1,4 @@
-(import ../visualize/http)
+(import ../../src.server/http)
 (import ./harness :as t)
 
 (t/test "a plain filename in web/ is served"
@@ -43,7 +43,8 @@
   (def src-dir (os/realpath (string (dyn :current-file) "/../..")))
   (def here (string src-dir "/web"))
 
-  (def roots [here (string src-dir "/../external-src/wterm")])
+  (def roots [here (string src-dir "/../src.wterm")
+                   (string src-dir "/../external-src/markdown-it")])
   (defn servable? [name]
     (find |(= :file (os/stat (string $ "/" name) :mode)) roots))
   (def markup (slurp (string here "/index.html")))
@@ -58,7 +59,7 @@
     (t/is= name (http/static-file (string "/" name))
            (string name " is referenced by index.html and must be servable"))
     (t/ok (servable? name)
-          (string name " exists in web/ or external-src/wterm/")))
+          (string name " exists in the server's static directories")))
 
   (def script (slurp (string here "/app.js")))
   (each found (or (peg/match ~(any (+ (* `from './` (<- (some (if-not "'" 1))) "'") 1)) script) [])
@@ -102,3 +103,16 @@
   (t/is= (inc port-one) port-two "it lands on the very next port")
   (:close one)
   (:close two))
+
+(t/test "a refused Unix connection cannot close a later socket during GC"
+  (def path (string "/tmp/visualize-connect-gc-" (os/getpid) ".sock"))
+  (def original (net/server :unix path))
+  (:close original)
+  (t/ok (try (do (net/connect :unix path) false) ([_] true)))
+  (os/rm path)
+  (def server (net/server :unix path))
+  (defer (do (:close server) (os/rm path))
+    (gccollect)
+    (def connection (net/connect :unix path))
+    (t/ok connection)
+    (:close connection)))

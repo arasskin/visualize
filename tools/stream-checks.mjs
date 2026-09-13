@@ -3,6 +3,7 @@ import { createConnection } from 'node:net';
 import { request as httpRequest } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 
 export async function check({ cdp, url, root, waitFor, restart }) {
@@ -94,8 +95,8 @@ export async function check({ cdp, url, root, waitFor, restart }) {
     await waitFor(() => cdp.evaluate('document.querySelector("#harness .screen").textContent.includes("y")')); checks++;
     const result = await ask({op:'since',at:0});
     assert(!result.text.includes('BAD')); checks++;
-    await ask({op:'start',argv:['/usr/bin/python3','-c',
-      "import sys,time;sys.stdout.buffer.write(bytes([226]));sys.stdout.flush();time.sleep(.04);sys.stdout.buffer.write(bytes([130,172]));sys.stdout.flush();time.sleep(2)"],root:join(root,'project'),rows:24,cols:80});
+    await ask({op:'start',argv:[fileURLToPath(new URL('../external-src/janet/janet', import.meta.url)),'-e',
+      String.raw`(file/write stdout "\xe2") (file/flush stdout) (ev/sleep 0.04) (file/write stdout "\x82\xac") (file/flush stdout) (ev/sleep 2)`],root:join(root,'project'),rows:24,cols:80});
     try { await waitFor(() => cdp.evaluate('document.querySelector("#harness .screen").textContent.includes("€")'), 5000); }
     catch (error) {
       console.log('Unicode probe:', JSON.stringify(await ask({op:'since',at:0})), await cdp.evaluate('document.querySelector("#harness").textContent'));

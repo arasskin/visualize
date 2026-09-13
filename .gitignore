@@ -3,3 +3,8 @@ bin/
 /visualize.conf
 
 .probe/
+
+/.logs/
+
+/src.vterm/libvisualize-vterm.so*
+/src.graphviz/libvisualize-graphviz.so*

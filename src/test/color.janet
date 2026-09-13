@@ -1,4 +1,4 @@
-(import ../visualize/color :as color)
+(import ../../src.server/color :as color)
 (import ./harness :as t)
 
 (t/test "as-hex resolves names, hex and rubbish"

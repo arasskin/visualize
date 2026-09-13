@@ -1,0 +1,19 @@
+#pragma once
+#define PACKAGE_NAME "graphviz"
+#define PACKAGE_VERSION "15.1.1"
+#define DEFAULT_DPI 96
+#define GVPLUGIN_VERSION 8
+#define GVPLUGIN_CONFIG_FILE "config8"
+#define HAVE_EXPAT 1
+#define HAVE_EXPAT_H 1
+#define HAVE_DRAND48 1
+#define HAVE_SETENV 1
+#define HAVE_UNISTD_H 1
+#define HAVE_SYS_TYPES_H 1
+#define HAVE_SYS_STAT_H 1
+#define HAVE_SYS_TIME_H 1
+#define HAVE_STRINGS_H 1
+#define HAVE_STDINT_H 1
+#define HAVE_INTTYPES_H 1
+#define WITH_CGRAPH 1
+#define YYTEXT_POINTER 1

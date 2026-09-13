@@ -1,3 +1,4 @@
+import { reportError } from './errors.js';
 const subscriptions = new Map();
 const pending = new Map();
 let socket = null;
@@ -30,14 +31,19 @@ function reconnect() {
   }, 500);
 }
 
+export async function refreshSession() {
+  const response = await fetch('/session', { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+  if (!response.ok) throw new Error('terminal connection unavailable');
+  const session = await response.json();
+  window.TOKEN = session.token;
+  return session;
+}
+
 export function connect() {
   if (socket?.readyState === WebSocket.OPEN) return Promise.resolve();
   if (connecting) return connecting;
   connecting = (async () => {
-    const response = await fetch('/session', { cache: 'no-store', signal: AbortSignal.timeout(5000) });
-    if (!response.ok) throw new Error('terminal connection unavailable');
-    const session = await response.json();
-    window.TOKEN = session.token;
+    const session = await refreshSession();
     const url = new URL('/terminal', location.href);
     url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     url.searchParams.set('k', session.token);
@@ -66,6 +72,7 @@ export function connect() {
             send({ type: 'credit', pane: message.pane, at: sub.at, generation: sub.generation, subscription: sub.id });
           }
         } catch (error) {
+          reportError(error, { pane: message.pane, phase: 'stream-output' });
           sub.state(error.message);
           ws.close(1011, 'terminal output failed');
         }

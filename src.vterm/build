@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+vterm_root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+vterm_out="$vterm_root/libvisualize-vterm.so"
+if [ "${1:-}" != --force ] && [ -f "$vterm_out" ] && ! find "$vterm_root/src" "$vterm_root/include" "$vterm_root/bridge.c" "$vterm_root/build" -type f -newer "$vterm_out" | read -r vterm_newer; then
+  exit 0
+fi
+vterm_tmp=$(mktemp "$vterm_out.XXXXXX")
+trap 'rm -f "$vterm_tmp"' EXIT HUP INT TERM
+case $(uname -s) in
+  Darwin) vterm_link=-dynamiclib ;;
+  *) vterm_link=-shared ;;
+esac
+"${CC:-cc}" -std=c99 -O2 -fPIC "$vterm_link" -I"$vterm_root/include" "$vterm_root/bridge.c" "$vterm_root"/src/*.c -o "$vterm_tmp"
+mv "$vterm_tmp" "$vterm_out"

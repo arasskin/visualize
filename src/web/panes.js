@@ -1,3 +1,5 @@
+import { reportError } from './errors.js';
+import { documentReader } from './document.js';
 import * as transport from './transport.js';
 import * as latency from './latency.js';
 import { makeTerminal } from './term.js';
@@ -8,6 +10,7 @@ let deps = {};
 export function wire(parts) { Object.assign(deps, parts); }
 
 const panelsByRoot = new Map();
+const COMPACT_WIDTH = 'min(26rem, 92vw)';
 
 export function makePanel(root, options = {}) {
   const bar = root.querySelector('.bar');
@@ -15,6 +18,10 @@ export function makePanel(root, options = {}) {
   root.style.width = options.width || 'min(46rem, 92vw)';
   const body = root.querySelector('.panel-body');
   const grip = root.querySelector('.grip');
+  const sideGrip = document.createElement('div');
+  sideGrip.className = 'side-grip';
+  sideGrip.title = 'drag to resize horizontally';
+  root.appendChild(sideGrip);
 
   function grab(handle, onMove, onDrop) {
     handle.addEventListener('pointerdown', (e) => {
@@ -63,21 +70,23 @@ export function makePanel(root, options = {}) {
        },
        (moved) => { if (moved) railDrop(panel); });
   grab(grip,
-       (dx, dy, from) => {
-         const w = Math.max(options.minWidth || 240, from.w + dx);
-         const h = Math.max(options.minHeight || 120, from.h + dy);
-         root.style.width = w + 'px';
-         if (panel.shut) {
-           if (onRail(panel)) packRail();
-           return;
-         }
+      (dx, dy, from) => {
+        const w = Math.max(options.minWidth || 240, from.w + dx);
+        const bottom = panel.root.classList.contains('bottom-docked');
+        const h = Math.max(options.minHeight || 120, from.h + (bottom ? -dy : dy));
+        root.style.width = w + 'px';
+        if (panel.shut) {
+          if (onRail(panel)) packRail();
+          return;
+        }
          root.style.height = h + 'px';
+         if (bottom) { packRail(); }
          if (options.onResize) options.onResize(w, h);
 
-         showEdges(nearEdges(root));
+         showEdges(bottom ? [] : nearEdges(root));
        },
        () => {
-         if (panel.shut) return;
+         if (panel.shut || panel.root.classList.contains('bottom-docked')) return;
 
          const landing = nearEdges(root);
          if (landing.length) {
@@ -97,6 +106,15 @@ export function makePanel(root, options = {}) {
          showEdges([]);
        });
 
+  grab(sideGrip,
+       (dx, dy, from) => {
+         const width = Math.max(options.minWidth || 240, from.w + dx);
+         root.style.width = width + 'px';
+         if (onRail(panel)) packRail();
+         if (options.onResize) options.onResize(width, root.getBoundingClientRect().height);
+       },
+       () => {});
+
   const panel = {
     root, bar, body, grip,
     place,
@@ -115,12 +133,21 @@ export function makePanel(root, options = {}) {
     },
   };
   panelsByRoot.set(root, panel);
+  const closeButton = bar.querySelector('.tab-close');
+  closeButton?.addEventListener('pointerdown', event => event.stopPropagation());
+  closeButton?.addEventListener('click', event => {
+    event.stopPropagation();
+    closePanel(panel);
+  });
 
   const label = bar.querySelector('.label');
   if (label) {
 
     label.addEventListener('mousedown', (e) => e.stopPropagation());
-    label.addEventListener('click', (e) => e.stopPropagation());
+    label.addEventListener('click', (e) => {
+      if (panel.shut) { e.preventDefault(); panel.open(); }
+      e.stopPropagation();
+    });
 
     label.style.userSelect = 'text';
 
@@ -184,9 +211,20 @@ export function raise(root) { root.style.zIndex = ++topmost; }
 export let configPanel = null;
 export function makeConfigPanel(root, onOpen) {
   configPanel = makePanel(root, {
-    minWidth: 240, minHeight: 120, onOpen,
+    width: COMPACT_WIDTH, minWidth: 240, minHeight: 120, onOpen,
     onLabel: (text) => saveLabel('config', text),
   });
+  let reader = null;
+  configPanel.showDocument = file => {
+    if (configPanel.documentFile === file) return;
+    reader?.stop();
+    configPanel.documentFile = file;
+    root.classList.add('document-pane', 'config-pane');
+    configPanel.body.replaceChildren();
+    reader = documentReader(configPanel, 'config', file);
+  };
+  configPanel.detach = () => reader?.stop();
+  configPanel.stop = async () => { reader?.stop(); reader = null; };
   configPanel.setLabel((window.PANE_LABELS || {}).config || '');
   return configPanel;
 }
@@ -203,15 +241,17 @@ document.addEventListener('keydown', (e) => {
   configPanel.toggle();
 });
 
-export function makeTerminalPane(root, prefix) {
+export function makeTerminalPane(root, prefix, launch = {}) {
   const stateLine = root.querySelector('.state');
   const nameLabel = root.querySelector('.name');
   const screen = root.querySelector('.screen');
-
-  const paneBody = root.querySelector('.panel-body');
+  let reader = null;
 
   let following = true;
+  let resizing = false;
+  let sizeRevision = 0;
   screen.addEventListener('scroll', () => {
+    if (resizing || root.classList.contains('shut')) return;
     following = screen.scrollTop + screen.clientHeight
       >= screen.scrollHeight - 4;
   });
@@ -226,6 +266,9 @@ export function makeTerminalPane(root, prefix) {
 
   const term = makeTerminal(screen, {
     pane: prefix,
+    isFollowing: () => following,
+    onReady: () => syncSize(),
+    onTheme: theme => { if (generation) post('theme', { theme }).catch(() => {}); },
     onPaint: (lines) => {
       const grew = lines !== paintedLines;
       paintedLines = lines;
@@ -250,30 +293,10 @@ export function makeTerminalPane(root, prefix) {
     return out;
   }
 
-  let cell = null;
-  function cellSize() {
-    if (cell) return cell;
-    const probe = document.createElement('span');
-    probe.textContent = 'M';
-    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre';
-    screen.appendChild(probe);
-    const box = probe.getBoundingClientRect();
-    probe.remove();
-    cell = { w: box.width || 7, h: box.height || 16 };
-    return cell;
-  }
-
-  function measure() {
-    const { w: cw, h: ch } = cellSize();
-    return {
-      rows: Math.max(4, Math.floor((paneBody.clientHeight - 24) / ch)),
-      cols: Math.max(20, Math.floor((paneBody.clientWidth - 12) / cw)),
-    };
-  }
-
-  function setState(text) { stateLine.textContent = text; }
+  function setState(text) { if (!reader) stateLine.textContent = text; }
 
   function setProgram(name) {
+    if (reader) return;
     if (!name) return;
     if (nameLabel.textContent === name) return;
     nameLabel.textContent = name;
@@ -282,34 +305,37 @@ export function makeTerminalPane(root, prefix) {
   }
 
   function setName(argv) {
+    if (reader) return;
     if (!Array.isArray(argv) || !argv.length) return;
 
     nameLabel.textContent = String(argv[0]).split('/').filter(Boolean).pop();
   }
 
   function writeOutput(out) {
-    if (!out.text) return;
-    if (out.encoding === 'base64') term.write(Uint8Array.from(atob(out.text), c => c.charCodeAt(0)));
-    else term.write(out.text);
+    if (reader) return;
+    if (out.error) throw new Error(out.error);
+    term.apply(out.screen);
   }
 
   function receive(out) {
+    if (reader) return { at, generation };
     if (out.reachable === false) {
       if (out.absent) { setState('exited'); stopPolling(); }
-      else setState(out.error || 'reconnecting...');
+      else {
+        if (out.error) reportError(new Error(out.error), { pane: prefix, phase: 'supervisor' });
+        setState(out.error || 'reconnecting...');
+      }
       return { at, generation };
     }
+    if (out.error) { setState(out.error); stopPolling(); return { at, generation }; }
     setProgram(out.program);
     if (out.generation !== generation) {
       generation = out.generation;
+      remoteSize = null;
       at = 0;
       term.reset();
     }
     if (out.at > at) {
-      if (out.from > at && at > 0) {
-        term.reset();
-        post('redraw').catch(() => {});
-      }
       writeOutput(out);
       at = out.at;
     }
@@ -319,6 +345,7 @@ export function makeTerminalPane(root, prefix) {
   }
 
   function startPolling() {
+    if (reader) return;
     if (unsubscribe) return;
     unsubscribe = transport.subscribe(prefix, { at, generation }, receive, setState);
   }
@@ -327,12 +354,6 @@ export function makeTerminalPane(root, prefix) {
     if (unsubscribe) unsubscribe();
     unsubscribe = null;
   }
-
-  screen.addEventListener('mousedown', () => {
-    setTimeout(() => {
-      if (!window.getSelection().toString()) term.focus();
-    }, 0);
-  });
 
   function sendInput(text, quiet) {
     if (!text) return Promise.resolve();
@@ -352,6 +373,7 @@ export function makeTerminalPane(root, prefix) {
         .then(() => { if (latency.enabled) latency.record('input-total', performance.now() - queued, prefix, traceId); })
         .catch(error => {
           if (latency.enabled) latency.record('input-error', performance.now() - queued, prefix, traceId);
+          reportError(error, { pane: prefix, phase: 'input', rows: term.rows, cols: term.cols });
           inputFault = error.message;
           setState(inputFault);
         }));
@@ -370,11 +392,12 @@ export function makeTerminalPane(root, prefix) {
   }, { passive: false });
 
   const termPanel = makePanel(root, {
-    minWidth: 360, minHeight: 200,
-    width: 'min(52rem, 94vw)', height: '24rem',
+    minWidth: prefix.startsWith('agent-') ? 240 : 360, minHeight: 200,
+    width: prefix.startsWith('agent-') ? COMPACT_WIDTH : 'min(52rem, 94vw)', height: '24rem',
     onLabel: (text) => saveLabel(prefix, text),
 
     onOpen: async () => {
+      if (reader) { reader.focus(); return; }
       term.focus();
 
       await new Promise(r => setTimeout(r, 50));
@@ -388,19 +411,32 @@ export function makeTerminalPane(root, prefix) {
       post('redraw', {}).catch(() => {});
     },
 
-    onShut: () => stopPolling(),
+    onShut: () => { clearTimeout(sizing); stopPolling(); },
     onResize: () => syncSize(),
   });
 
   let sizing = null;
+  let remoteSize = null;
   function syncSize() {
-    cell = null;
+    if (reader) return;
+    const revision = ++sizeRevision;
+    resizing = true;
     clearTimeout(sizing);
+    if (termPanel.shut || !root.isConnected) return;
     sizing = setTimeout(() => {
-      const size = measure();
-      if (term.resize(size.rows, size.cols)) {
-        post('resize', size).catch(() => {});
+      if (termPanel.shut || !root.isConnected) return;
+      const size = term.measure();
+      if (!size) return;
+      term.resize(size.rows, size.cols);
+      if (!remoteSize || size.rows !== remoteSize.rows || size.cols !== remoteSize.cols) {
+        post('resize', size).then(() => { remoteSize = size; }).catch(error => {
+          reportError(error, { pane: prefix, phase: 'resize-delivery', ...size });
+          if (revision === sizeRevision && !termPanel.shut && root.isConnected) {
+            sizing = setTimeout(syncSize, 300);
+          }
+        });
       }
+      requestAnimationFrame(() => { if (revision === sizeRevision) resizing = false; });
     }, 150);
   }
 
@@ -417,32 +453,54 @@ export function makeTerminalPane(root, prefix) {
 
   let booting = null;
   termPanel.boot = () => {
+    if (reader) return Promise.resolve();
     if (generation) return Promise.resolve();
     if (booting) return booting;
     booting = (async () => {
       try {
-        const now = await post('poll', { at: 0, generation: 0 });
-        if (now.running) {
+        const now = await post('screen', { at: 0, generation: 0 });
+        if (now.generation) {
+          await post('theme', { theme: term.theme });
           generation = now.generation;
+          setName(now.argv);
           setProgram(now.program);
+          setState(now.running ? '' : 'exited');
           term.resize(now.rows || 24, now.cols || 80);
           writeOutput(now);
           at = now.at;
         } else {
+          if (launch?.recover) { setState(now.absent ? 'exited' : 'reconnecting...'); return; }
           if (now.reachable === false && !now.absent) throw new Error('supervisor unreachable');
-          const out = await post('start', { rows: 24, cols: 80 });
+          const out = await post('start', { rows: 24, cols: 80, theme: term.theme, ...launch });
           generation = out.generation;
           at = 0;
           setName(out.argv);
         }
         if (!termPanel.shut) startPolling();
-      } catch (error) { setState(error.message); }
+      } catch (error) { reportError(error, { pane: prefix, phase: 'boot' }); setState(error.message); }
     })().finally(() => { booting = null; });
     return booting;
   };
 
+  termPanel.showDocument = file => {
+    if (termPanel.documentFile === file) return;
+    stopPolling();
+    clearTimeout(sizing);
+    reader?.stop();
+    termPanel.documentFile = file;
+    root.classList.add('document-pane');
+    root.classList.toggle('markdown-pane', /\.(md|markdown|mdown)$/i.test(file));
+    term.destroy();
+    stateLine.textContent = '';
+    nameLabel.textContent = file.split('/').pop();
+    reader = documentReader(termPanel, prefix, file);
+    if (!termPanel.shut && root.classList.contains('picked')) reader.focus();
+  };
+  termPanel.showMarkdown = termPanel.showDocument;
+  termPanel.detach = () => { stopPolling(); reader?.stop(); };
   termPanel.stop = async () => {
     stopPolling();
+    reader?.stop();
     try { await post('stop', {}); } catch (e) {                              }
     try { await post('shutdown', {}); } catch (e) {                }
   };
@@ -451,7 +509,7 @@ export function makeTerminalPane(root, prefix) {
   return termPanel;
 }
 
-const harnessPane = makeTerminalPane(document.getElementById('harness'), 'harness');
+let harnessPane = makeTerminalPane(document.getElementById('harness'), 'harness', { recover: true });
 
 async function saveLabel(id, text) {
   try {
@@ -469,107 +527,47 @@ export let paneCount = 1;
 export const extraPanes = [];
 
 const TAB_GAP = 6;
-const RAIL_TOP = TAB_GAP;
 const RAIL_GRAB = 56;
-const RAIL_LEFT = TAB_GAP;
 
 export const rail = [];
+const railStates = Object.fromEntries(['top', 'bottom'].map(side => [side, {
+  scroll: 0, scrolling: false, release: null,
+}]));
+let draggingPanel = null;
 
 export function onRail(panel) { return rail.includes(panel); }
-
-function railSpan(p) {
-
-  return p.root.getBoundingClientRect().width;
-}
-
-function railShape() {
-  return rail.map(railSpan).join(',');
-}
-
-const railState = {
-  scroll: 0,
-  end: 0,
-  spans: new Map(),
-
-  dragging: null,
-
-  widths: '',
-
-  scrolling: false,
-};
-
-function measureRail() {
-  railState.spans = new Map(rail.map((p) => [p, railSpan(p)]));
-  railState.widths = railShape();
-}
-
-function placeRail() {
-  const at = new Map();
-  let x = RAIL_LEFT + railState.scroll;
-  for (const p of rail) {
-    at.set(p, x);
-    x += (railState.spans.get(p) || 0) + TAB_GAP;
-  }
-  railState.end = x - TAB_GAP - railState.scroll;
-  return at;
-}
+function railSide(panel) { return panel.root.dataset.rail || 'top'; }
+function railPanels(side) { return rail.filter(p => railSide(p) === side); }
 
 export function packRail() { changed(); }
-
 renders(packRailNow);
 
 export function packRailNow() {
-
   unscrollPage();
-  measureRail();
-
-  placeRail();
-  if (railState.end) {
-    const most = railOverflows() ? Math.min(0, (innerWidth - RAIL_LEFT) - railState.end) : 0;
-    railState.scroll = Math.max(most, Math.min(0, railState.scroll));
+  for (const side of ['top', 'bottom']) {
+    const state = railStates[side], panels = railPanels(side);
+    const widths = panels.map(p => p.root.getBoundingClientRect().width);
+    const total = widths.reduce((sum, width) => sum + width + TAB_GAP, TAB_GAP);
+    const most = Math.min(0, innerWidth - total);
+    state.scroll = Math.max(most, Math.min(0, state.scroll));
+    const chosen = state.scrolling ? null : pickedPanel();
+    const index = panels.indexOf(chosen);
+    if (index >= 0 && most < 0) {
+      const left = TAB_GAP + state.scroll + widths.slice(0, index).reduce((sum, width) => sum + width + TAB_GAP, 0);
+      if (left < TAB_GAP) state.scroll += TAB_GAP - left;
+      else if (left + widths[index] > innerWidth - TAB_GAP) state.scroll -= left + widths[index] - innerWidth + TAB_GAP;
+      state.scroll = Math.max(most, Math.min(0, state.scroll));
+    }
+    let x = TAB_GAP + state.scroll;
+    panels.forEach((panel, index) => {
+      panel.root.style.setProperty('--rail-tab-height', panel.bar.offsetHeight + 'px');
+      if (panel !== draggingPanel) {
+        panel.root.classList.toggle('bottom-docked', side === 'bottom');
+        panel.place(x, side === 'bottom' ? innerHeight - TAB_GAP - panel.root.offsetHeight : TAB_GAP, true);
+      }
+      x += widths[index] + TAB_GAP;
+    });
   }
-
-  const chosen = railState.scrolling ? null : pickedPanel();
-  if (chosen && rail.includes(chosen) && railOverflows()) {
-    const at = placeRail().get(chosen);
-    const over = at + (railState.spans.get(chosen) || 0) - innerWidth;
-    const most = Math.min(0, (innerWidth - RAIL_LEFT) - railState.end);
-    let want = railState.scroll;
-    if (at < RAIL_LEFT) want = railState.scroll + (RAIL_LEFT - at);
-    else if (over > 0) want = railState.scroll - over;
-    railState.scroll = Math.max(most, Math.min(0, want));
-  }
-  renderRail();
-}
-
-function renderRail() {
-  const at = placeRail();
-  rail.forEach((p, i) => {
-    const held = p.root === railState.dragging;
-    if (!held) p.place(at.get(p), RAIL_TOP, true);
-  });
-}
-
-function railOverflows() { return railState.end > innerWidth - RAIL_LEFT; }
-
-function scrollRail(by) {
-
-  measureRail();
-  placeRail();
-  if (!railOverflows()) {
-    if (railState.scroll === 0) return false;
-    railState.scroll = 0;
-    packRail();
-    return true;
-  }
-
-  const most = Math.min(0, (innerWidth - RAIL_LEFT) - railState.end);
-  const next = Math.max(most, Math.min(0, railState.scroll + by));
-  if (next === railState.scroll) return false;
-  railState.scroll = next;
-
-  packRail();
-  return true;
 }
 
 function unscrollPage() {
@@ -582,85 +580,70 @@ export function revealTab(panel) {
   packRail();
 }
 
-let scrollRelease = 0;
-
-window.addEventListener('wheel', (e) => {
-
-  if (e.clientY > RAIL_TOP + railHeight()) return;
-
+window.addEventListener('wheel', e => {
+  const side = e.clientY <= TAB_GAP + railHeight('top') ? 'top'
+    : e.clientY >= innerHeight - TAB_GAP - railHeight('bottom') ? 'bottom' : null;
+  if (!side) return;
+  const state = railStates[side];
+  const total = railPanels(side).reduce((sum, panel) => sum + panel.root.offsetWidth + TAB_GAP, TAB_GAP);
   const by = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? -e.deltaX : -e.deltaY;
-
-  railState.scrolling = true;
-  clearTimeout(scrollRelease);
-  scrollRelease = setTimeout(() => { railState.scrolling = false; }, 400);
-  if (scrollRail(by)) e.preventDefault();
+  const next = Math.max(Math.min(0, innerWidth - total), Math.min(0, state.scroll + by));
+  if (next === state.scroll) return;
+  state.scroll = next;
+  state.scrolling = true;
+  clearTimeout(state.release);
+  state.release = setTimeout(() => { state.scrolling = false; }, 400);
+  packRail();
+  e.preventDefault();
 }, { passive: false });
 
-window.addEventListener('resize', () => { scrollRail(0); });
-
-function railChanged() {
-  const now = railShape();
-  if (now === railState.widths) return false;
-  railState.widths = now;
-  return true;
-}
+window.addEventListener('resize', packRail);
+let railShape = '';
 setInterval(() => {
-  if (railState.dragging) return;
+  if (draggingPanel) return;
   unscrollPage();
-  if (railChanged()) packRail();
-
+  const shape = rail.map(p => [railSide(p), p.root.offsetWidth, p.root.offsetHeight].join(':')).join(',');
+  if (shape !== railShape) { railShape = shape; packRail(); }
   resnap();
-
 }, 250);
 
-export function addToRail(panel, at) {
-  if (onRail(panel)) return;
-  rail.splice(at === undefined ? rail.length : at, 0, panel);
+export function addToRail(panel, at, side = 'top') {
+  const old = rail.indexOf(panel);
+  if (old >= 0) rail.splice(old, 1);
+  const others = railPanels(side);
+  const before = others[at === undefined ? others.length : at];
+  rail.splice(before ? rail.indexOf(before) : rail.length, 0, panel);
+  panel.root.dataset.rail = side;
+  delete panel.root.dataset.snapped;
   packRail();
+  savePlacementSoon();
 }
 
 function removeFromRail(panel) {
   const at = rail.indexOf(panel);
   if (at < 0) return;
+  const bar = panel.bar.getBoundingClientRect();
   rail.splice(at, 1);
+  delete panel.root.dataset.rail;
+  if (panel.root.classList.contains('bottom-docked')) {
+    panel.root.classList.remove('bottom-docked');
+    panel.place(bar.left, bar.top);
+  }
   packRail();
-
 }
 
-const bin = document.createElement('div');
-bin.id = 'bin';
-bin.innerHTML =
-  '<svg viewBox="0 0 48 52" aria-hidden="true">' +
-
-  '<g class="lid"><rect x="6" y="8" width="36" height="6" rx="2"/>' +
-  '<rect x="19" y="3" width="10" height="5" rx="2"/></g>' +
-
-  '<path class="can" d="M9 17 h30 l-3 31 a3 3 0 0 1 -3 3 h-18 a3 3 0 0 1 -3 -3 z"/>' +
-  '<g class="ribs"><line x1="18" y1="24" x2="17" y2="44"/>' +
-  '<line x1="24" y1="24" x2="24" y2="44"/>' +
-  '<line x1="30" y1="24" x2="31" y2="44"/></g>' +
-  '</svg>';
-document.body.appendChild(bin);
-
-function overBin(panel) {
-  if (!bin.classList.contains('up')) return false;
-  const b = panel.root.querySelector('.bar').getBoundingClientRect();
-  const t = bin.getBoundingClientRect();
-  return b.left < t.right && b.right > t.left && b.top < t.bottom && b.bottom > t.top;
-}
-
-function binEat(panel) {
-
-  bin.classList.add('up', 'fed');
-  setTimeout(() => bin.classList.remove('up', 'fed'), 420);
+function closePanel(panel, remote = false) {
   removeFromRail(panel);
   const at = extraPanes.indexOf(panel);
   if (at >= 0) extraPanes.splice(at, 1);
 
   if (panel.root.classList.contains('picked')) selectPane(configPanel.root);
   packRail();
-  if (panel.stop) panel.stop();
+  if (remote) panel.detach?.();
+  else if (panel.stop) panel.stop();
   panel.root.remove();
+  panelsByRoot.delete(panel.root);
+  savePlacementSoon();
 }
 
 const EDGE_GRAB = 48;
@@ -724,80 +707,64 @@ function showEdges(names) {
   }
 }
 
-const railMarks = document.createElement('div');
-railMarks.id = 'rail-marks';
-railMarks.innerHTML = '<i></i><i></i>';
-document.body.appendChild(railMarks);
+const railMarks = Object.fromEntries(['top', 'bottom'].map(side => {
+  const mark = document.createElement('div');
+  mark.className = 'rail-marks ' + side;
+  mark.innerHTML = '<i></i><i></i>';
+  document.body.appendChild(mark);
+  return [side, mark];
+}));
 
-function railHeight() {
-  const anyBar = document.querySelector('.panel .bar');
-  return anyBar ? anyBar.offsetHeight : 28;
+function railHeight(side) {
+  const panels = railPanels(side);
+  const panel = draggingPanel || panels[0] || configPanel;
+  if (!panel) return 28;
+  const style = getComputedStyle(panel.root);
+  return panel.bar.getBoundingClientRect().height
+    + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
 }
 
 function showRails(near) {
-  railMarks.style.top = RAIL_TOP + 'px';
-  railMarks.style.height = railHeight() + 'px';
-  railMarks.classList.toggle('near', !!near);
+  for (const [side, mark] of Object.entries(railMarks)) {
+    mark.style.height = railHeight(side) + 'px';
+    mark.classList.toggle('near', side === near);
+  }
 }
 
 function overRail(panel) {
-  const bar = panel.root.querySelector('.bar').getBoundingClientRect();
-  return Math.abs(bar.top - RAIL_TOP) <= RAIL_GRAB;
+  const bar = panel.bar.getBoundingClientRect();
+  const top = Math.abs(bar.top - TAB_GAP);
+  const bottom = Math.abs(bar.bottom - (innerHeight - TAB_GAP));
+  if (Math.min(top, bottom) > RAIL_GRAB) return null;
+  return top <= bottom ? 'top' : 'bottom';
 }
 
-function slotFor(panel) {
-  const bar = panel.root.querySelector('.bar').getBoundingClientRect();
+function slotFor(panel, side) {
+  const bar = panel.bar.getBoundingClientRect();
   const mid = bar.left + bar.width / 2;
-  const others = rail.filter(p => p !== panel);
-  let at = others.length;
-  for (let i = 0; i < others.length; i++) {
-    const b = others[i].root.querySelector('.bar').getBoundingClientRect();
-    if (mid < b.left + b.width / 2) { at = i; break; }
-  }
-  return at;
+  const others = railPanels(side).filter(p => p !== panel);
+  const at = others.findIndex(p => {
+    const b = p.bar.getBoundingClientRect();
+    return mid < b.left + b.width / 2;
+  });
+  return at < 0 ? others.length : at;
 }
 
 function railDrag(panel) {
-  railState.dragging = panel.root;
-
-  bin.classList.toggle('up', !!panel.stop);
-  bin.classList.toggle('open', overBin(panel));
+  draggingPanel = panel;
   const near = overRail(panel);
   showRails(near);
-  if (!near) return;
-
-  const at = slotFor(panel);
-  const was = rail.indexOf(panel);
-  if (was >= 0 && was !== at) {
-    rail.splice(was, 1);
-    rail.splice(at, 0, panel);
-    packRail();
-  } else if (was < 0) {
-    rail.splice(at, 0, panel);
-    packRail();
-  }
+  if (near) addToRail(panel, slotFor(panel, near), near);
 }
 
 function railDrop(panel) {
-  railState.dragging = null;
-  railMarks.classList.remove('near');
-
-  const eaten = overBin(panel);
-  bin.classList.remove('up', 'open');
-  if (eaten) { binEat(panel); return; }
-
-  if (overRail(panel)) {
-    if (!onRail(panel)) addToRail(panel, slotFor(panel));
-    packRail();
-  } else {
-
-    removeFromRail(panel);
-
-    const box = panel.root.getBoundingClientRect();
-    const edge = 28;
-    if (box.right < edge) panel.place(edge - box.width, box.top);
-    else if (box.left > innerWidth - edge) panel.place(innerWidth - edge, box.top);
-  }
+  const near = overRail(panel);
+  draggingPanel = null;
+  showRails(null);
+  if (near) addToRail(panel, slotFor(panel, near), near);
+  else removeFromRail(panel);
+  packRail();
+  savePlacementSoon();
 }
 
 export function selectPane(root) {
@@ -835,16 +802,50 @@ const paneTemplate = (() => {
 })();
 
 function reopenTerminal(id) {
-  const pane = buildTerminal(id);
-  addToRail(pane);
+  const pane = buildTerminal(id, { recover: true });
+  addToRail(pane, undefined, id.startsWith('agent-') ? 'bottom' : 'top');
 
   pane.boot();
   return pane;
 }
 
-function buildTerminal(id) {
+let remotePanes = new Set();
+let harnessRequest = 0;
+export function syncAgentPanes(ids, labels = {}, documents = {}, requestedHarness = 0) {
+  window.PANE_LABELS = labels;
+  const wanted = new Set(ids);
+  for (const pane of [harnessPane, ...extraPanes]) {
+    const id = pane === harnessPane ? 'harness' : pane.root.id.slice(5);
+    if (remotePanes.has(id) && !wanted.has(id)) closePanel(pane, true);
+  }
+  for (const id of wanted) {
+    if (id === 'harness' && !harnessPane.root.isConnected) {
+      harnessPane = buildTerminal('harness', { recover: true });
+      addToRail(harnessPane);
+      harnessPane.boot();
+    } else if (id.startsWith('agent-') && !document.getElementById('pane-' + id)) reopenTerminal(id);
+  }
+  if (requestedHarness > harnessRequest) {
+    harnessRequest = requestedHarness;
+    harnessPane.open();
+    selectPane(harnessPane.root);
+  }
+  for (const panel of [configPanel, harnessPane, ...extraPanes]) {
+    const id = paneId(panel);
+    if (documents[id] && panel.root.isConnected) {
+      panel.showDocument?.(documents[id]);
+    }
+    if (document.activeElement !== panel.label) {
+      const id = panel === configPanel ? 'config' : panel === harnessPane ? 'harness' : panel.root.id.slice(5);
+      panel.setLabel(labels[id] || '');
+    }
+  }
+  remotePanes = wanted;
+}
+
+function buildTerminal(id, launch) {
   const root = paneTemplate.cloneNode(true);
-  root.id = 'pane-' + id;
+  root.id = id === 'harness' ? 'harness' : 'pane-' + id;
   root.classList.add('shut');
   root.querySelector('.screen').textContent = '';
   root.querySelector('.state').textContent = '';
@@ -853,17 +854,29 @@ function buildTerminal(id) {
   root.style.cssText = '';
   document.body.appendChild(root);
 
-  const pane = makeTerminalPane(root, id);
-  extraPanes.push(pane);
+  const pane = makeTerminalPane(root, id, launch);
+  if (id !== 'harness') extraPanes.push(pane);
   return pane;
 }
 
-export function openTerminal() {
+export function openFileTerminal(file, command, position) {
+  const pane = buildTerminal(String(++paneCount), { node: file.name, file: file.file, command });
+  selectPane(pane.root);
+  pane.open();
+  pane.place(Math.max(6, Math.min(position.x, innerWidth - pane.root.offsetWidth - 6)),
+    Math.max(6, Math.min(position.y, innerHeight - pane.root.offsetHeight - 6)));
+  savePlacementSoon();
+  return pane;
+}
+
+export function openTerminal(side) {
+  const selected = pickedPanel();
+  side ??= onRail(selected) ? railSide(selected) : 'top';
   const id = String(++paneCount);
   const pane = buildTerminal(id);
   selectPane(pane.root);
 
-  addToRail(pane);
+  addToRail(pane, undefined, side);
 
   pane.boot();
 
@@ -871,8 +884,6 @@ export function openTerminal() {
   return pane;
 }
 
-document.getElementById('term-new')
-  .addEventListener('click', () => { openTerminal(); });
 
 document.addEventListener('keydown', (e) => {
   if (e.key !== 't' && e.key !== 'T') return;
@@ -887,9 +898,15 @@ document.addEventListener('keydown', (e) => {
 
 export function startRail() {
 
-  addToRail(configPanel);
-  addToRail(harnessPane);
-  harnessPane.boot();
+  const savedConfig = !!(window.PANE_POSITIONS && window.PANE_POSITIONS.config);
+  if (window.START_EMPTY || savedConfig) {
+    addToRail(configPanel, undefined, 'bottom');
+    if (savedConfig) configPanel.open();
+  }
+  if (window.HARNESS_PRESENT) {
+    addToRail(harnessPane);
+    harnessPane.boot();
+  } else closePanel(harnessPane, true);
 
   for (const id of (window.OPEN_TERMINALS || [])) {
     const n = Number(id);
@@ -897,5 +914,86 @@ export function startRail() {
     reopenTerminal(String(id));
   }
 
-    selectPane(configPanel.root);
+  restorePlacements();
+  placementsReady = true;
+  savePlacementSoon();
+  if (configPanel.root.isConnected) selectPane(configPanel.root);
 }
+
+let placementsReady = false;
+let placementTimer = null;
+let placementSaving = false;
+let placementDirty = false;
+
+function paneId(panel) {
+  return panel === configPanel ? 'config' : panel === harnessPane ? 'harness' : panel.root.id.slice(5);
+}
+
+function placementSnapshot() {
+  return Object.fromEntries([configPanel, harnessPane, ...extraPanes]
+    .filter(p => p.root.isConnected)
+    .filter(p => p !== configPanel || !p.shut)
+    .map(p => {
+      const box = p.root.getBoundingClientRect();
+      const size = [Math.round(box.width), Math.round(box.height)];
+      return [paneId(p), onRail(p)
+        ? [railSide(p), railPanels(railSide(p)).indexOf(p), ...size]
+        : ['floating', p.root.offsetLeft, p.root.offsetTop, ...size]];
+    }));
+}
+
+function savePlacementSoon() {
+  if (!placementsReady || draggingPanel) return;
+  placementDirty = true;
+  clearTimeout(placementTimer);
+  placementTimer = setTimeout(savePlacements, 100);
+}
+
+async function savePlacements() {
+  if (!placementDirty || placementSaving) return;
+  placementSaving = true;
+  placementDirty = false;
+  try {
+    const response = await fetch('/panes/placements?k=' + encodeURIComponent(window.TOKEN), {
+      method: 'POST', body: JSON.stringify(placementSnapshot()), keepalive: true,
+    });
+    if (response.status === 403) await transport.refreshSession();
+    if (!response.ok) throw new Error('could not save pane placement');
+  } catch (error) {
+    placementDirty = true;
+    reportError(error, { phase: 'pane-placement' });
+  } finally {
+    placementSaving = false;
+    if (placementDirty) placementTimer = setTimeout(savePlacements, 1000);
+  }
+}
+
+function restorePlacements() {
+  const saved = window.PANE_POSITIONS || {};
+  for (const panel of [configPanel, harnessPane, ...extraPanes]) {
+    if (!panel.root.isConnected) continue;
+    const position = saved[paneId(panel)];
+    if (!position) continue;
+    const sizeAt = position[0] === 'floating' ? 3 : 2;
+    if (position.length >= sizeAt + 2 && position[sizeAt] > 0 && position[sizeAt + 1] > 0) {
+      panel.root.style.width = position[sizeAt] + 'px';
+      panel.root.style.height = position[sizeAt + 1] + 'px';
+    }
+    if (position[0] === 'floating') {
+      removeFromRail(panel);
+      panel.open();
+      panel.place(position[1], position[2]);
+    } else addToRail(panel, undefined, position[0]);
+  }
+  for (const side of ['top', 'bottom']) {
+    const ordered = railPanels(side).sort((a, b) =>
+      (saved[paneId(a)]?.[1] ?? Infinity) - (saved[paneId(b)]?.[1] ?? Infinity));
+    for (const panel of ordered) addToRail(panel, undefined, side);
+  }
+  packRailNow();
+}
+
+window.addEventListener('pagehide', () => {
+  clearTimeout(placementTimer);
+  savePlacements();
+});

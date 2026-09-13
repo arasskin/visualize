@@ -20813,8 +20813,8 @@ JANET_CORE_FN(cfun_net_connect,
     if (status == -1) {
         if (err != EINPROGRESS) {
 #endif
-            JSOCKCLOSE(sock);
             Janet lasterr = janet_ev_lasterr();
+            janet_stream_close(stream);
             janet_panicf("could not connect socket: %V", lasterr);
         }
     }

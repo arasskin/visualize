@@ -1,6 +1,6 @@
-(import ../src/visualize/scan)
-(import ../src/visualize/config)
-(import ../src/visualize/names)
+(import ../src.server/scan)
+(import ../src.server/config)
+(import ../src.server/names)
 
 (def args (dyn :args))
 (def write? (truthy? (index-of "--write" args)))

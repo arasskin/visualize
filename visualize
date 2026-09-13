@@ -3,7 +3,36 @@
 set -e
 
 here=$(cd "$(dirname "$0")" && pwd)
+# Invocation is used to declare the main harness opened on every launch with the following options:
+#   disable native subagents
+#   inject Visualize instructions
+#   connect to visualize's MCP
+# Default harness is used to declare what harness will be invoked when the main agent tries to create a subagent through the visualize mcp
+
+# For Codex:
+invocation='exec codex \
+  -c agents.enabled=false \
+  -c "developer_instructions=$VISUALIZE_AGENT_JSON" \
+  -c "mcp_servers.visualize={command=$VISUALIZE_MCP_COMMAND_JSON,args=[$VISUALIZE_SOCKET_JSON],required=true}"'
+default_harness=codex
+export VISUALIZE_MAIN_HARNESS_COMMAND="$invocation"
+
+# Injected harness instructions:
+# You are working in Visualize, a visual harness.
+# Use the Visualize MCP to orchestrate subagents when necessary.
+# When given a list of features, prefer working in parallel worktrees with separate pull requests, merging them at the end.
+agent_instructions='You are working in Visualize, a visual harness.
+Use the Visualize MCP to orchestrate subagents when necessary.
+When given a list of features, prefer working in parallel worktrees with separate pull requests, merging them at the end.'
+export VISUALIZE_AGENT_INSTRUCTIONS="$agent_instructions"
+
+# For Claude:
+# invocation='exec claude \
+#   --disallowedTools "Agent" \
+#   --append-system-prompt "$VISUALIZE_AGENT_INSTRUCTIONS" \
+#   --mcp-config "{\"mcpServers\":{\"visualize\":{\"type\":\"stdio\",\"command\":$VISUALIZE_MCP_COMMAND_JSON,\"args\":[$VISUALIZE_SOCKET_JSON]}}}"'
+# default_harness=claude
 
 "$here/build"
 
-exec "$here/external-src/janet/janet" "$here/src/visualize/core.janet" "$@"
+exec "$here/external-src/janet/janet" "$here/src.server/core.janet" --command "$invocation" --default-harness "$default_harness" "$@"

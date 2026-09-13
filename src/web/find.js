@@ -1,10 +1,11 @@
+import { measure } from './render-trace.js';
 import { pane, scale, panBy, drawing, renderedScale, screenBounds, selectGraphNode } from './graph.js';
+import { fuzzyScore, fuzzyRank } from './fuzzy.js';
 
 let deps = {
   moduleNames: () => [],
   help: null,
   shutHelp: () => {},
-  rank: () => [],
   prefixCandidates: () => [],
   compose: null,
   lines: () => [],
@@ -23,25 +24,24 @@ let hitAt = 0;
 function finding() { return !find.classList.contains('shut'); }
 
 function searchNodes(query) {
+  return measure('search-match', () => matchNodes(query));
+}
+
+function matchNodes(query) {
   const svg = pane.querySelector('svg');
   if (!svg || !query) return [];
   const names = deps.moduleNames(svg);
-  const needle = query.toLowerCase();
   const found = [];
   for (const node of svg.querySelectorAll('g.node')) {
     const title = node.querySelector('title');
     if (!title) continue;
     const key = title.textContent.trim();
     const label = names.get(key) || key;
-    const hay = (key + ' ' + label).toLowerCase();
-    const at = hay.indexOf(needle);
-    if (at < 0) continue;
-
-    const starts = key.toLowerCase().startsWith(needle) ||
-                   label.toLowerCase().startsWith(needle);
-    found.push({ node, key, label, rank: (starts ? 0 : 1) * 1000 + key.length });
+    const rank = Math.min(fuzzyScore(key, query), fuzzyScore(label, query));
+    if (!Number.isFinite(rank)) continue;
+    found.push({ node, key, label, rank });
   }
-  found.sort((a, b) => a.rank - b.rank);
+  found.sort((a, b) => a.rank - b.rank || a.key.length - b.key.length || a.key.localeCompare(b.key));
   return found;
 }
 
@@ -307,7 +307,7 @@ function renderFindRows() {
 function renderFindList() {
   const typed = findInput.value.trim();
 
-  findItems = finding() ? deps.rank(deps.prefixCandidates(), typed) : [];
+  findItems = finding() ? measure('search-suggestions', () => fuzzyRank(deps.prefixCandidates(), typed)) : [];
   findAt = -1;
   renderFindRows();
 }
