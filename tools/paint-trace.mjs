@@ -48,9 +48,9 @@ class CDP {
 try {
   await mkdir(join(root, 'project'));
   await mkdir(join(root, 'bin'));
-  for (const part of ['src', 'src.server', 'src.mcp', 'src.vterm', 'src.wterm', 'src.graphviz', 'external-src', 'tools']) await cp(join(repo, part), join(root, 'project', part), { recursive: true });
-  const config = (await readFile(join(repo, 'visualize.conf'), 'utf8')).split('\n').filter(line => !line.startsWith('@visualize')).join('\n');
-  await writeFile(join(root, 'project', 'visualize.conf'), config);
+  for (const part of ['src', 'src.server', 'src.vterm', 'src.wterm', 'src.graphviz', 'external-src', 'tools']) await cp(join(repo, part), join(root, 'project', part), { recursive: true });
+  const config = (await readFile(join(repo, 'visualize_config'), 'utf8')).split('\n').filter(line => !line.startsWith('@visualize')).join('\n');
+  await writeFile(join(root, 'project', 'visualize_config'), config);
   await writeFile(join(root, 'bin', 'open'), '#!/bin/sh\nfor browser_arg do\n  browser_arg=${browser_arg%%#*}\n  case "$browser_arg" in\n    http://*|https://*) printf "%s" "$browser_arg" > "$VZ_BENCH_URL" ;;\n    --app=*) printf "%s" "${browser_arg#--app=}" > "$VZ_BENCH_URL" ;;\n  esac\ndone\n', { mode: 0o755 });
   const core = join(repo, 'src.server/core.janet');
   const serverOptions = {

@@ -42,6 +42,7 @@ export function makeTerminal(element, options = {}) {
             reportError(error, { pane: options.pane, phase: 'render', rows, cols });
             throw error;
           }
+          paint();
           if (latency.enabled) latency.record('render', performance.now() - start, options.pane);
           if (awaitingRender) {
             latency.record('write-to-render', performance.now() - awaitingRender, options.pane);
@@ -62,7 +63,6 @@ export function makeTerminal(element, options = {}) {
       for (const screen of pending) applyScreen(screen);
       pending = [];
       unlockHeight();
-      paint();
       options.onReady?.();
     }).catch((err) => {
       if (current !== revision) return;
@@ -90,7 +90,7 @@ export function makeTerminal(element, options = {}) {
   function paint() {
     const core = term && term.bridge;
     const lines = core ? core.getScrollbackCount() + core.getRows() : 0;
-    onPaint(lines);
+    onPaint(lines, core?.getRows(), core?.getCols());
   }
 
   function applyScreen(screen) {
@@ -108,7 +108,6 @@ export function makeTerminal(element, options = {}) {
       if (latency.enabled && !awaitingRender) awaitingRender = start;
       term._scheduleRender();
       unlockHeight();
-      paint();
     } catch (error) {
       reportError(error, { pane: options.pane, phase: 'screen', rows, cols });
       throw error;

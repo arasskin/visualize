@@ -60,8 +60,9 @@ export async function check({ cdp, url, root, waitFor, restart }) {
     await waitFor(() => frames.some(f => f.opcode === 8)); checks++;
   } finally { wire.destroy(); }
 
-  const conf = await readFile(join(root,'project','visualize.conf'),'utf8');
-  const host = createConnection(conf.match(/@visualize terminal harness socket (.+)/)[1]);
+  const conf = await readFile(join(root,'project','visualize_config'),'utf8');
+  const socket = conf.match(/@visualize terminal harness socket ("(?:\\.|[^"\\])*"|\S+)/)[1];
+  const host = createConnection(socket.startsWith('"') ? JSON.parse(socket) : socket);
   let text = ''; const awaiting = [];
   host.on('data', b => {
     text += String(b);

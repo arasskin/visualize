@@ -22,7 +22,7 @@ Default/palette color queries and character/pixel geometry queries are answered 
 
 ## Capture and migration
 
-`POST /pane/<id>/capture?k=<token>` with body `{}` returns plain visible-screen text, dimensions, and generation. The same supervisor RPC is `{"op":"capture"}`, available through the Janet client as `(:capture client)`. Capture reads the emulator's current screen, including an in-progress synchronized update; it is independent of browser publication. The pane MCP adapter and CLI use this same capture operation; see [pane control](mcp.md).
+`POST /pane/<id>/capture?k=<token>` with body `{}` returns plain visible-screen text, dimensions, and generation. The same supervisor RPC is `{"op":"capture"}`, available through the Janet client as `(:capture client)`. Capture reads the emulator's current screen, including an in-progress synchronized update; it is independent of browser publication.
 
 Supervisors created before this change cannot load the new engine in place. The UI reports that those panes need to be closed and recreated. Restart Visualize and reload the page, then recreate old panes when their running work can be stopped. A server restart alone deliberately preserves existing supervisors. Live user panes are not restarted during development or tests.
 

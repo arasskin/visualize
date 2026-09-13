@@ -58,9 +58,9 @@ class CDP {
 try {
   await mkdir(join(root, 'project'));
   await mkdir(join(root, 'bin'));
-  for (const part of ['src', 'src.server', 'src.mcp', 'src.vterm', 'src.wterm', 'src.graphviz', 'external-src', 'tools']) await cp(join(repo, part), join(root, 'project', part), { recursive: true });
-  const config = (await readFile(join(repo, 'visualize.conf'), 'utf8')).split('\n').filter(line => !line.startsWith('@visualize')).join('\n');
-  await writeFile(join(root, 'project', 'visualize.conf'), config);
+  for (const part of ['src', 'src.server', 'src.vterm', 'src.wterm', 'src.graphviz', 'external-src', 'tools']) await cp(join(repo, part), join(root, 'project', part), { recursive: true });
+  const config = (await readFile(join(repo, 'visualize_config'), 'utf8')).split('\n').filter(line => !line.startsWith('@visualize')).join('\n');
+  await writeFile(join(root, 'project', 'visualize_config'), config);
   await writeFile(join(root, 'bin', 'open'), '#!/bin/sh\nfor browser_arg do\n  browser_arg=${browser_arg%%#*}\n  case "$browser_arg" in\n    http://*|https://*) printf "%s" "$browser_arg" > "$VZ_BENCH_URL" ;;\n    --app=*) printf "%s" "${browser_arg#--app=}" > "$VZ_BENCH_URL" ;;\n  esac\ndone\n', { mode: 0o755 });
   const fixture = join(root, 'bin', 'pane-terminal.janet');
   await cp(join(repo, 'tools/fixtures/pane-terminal.janet'), fixture);
@@ -322,6 +322,7 @@ try {
   await cdp.evaluate('subject.toggle();other.toggle();window.config=panes.configPanel');
   for (const side of ['top','bottom','floating']) {
     await cdp.evaluate(`config.open();panes.selectPane(config.root);panes.addToRail(config,0,${JSON.stringify(side==='floating'?'top':side)});config.root.style.width='500px';config.root.style.height='350px';panes.packRailNow()`);
+    await waitFor(() => cdp.evaluate('!!config.body.querySelector(".config-diagram .node")'));
     await sleep(100);
     if(side==='floating')await drag('config.bar',160,150);
     const sign=side==='bottom'?-1:1;

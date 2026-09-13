@@ -12,7 +12,7 @@
 (t/test "animate flashes what moved since the last drawing"
 
   (def conf "/tmp/visualize-animate-test.conf")
-  (spit conf "(animate)\n")
+  (spit conf "animate\n")
 
   (def first-draw (drawn (scan/scan ".") conf))
   (t/is= 0 (length (string/find-all "node fresh" (string (first-draw 3))))
@@ -23,7 +23,7 @@
   (t/is= 1 (length (string/find-all `class="node fresh"` (string (second-draw 3))))
          "one file moved, one node flashes")
 
-  (spit conf "(lines)\n")
+  (spit conf "lines\n")
   (os/touch "src.server/select.janet")
   (def unasked (drawn (scan/scan ".") conf))
   (t/is= 0 (length (string/find-all "fresh" (string (unasked 3))))
@@ -42,7 +42,7 @@
   (spit (string dir "/api.v1.users.py") "x = 1\n")
   (spit (string dir "/web.page.py") "y = 2\n")
   (def conf (string dir "/vz.conf"))
-  (spit conf "(box api blue)\n(box api.v1 red)\n")
+  (spit conf "box api blue\nbox api.v1 red\n")
 
   (def svg (string ((drawn (scan/scan dir) conf) 3)))
   (def clusters
@@ -59,7 +59,7 @@
 (t/test "a line count is written out in full"
 
   (def conf "/tmp/visualize-lines-test.conf")
-  (spit conf "(lines)\n")
+  (spit conf "lines\n")
   (def svg (string ((drawn (scan/scan ".") conf) 3)))
   (t/ok (nil? (peg/find ~(* (some (range "09")) "k") svg))
         "no k-abbreviated count")
@@ -79,7 +79,7 @@
   (clear)
   (os/mkdir dir)
   (def conf (string dir "/vz.conf"))
-  (spit conf "(animate)\n")
+  (spit conf "animate\n")
   (spit (string dir "/a.py") "import b\n")
   (spit (string dir "/b.py") "x = 1\n")
 
@@ -107,7 +107,7 @@
   (clear)
   (os/mkdir dir)
   (def conf (string dir "/vz.conf"))
-  (spit conf "(animate)\n")
+  (spit conf "animate\n")
   (spit (string dir "/a.py") "import b\n")
   (spit (string dir "/b.py") "x = 1\n")
 
@@ -132,7 +132,7 @@
 
   (clear))
 
-(t/test "aliased folded nodes keep their final name component instead of an extension"
+(t/test "folded nodes keep their final name component instead of an extension"
   (def tree {:nodes [{:name "src.server.parsers.janet.janet" :label "janet\n.janet" :ours true}
                      {:name "src.server.parsers.python.janet" :label "python\n.janet" :ours true}]
              :edges [] :ours {} :stamps {}
@@ -140,7 +140,6 @@
                      "src.server.parsers.python.janet" 341}})
   (each sized [false true]
     (def state (config/new-state))
-    (put state :aliases [{:alias "~" :prefix "src.server"}])
     (put state :folded ["src.server.parsers"])
     (put state :sized sized)
     (def [ok svg] (graph/render-svg tree state))

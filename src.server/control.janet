@@ -1,4 +1,4 @@
-(import ../src.server/json)
+(import ./json)
 
 (def limit 1048576)
 

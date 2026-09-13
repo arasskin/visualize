@@ -6,4 +6,12 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 
 "$here/build"
 
-"$here/external-src/janet/janet" "$here/src/test/core.janet" "$@"
+test_errors=$(mktemp)
+trap 'rm -f "$test_errors"' EXIT HUP INT TERM
+test_status=0
+"$here/external-src/janet/janet" "$here/src/test/core.janet" "$@" 2>"$test_errors" || test_status=$?
+if [ -s "$test_errors" ]; then
+  cat "$test_errors" >&2
+  [ "$test_status" -ne 0 ] || test_status=1
+fi
+exit "$test_status"

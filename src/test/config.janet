@@ -6,26 +6,26 @@
 (defn- state-of [& lines] (first (config/run lines)))
 
 (t/test "hide and only collect prefixes"
-  (def state (state-of "(hide src.test)" "(hide WebKit)" "(only \"\")"))
+  (def state (state-of "hide src.test" "hide WebKit" "only \"\""))
   (t/is= ["src.test" "WebKit"] (state :hidden))
   (t/is= [""] (state :only) "the empty prefix is everything of ours"))
 
 (t/test "saying a thing twice is not an error"
 
-  (def state (state-of "(hide \"~.Tests\")" "(hide \"~.Tests\")"))
+  (def state (state-of "hide \"~.Tests\"" "hide \"~.Tests\""))
   (t/is= ["~.Tests"] (state :hidden)))
 
 (t/test "animate asks for the flash"
-  (t/ok ((state-of "(animate)") :animated))
-  (t/ok (not ((state-of "(lines)") :animated))
+  (t/ok ((state-of "animate") :animated))
+  (t/ok (not ((state-of "lines") :animated))
         "and nothing else turns it on"))
 
 (t/test "flags are set, never flipped"
-  (def state (state-of "(lines)" "(lines)"))
+  (def state (state-of "lines" "lines"))
   (t/ok (state :sized)))
 
 (t/test "groups take the palette in order and never repeat"
-  (def state (state-of "(box \"~.A\")" "(box \"~.B\")" "(box \"~.C\")"))
+  (def state (state-of "box \"~.A\"" "box \"~.B\"" "box \"~.C\""))
   (def hues (map |($ :color) (state :groups)))
   (t/is= 3 (length (distinct hues)))
   (t/ok (not (index-of color/ungrouped hues))
@@ -33,18 +33,18 @@
 
 (t/test "an explicit colour wins and the automatic ones move around it"
 
-  (def state (state-of "(box \"~.A\")" "(box \"~.B\" red)"))
+  (def state (state-of "box \"~.A\"" "box \"~.B\" red"))
   (def by-prefix (table ;(mapcat |[($ :prefix) ($ :color)] (state :groups))))
   (t/is= "#ff4d6d" (by-prefix "~.B"))
   (t/ok (not= "#ff4d6d" (by-prefix "~.A"))))
 
 (t/test "regrouping a prefix recolours rather than duplicating"
-  (def state (state-of "(box \"~.A\")" "(box \"~.A\" blue)"))
+  (def state (state-of "box \"~.A\"" "box \"~.A\" blue"))
   (t/is= 1 (length (state :groups)))
   (t/is= "#22a6f2" (((state :groups) 0) :color)))
 
 (t/test "a bad colour complains on its own line and the rest still runs"
-  (def [state problems] (run "(box \"~.A\" nonsense)" "(hide \"~.B\")"))
+  (def [state problems] (run "box \"~.A\" nonsense" "hide \"~.B\""))
   (t/ok (problems 0) "the bad line is reported")
   (t/ok (string/find "not a colour" (problems 0)))
   (t/is= ["~.B"] (state :hidden) "the good line still took effect")
@@ -53,12 +53,12 @@
 (t/test "the ungrouped colour is refused as a group colour"
 
   (def bare (string/replace "#" "" color/ungrouped))
-  (def [_ problems] (run (string "(box \"~.A\" " bare ")")))
+  (def [_ problems] (run (string "box \"~.A\" " bare "")))
   (t/ok (problems 0))
   (t/ok (string/find "invisible" (problems 0))))
 
 (t/test "an unknown verb is reported, not fatal"
-  (def [state problems] (run "(explode \"~.A\")" "(hide \"~.B\")"))
+  (def [state problems] (run "(explode \"~.A\")" "hide \"~.B\""))
   (t/ok (problems 0))
   (t/is= ["~.B"] (state :hidden)))
 
@@ -69,29 +69,29 @@
 
 (t/test "a bare name is a literal, and quoting is for awkward ones"
 
-  (t/is= ["src.server"] ((state-of "(hide src.server)") :hidden))
-  (t/is= ["src.server"] ((state-of `(hide "src.server")`) :hidden))
-  (t/is= ["a name with spaces"] ((state-of `(hide "a name with spaces")`) :hidden))
-  (t/is= ["src.test"] ((state-of "(hide src/test)") :hidden)
+  (t/is= ["src.server"] ((state-of "hide src.server") :hidden))
+  (t/is= ["src.server"] ((state-of `hide "src.server"`) :hidden))
+  (t/is= ["a name with spaces"] ((state-of `hide "a name with spaces"`) :hidden))
+  (t/is= ["src.test"] ((state-of "hide src/test") :hidden)
          "a slash is taken too, since a path is a natural thing to type"))
 
 (t/test "a hex colour is written bare, because a hash starts a comment"
 
-  (t/is= "#22a6f2" (get-in (state-of "(box web 22a6f2)") [:groups 0 :color]))
-  (t/is= "#ff4d6d" (get-in (state-of "(box web red)") [:groups 0 :color]))
+  (t/is= "#22a6f2" (get-in (state-of "box web 22a6f2") [:groups 0 :color]))
+  (t/is= "#ff4d6d" (get-in (state-of "box web red") [:groups 0 :color]))
 
-  (def [state problems] (run "(box web #22a6f2)"))
-  (t/is= [] (state :groups) "nothing was grouped")
-  (t/ok (string/find "parenthesis" (problems 0)))
+  (def [state problems] (run "box web #22a6f2"))
+  (t/is= ["web"] (map |($ :prefix) (state :groups)) "the hash starts an inline comment")
+  (t/is= {} problems)
 
-  (def [_ quoted] (run `(box web "#22a6f2")`))
+  (def [_ quoted] (run `box web "#22a6f2"`))
   (t/ok (string/find "not a colour" (quoted 0)))
 
-  (def [_ bad] (run "(box web nonsense)"))
+  (def [_ bad] (run "box web nonsense"))
   (t/ok (bad 0)))
 
 (t/test "a comment is a line that does nothing, wherever it sits"
-  (def [state problems] (run "# just a note" "   " "(hide src.test) # and why"))
+  (def [state problems] (run "# just a note" "   " "hide src.test # and why"))
   (t/is= {} (table ;(kvs problems)) "none of the three is a complaint")
   (t/is= ["src.test"] (state :hidden) "and the form still ran"))
 
@@ -100,12 +100,12 @@
   (each forbidden ["(os/shell \"echo hi\")"
                    "(file/open \"/tmp/x\" :w)"
                    "(slurp \"/etc/passwd\")"
-                   "(each f [1 2] (hide f))"
+                   "(each f [1 2] hide f)"
                    "(def home \"src\")"]
     (def [_ problems] (run forbidden))
     (t/ok (problems 0) (string forbidden " must not be a config form")))
 
-  (def [state clean] (run "(hide ,home)"))
+  (def [state clean] (run "hide ,home"))
   (t/is= @{} clean)
   (t/is= [",home"] (state :hidden)))
 
@@ -113,110 +113,47 @@
   (def [_ unknown] (run "(explode src)"))
   (t/ok (string/find "no verb" (unknown 0)))
   (t/ok (string/find "box" (unknown 0)) "and lists the ones there are")
-  (def [_ badargs] (run "(hide)"))
+  (def [_ badargs] (run "hide"))
   (t/ok (badargs 0) "a verb without its argument is refused"))
 
-(t/test "a complaint names the form that failed, not the first one"
-
-  (defn about [line] (((run line) 1) 0))
-
-  (t/ok (string/find "`hide`" (about "(box src.web) (hide)"))
-        "the broken form is named")
-  (t/ok (not (string/find "`box`" (about "(box src.web) (hide)")))
-        "and the one before it is not")
-
-  (t/ok (string/find "wobble" (about "(lines) (wobble x)")))
-  (t/ok (string/find "`lines`" (about "(box a red) (lines extra)")))
-
-  (t/ok (string/find "parenthesis" (about "(hide src.test")))
-  (t/ok (string/find "parentheses" (about "hide src.test"))))
+(t/test "commands are separated by lines and parentheses are rejected"
+  (each text ["box b fold b" "(hide src.test)" "hide" "lines extra" "foldb"]
+    (def [_ problems] (run text))
+    (t/ok (problems 0)))
+  (def [state problems] (run "box b" "fold b"))
+  (t/is= {} problems)
+  (t/is= ["b"] (state :folded)))
 
 (t/test "an arity complaint shows THAT verb's shape"
 
   (defn about [line] (((run line) 1) 0))
 
-  (t/ok (string/find "(hide p)" (about "(hide)"))
+  (t/ok (string/find "hide prefix" (about "hide"))
         "hide is shown taking a prefix")
-  (t/ok (not (string/find "colour" (about "(hide)")))
+  (t/ok (not (string/find "colour" (about "hide")))
         "and no colour, which it does not take")
 
-  (t/ok (string/find "(lines)" (about "(lines extra)")))
-  (t/ok (string/find "nothing else" (about "(lines extra)"))
+  (t/ok (string/find "lines" (about "lines extra")))
+  (t/ok (string/find "nothing else" (about "lines extra"))
         "a verb with no arguments says so")
 
-  (t/ok (string/find "(prefix name p)" (about "(prefix ~)"))
-        "prefix is shown taking both of its arguments")
-
-  (t/ok (string/find "(box p color?)" (about "(box)")))
-  (t/ok (string/find "colour" (about "(box)"))
+  (t/ok (string/find "box prefix color?" (about "box")))
+  (t/ok (string/find "colour" (about "box"))
         "and it alone mentions a colour")
-  (def [_ unclosed] (run "(hide src.test"))
-  (t/ok (string/find "parenthesis" (unclosed 0)))
-  (def [_ naked] (run "hide src.test"))
-  (t/ok (string/find "parentheses" (naked 0))))
+)
 
-(t/test "a prefix binds a token to a path"
-  (def state (state-of "(prefix ~ src.server)"))
-  (t/is= [{:alias "~" :prefix "src.server"}] (state :aliases))
-
-  (t/is= "@" (get-in (state-of "(prefix @ src)") [:aliases 0 :alias]))
-  (t/is= "lib" (get-in (state-of "(prefix lib deps.vendor)") [:aliases 0 :alias])))
-
-(t/test "a bound prefix expands in later names"
-  (def state (state-of "(prefix ~ src.server)" "(hide ~.color)" "(only ~)"))
-  (t/is= ["src.server.color"] (state :hidden))
-  (t/is= ["src.server"] (state :only))
-
-  (def grouped (state-of "(prefix ~ src)" "(box ~.test 22a6f2)"))
-  (t/is= "src.test" (get-in grouped [:groups 0 :prefix]))
-  (t/is= "#22a6f2" (get-in grouped [:groups 0 :color])))
-
-(t/test "the longest alias wins"
-
-  (def state (state-of "(prefix ~ src)" "(prefix ~~ src.server)"
-                       "(hide ~.test)" "(hide ~~.color)"))
-  (t/is= ["src.test" "src.server.color"] (state :hidden))
-  (def other (state-of "(prefix ~~ src.server)" "(prefix ~ src)"
-                       "(hide ~~.color)"))
-  (t/is= ["src.server.color"] (other :hidden)))
-
-(t/test "rebinding a token is refused"
-
-  (def [state problems] (run "(prefix ~ src)" "(prefix ~ test)" "(hide ~.a)"))
-  (t/ok (string/find "already bound" (problems 1)))
-  (t/is= 1 (length (state :aliases)))
-  (t/is= ["src.a"] (state :hidden) "the first binding stands"))
-
-(t/test "a token substitutes only at the head"
-
-  (def state (state-of "(prefix ~ src.config)" "(box ~~.something)"))
-  (t/is= "src.config~.something" (get-in state [:groups 0 :prefix]))
-
-  (t/is= ["a.~.b"] ((state-of "(prefix ~ src)" "(hide a.~.b)") :hidden)))
-
-(t/test "any token at all can be a prefix"
-
-  (each token [",x" "`q" "@" "%%" "!" "->"]
-    (def [state problems] (run (string "(prefix " token " src)")
-                               (string "(hide " token ".a)")))
-    (t/is= @{} problems (string token " must bind"))
-    (t/is= ["src.a"] (state :hidden) (string token " must substitute"))))
-
-(t/test "an unbound token is just a name"
-
-  (t/is= ["~.color"] ((state-of "(hide ~.color)") :hidden)))
-
-(t/test "a prefix without both halves is refused"
-  (def [_ p1] (run "(prefix ~)"))
-  (t/ok (p1 0) "a token with nothing to stand for")
-  (def [_ p2] (run "(prefix)"))
-  (t/ok (p2 0) "neither half"))
+(t/test "prefix is no longer a verb and paths are literal"
+  (def [state problems] (run "prefix ~ src.server" "hide ~.color"))
+  (t/ok (string/find "there is no verb" (problems 0)))
+  (t/is= ["~.color"] (state :hidden))
+  (t/is= nil (config/command "prefix ~ src.server"))
+  (t/is= nil (find |(= ($ :name) "prefix") (config/docs))))
 
 (t/test "the docs are generated from the grammar"
 
   (def documented (map |($ :name) (config/docs)))
   (each name documented
-    (def [_ problems] (run (string "(" name " src.a x)")))
+    (def [_ problems] (run (string name " src.a x")))
 
     (when (problems 0)
       (t/ok (not (string/find "there is no verb" (problems 0)))
@@ -232,7 +169,6 @@
   (def by-name (tabseq [d :in (config/docs)] (d :name) d))
   (t/is= ["name" "color?"] (get-in by-name ["box" :args]))
   (t/is= ["name"] (get-in by-name ["hide" :args]) "no second slot to fill")
-  (t/is= ["alias" "name"] (get-in by-name ["prefix" :args]))
   (t/is= [] (get-in by-name ["lines" :args]))
 
   (each d (config/docs)
@@ -246,10 +182,9 @@
 
 (t/test "a usage line comes from the arguments the parser takes"
   (def by-name (tabseq [d :in (config/docs)] (d :name) d))
-  (t/is= "(prefix name p)" (get-in by-name ["prefix" :usage]))
-  (t/is= "(box p color?)" (get-in by-name ["box" :usage])
+  (t/is= "box prefix color?" (get-in by-name ["box" :usage])
          "the optional colour is marked")
-  (t/is= "(lines)" (get-in by-name ["lines" :usage])
+  (t/is= "lines" (get-in by-name ["lines" :usage])
          "a verb with no arguments")
 
   (each d (config/docs)
@@ -266,51 +201,66 @@
               (string other " must be tried before " name)))))
 
   (each d (config/docs)
-    (def [_ problems] (run (string "(" (d :name) " a b)")))
+    (def [_ problems] (run (string (d :name) " a b")))
     (when (problems 0)
       (t/ok (not (string/find "there is no verb" (problems 0)))
             (string (d :name) " must be reachable")))))
 
-(t/test "a prefix binds before any line that uses it"
+(t/test "the file reads top to bottom"
 
-  (def below (state-of "(hide ~.color)" "(prefix ~ src.server)"))
-  (t/is= ["src.server.color"] (below :hidden))
-  (def above (state-of "(prefix ~ src.server)" "(hide ~.color)"))
-  (t/is= (above :hidden) (below :hidden) "the same file either way round")
-
-  (def together (state-of "(hide ~.a)" "(prefix ~ src) (hide ~.b)"))
-  (t/is= ["src.a" "src.b"] (together :hidden)))
-
-(t/test "two passes do not double-report a line"
-  (def [_ bad] (run "(prefix ~)"))
-  (t/is= 1 (length bad) "a bad prefix line complains once")
-
-  (def [state rebound] (run "(prefix ~ src)" "(prefix ~ test)" "(hide ~.a)"))
-  (t/ok (string/find "already bound" (rebound 1)))
-  (t/is= nil (rebound 0))
-  (t/is= ["src.a"] (state :hidden)))
-
-(t/test "the file still reads top to bottom within a pass"
-
-  (def state (state-of "(box a)" "(prefix ~ src)" "(box b)"))
+  (def state (state-of "box a" "box b"))
   (t/is= ["a" "b"] (map |($ :prefix) (state :groups))))
 
 (def- scratch "/tmp/visualize-config-file-test.conf")
 
+(t/test "config files keep the first occurrence of each nonblank line"
+  (def lines [" box b " "fold b" "box b" "#fold b" "fold b" "" ""
+              "@visualize placement 1 top 0" "@visualize placement 1 top 0"])
+  (def expected [" box b " "fold b" "#fold b" "" ""
+                 "@visualize placement 1 top 0" "@visualize placement 1 top 0"])
+  (t/is= expected (config/unique-lines lines))
+  (def saved [" box b " "fold b" "#fold b" "" "@visualize terminal 1 placement top 0"])
+  (spit scratch (string (string/join lines "\n") "\n"))
+  (t/is= saved (config/read-config scratch))
+  (t/is= (string (string/join saved "\n") "\n") (string (slurp scratch)))
+  (config/write-config scratch ["fold b" "box c" "fold b"])
+  (t/is= "fold b\nbox c\n" (string (slurp scratch))))
+
+(t/test "config cleanup compares commands rather than their spelling"
+  (def lines ["  fold src # first" "fold   \"src\" # later" "fold\tsrc"
+              "#fold src # disabled first" "  # fold \"src\" # disabled later"
+              "box src blue" "box \"src\" \"blue\"" "box src red"
+              "fold Src" "fold src.web" "lines # first" "lines"
+              "fold \"a b\"" "fold \"a  b\"" "fold \"src#tag\"" "fold \"src#tag\" # later"
+              "broken src" "broken  src" "# note" "" ""
+              "@visualize placement pane top 0" "@visualize placement pane top 0"])
+  (def expected ["  fold src # first" "#fold src # disabled first" "box src blue" "box src red"
+                 "fold Src" "fold src.web" "lines # first" "fold \"a b\"" "fold \"a  b\""
+                 "fold \"src#tag\"" "broken src" "broken  src" "# note" "" ""
+                 "@visualize placement pane top 0" "@visualize placement pane top 0"])
+  (t/is= expected (config/unique-lines lines))
+  (t/is= expected (config/unique-lines expected))
+  (def saved (array ;(slice expected 0 13) "" "@visualize terminal pane placement top 0"))
+  (spit scratch (string (string/join lines "\n") "\n"))
+  (t/is= saved (config/read-config scratch))
+  (t/is= (string (string/join saved "\n") "\n") (string (slurp scratch)))
+  (config/write-config scratch lines)
+  (t/is= saved (config/read-config scratch)))
+
 (t/test "reading a config gives one entry per written line"
 
-  (spit scratch "(lines)\n(hide src.test)\n")
-  (t/is= ["(lines)" "(hide src.test)"] (config/read-config scratch))
-  (spit scratch "(lines)")
-  (t/is= ["(lines)"] (config/read-config scratch)
+  (spit scratch "lines\nhide src.test\n")
+  (t/is= ["lines" "hide src.test"] (config/read-config scratch))
+  (spit scratch "lines")
+  (t/is= ["lines"] (config/read-config scratch)
          "a file with no trailing newline reads the same"))
 
 (t/test "a config round trips unchanged"
-  (spit scratch "(lines)\n(hide src.test)\n")
+  (spit scratch "lines\nhide src.test\n")
   (def lines (config/read-config scratch))
   (config/write-config scratch lines)
   (t/is= lines (config/read-config scratch))
-  (t/is= "(lines)\n(hide src.test)\n" (string (slurp scratch))
+  (t/is= "lines\nhide src.test\n" (string (slurp scratch))
          "and the file is the lines, newline-terminated"))
 
 (t/test "the editor's actions are the ones the page can send"
@@ -332,17 +282,17 @@
   (t/ok (config/note? "@visualize terminal 3 socket /tmp/a.sock"))
   (t/ok (config/note? "   @visualize terminal 3 socket /tmp/a.sock")
         "leading space is still a note")
-  (t/ok (not (config/note? "(hide src)")))
+  (t/ok (not (config/note? "hide src")))
   (t/ok (not (config/note? "# @visualize in a comment is a comment")))
 
-  (def lines ["(lines)" "@visualize terminal 3 socket /tmp/a.sock" "(box src)"])
+  (def lines ["lines" "@visualize terminal 3 socket /tmp/a.sock" "box src"])
   (t/is= [["3" "/tmp/a.sock"]] (config/terminals lines))
 
   (def shown (filter |(not (config/note? $)) lines))
-  (t/is= ["(lines)" "(box src)"] shown
+  (t/is= ["lines" "box src"] shown
          "a note is never a row the editor shows")
 
-  (t/is= ["(lines)"] (config/edit shown "delete" 1)
+  (t/is= ["lines"] (config/edit shown "delete" 1)
          "an index from the editor means the line the editor showed")
 
   (def [_ problems] (config/run lines))
@@ -350,21 +300,21 @@
 
 (t/test "notes are rewritten whole, never appended to"
 
-  (def lines ["(lines)" "@visualize terminal 3 socket /tmp/old.sock"])
+  (def lines ["lines" "@visualize terminal 3 socket /tmp/old.sock"])
   (def after (config/remember-terminals lines [["4" "/tmp/new.sock"]]))
   (t/is= [["4" "/tmp/new.sock"]] (config/terminals after))
   (t/ok (not (find |(string/find "old.sock" $) after))
         "the pane that went is gone from the file")
 
-  (t/is= ["(lines)"]
+  (t/is= ["lines"]
          (filter |(and (not (config/note? $)) (not (empty? (string/trim $)))) after))
 
-  (t/is= ["(lines)"] (config/remember-terminals lines []))
-  (t/is= ["(lines)"] (config/remember-terminals after [])
+  (t/is= ["lines"] (config/remember-terminals lines []))
+  (t/is= ["lines"] (config/remember-terminals after [])
          "including the blank it added on the way in")
 
   (def pairs [["harness" "/tmp/h.sock"] ["2" "/tmp/2.sock"]])
-  (t/is= pairs (config/terminals (config/remember-terminals [] pairs))))
+  (t/is= (sorted-by first pairs) (config/terminals (config/remember-terminals [] pairs))))
 
 (t/test "a nested project is drawn by its own config"
 
@@ -374,65 +324,53 @@
 
   (os/mkdir (string root "/lib/vendor"))
   (spit (string root "/lib/helper.py") "x = 1\n")
-  (defn conf [dir text] (spit (string root dir "/visualize.conf") text))
+  (defn conf [dir text] (spit (string root dir "/visualize_config") text))
 
-  (conf "/lib" "(box vendor)\n(fold vendor)\n")
-  (def [state problems] (config/run @["(visualize lib)"] root))
+  (conf "/lib" "box vendor\nfold vendor\n")
+  (def [state problems] (config/run @["visualize lib"] root))
   (t/is= @{} problems)
 
   (t/is= ["lib.vendor"] (map |($ :prefix) (state :groups)))
   (t/is= ["lib.vendor"] (state :folded))
 
-  (conf "/lib" "(lines)\n(animate)\n(box vendor)\n")
-  (def [s2 _] (config/run @["(visualize lib)"] root))
-  (t/ok (not (s2 :sized)) "a nested (lines) does not size the parent")
-  (t/ok (not (s2 :animated)) "a nested (animate) does not animate the parent")
+  (conf "/lib" "lines\nanimate\nbox vendor\n")
+  (def [s2 _] (config/run @["visualize lib"] root))
+  (t/ok (not (s2 :sized)) "a nested lines does not size the parent")
+  (t/ok (not (s2 :animated)) "a nested animate does not animate the parent")
   (t/is= ["lib.vendor"] (map |($ :prefix) (s2 :groups)))
 
-  (conf "/lib" "(box vendor red)\n(prefix q other)\n")
-  (def [s3 _] (config/run @["(visualize lib)"] root))
+  (conf "/lib" "box vendor red\n")
+  (def [s3 _] (config/run @["visualize lib"] root))
   (t/is= [["lib.vendor" "#ff4d6d"]] (map |[($ :prefix) ($ :color)] (s3 :groups)))
-  (t/is= [] (s3 :aliases) "a child's alias does not reach the parent")
+  (conf "/lib" "box vendor\nfold vendor.deep\nhide vendor\n")
+  (def [nested faults] (config/run @["hide main.thing" "visualize lib"] root))
+  (t/is= @{} faults)
+  (t/is= ["lib.vendor"] (map |($ :prefix) (nested :groups)))
+  (t/is= ["lib.vendor.deep"] (nested :folded))
+  (t/is= ["main.thing" "lib.vendor"] (nested :hidden))
 
-  (conf "/lib" "(prefix v vendor)\n(box v)\n(fold v.deep)\n(hide v)\n")
-  (def [s8 _] (config/run @["(visualize lib)"] root))
-  (t/is= ["lib.vendor"] (map |($ :prefix) (s8 :groups)))
-  (t/is= ["lib.vendor.deep"] (s8 :folded) "an alias at the head of a longer name")
-  (t/is= ["lib.vendor"] (s8 :hidden) "the bare token is the path itself")
-
-  (conf "/lib" "(box v)\n(prefix v vendor)\n")
-  (def [s9 _] (config/run @["(visualize lib)"] root))
-  (t/is= ["lib.vendor"] (map |($ :prefix) (s9 :groups)))
-
-  (conf "/lib" "(prefix v vendor)\n(box v)\n")
-  (def [s10 p10]
-    (config/run @["(prefix v main.thing)" "(hide v)" "(visualize lib)"] root))
-  (t/is= @{} p10)
-  (t/is= ["main.thing"] (s10 :hidden) "the parent's v is the parent's")
-  (t/is= ["lib.vendor"] (map |($ :prefix) (s10 :groups)) "the child's v is the child's")
-
-  (conf "/lib" "(fold vendor)\n")
-  (def [s4 _] (config/run @["(visualize lib)" "(hide lib.vendor)"] root))
+  (conf "/lib" "fold vendor\n")
+  (def [s4 _] (config/run @["visualize lib" "hide lib.vendor"] root))
   (t/is= ["lib.vendor"] (s4 :hidden))
   (t/is= ["lib.vendor"] (s4 :folded))
 
   (os/mkdir (string root "/quiet"))
-  (def [s5 p5] (config/run @["(visualize quiet)"] root))
+  (def [s5 p5] (config/run @["visualize quiet"] root))
   (t/is= @{} p5)
   (t/is= [] (s5 :folded))
 
-  (conf "/lib" "(hide os)\n(hide vendor)\n")
-  (def [s11 _] (config/run @["(visualize lib)"] root))
+  (conf "/lib" "hide os\nhide vendor\n")
+  (def [s11 _] (config/run @["visualize lib"] root))
   (t/is= ["os" "lib.vendor"] (s11 :hidden)
          "an external keeps its name, a real one takes the prefix")
 
-  (def [_ p5b] (config/run @["(visualize nope)"] root))
+  (def [_ p5b] (config/run @["visualize nope"] root))
   (t/ok (p5b 0) "a name that is no directory is a complaint")
 
-  (def [_ p6] (config/run @[`(visualize "")`] root))
+  (def [_ p6] (config/run @[`visualize ""`] root))
   (t/ok (p6 0) "an empty nested name is a complaint")
 
-  (def [s7 p7] (config/run @["(visualize lib)"]))
+  (def [s7 p7] (config/run @["visualize lib"]))
   (t/is= @{} p7)
   (t/is= [] (s7 :folded)))
 
@@ -441,16 +379,16 @@
   (os/mkdir root)
   (os/mkdir (string root "/a"))
   (os/mkdir (string root "/a/b"))
-  (spit (string root "/a/visualize.conf") "(visualize b)\n")
+  (spit (string root "/a/visualize_config") "visualize b\n")
   (spit (string root "/a/b/leaf.py") "x = 1\n")
-  (spit (string root "/a/b/visualize.conf") "(box leaf)\n(fold leaf)\n")
+  (spit (string root "/a/b/visualize_config") "box leaf\nfold leaf\n")
 
-  (def [state problems] (config/run @["(visualize a)"] root))
+  (def [state problems] (config/run @["visualize a"] root))
   (t/is= @{} problems)
   (t/is= ["a.b.leaf"] (map |($ :prefix) (state :groups)))
   (t/is= ["a.b.leaf"] (state :folded))
 
-  (def [s2 _] (config/run @["(visualize a.b)"] root))
+  (def [s2 _] (config/run @["visualize a.b"] root))
   (t/is= ["a.b.leaf"] (s2 :folded)))
 
 (t/test "a directory may have a dot in its name"
@@ -461,10 +399,10 @@
   (os/mkdir (string root "/my.lib/inner"))
   (spit (string root "/my.lib/thing.py") "x = 1\n")
   (spit (string root "/my.lib/inner/deep.py") "y = 2\n")
-  (spit (string root "/my.lib/visualize.conf") "(box thing)\n(visualize inner)\n")
-  (spit (string root "/my.lib/inner/visualize.conf") "(fold deep)\n")
+  (spit (string root "/my.lib/visualize_config") "box thing\nvisualize inner\n")
+  (spit (string root "/my.lib/inner/visualize_config") "fold deep\n")
 
-  (def [state problems] (config/run @["(visualize my.lib)"] root))
+  (def [state problems] (config/run @["visualize my.lib"] root))
   (t/is= @{} problems)
   (t/is= ["my.lib.thing"] (map |($ :prefix) (state :groups)))
 
@@ -476,33 +414,33 @@
   (os/mkdir root)
   (os/mkdir (string root "/childA"))
   (os/mkdir (string root "/childB"))
-  (spit (string root "/visualize.conf")
-        "(visualize childA) (visualize childB)\n")
-  (spit (string root "/childA/visualize.conf") "(hide ?.)\n")
-  (spit (string root "/childB/visualize.conf") "# nothing hidden\n")
+  (spit (string root "/visualize_config")
+        "visualize childA\nvisualize childB\n")
+  (spit (string root "/childA/visualize_config") "hide ?.\n")
+  (spit (string root "/childB/visualize_config") "# nothing hidden\n")
   (spit (string root "/childA/a.py") "import zzz_libA\n")
   (spit (string root "/childB/b.py") "import zzz_libB\n")
 
   (def [state problems] (config/run (config/read-config
-                                      (string root "/visualize.conf")) root))
+                                      (string root "/visualize_config")) root))
   (t/is= 0 (length problems) "the nested configs ran cleanly")
   (t/ok (some |(string/find "@childA" $) (state :hidden))
         "the hide carries the project that wrote it")
 
-  (spit (string root "/childA/visualize.conf") "(hide ?)\n")
+  (spit (string root "/childA/visualize_config") "hide ?\n")
   (def [state2 _] (config/run (config/read-config
-                                (string root "/visualize.conf")) root))
+                                (string root "/visualize_config")) root))
   (t/ok (some |(string/find "@childA" $) (state2 :hidden))
         "written without the trailing dot, it is still scoped"))
 
 (t/test "pane placements round trip without replacing other metadata"
   (def positions {"config" ["bottom" 0] "harness" ["top" 1] "3" ["floating" 240 180]})
-  (def lines ["(lines)" "@visualize terminal 3 socket /tmp/x.sock" "@visualize label 3 work"
+  (def lines ["lines" "@visualize terminal 3 socket /tmp/x.sock" "@visualize label 3 work"
               "@visualize placement old top 0"])
   (def saved (config/remember-placements lines positions))
   (t/is= positions (config/placements saved))
   (t/is= saved (config/remember-placements saved positions))
-  (t/ok (some |(= $ "(lines)") saved))
+  (t/ok (some |(= $ "lines") saved))
   (t/ok (some |(string/find "terminal 3 socket" $) saved))
   (t/is= "work" (get (config/labels saved) "3"))
   (t/is= @{} (config/placements ["@visualize placement a top nope"
@@ -511,7 +449,7 @@
 
 (t/test "a label is what a pane has been called by hand"
 
-  (def lines ["(lines)"
+  (def lines ["lines"
               "@visualize terminal 3 socket /tmp/x.sock"
               "@visualize label 3 the failing test"])
   (t/is= "the failing test" (get (config/labels lines) "3"))
@@ -529,3 +467,64 @@
   (t/is= 1 (length (filter |(string/find "label" $) renamed))
          "one label line, not two")
   (t/is= "prod logs" (get (config/labels renamed) "3")))
+
+(t/test "terminal records migrate all saved state onto one line"
+  (def old ["box src" "" "" "fold src" "" ""
+            "@visualize placement harness bottom 2 640 480"
+            "@visualize label harness work placement socket \"quoted\""
+            "@visualize terminal harness socket /tmp/h.sock"
+            "@visualize markdown {\"harness\":\"/tmp/my project/notes.md\"}"
+            "@visualize terminal other socket /tmp/o.sock"
+            "@visualize placement other floating -10 80 320 200"
+            "@visualize future setting"])
+  (def expected ["box src" "" "fold src" ""
+                "@visualize terminal harness socket /tmp/h.sock placement bottom 2 640 480 label \"work placement socket \\\"quoted\\\"\" document \"/tmp/my project/notes.md\""
+                "@visualize terminal other socket /tmp/o.sock placement floating -10 80 320 200"
+                "@visualize future setting"])
+  (def file (string "/tmp/vz-record-migration-" (os/getpid)))
+  (spit file (string (string/join old "\n") "\n"))
+  (defer (os/rm file)
+    (t/is= expected (config/read-config file))
+    (t/is= (string (string/join expected "\n") "\n") (string (slurp file)))
+    (t/is= expected (config/read-config file))
+    (t/is= (config/terminals old) (config/terminals expected))
+    (t/is= (config/placements old) (config/placements expected))
+    (t/is= (config/labels old) (config/labels expected))
+    (t/is= (config/markdown old) (config/markdown expected))))
+
+(t/test "terminal fields update independently and round trip quoted values"
+  (def socket "/tmp/my project/\"shell\"\\terminal.sock")
+  (def document "/tmp/my project/notes #1.md")
+  (def label "socket placement document\n\"title\"")
+  (var lines (config/remember-terminals ["lines"] [["1" socket]]))
+  (set lines (config/remember-labels lines {"1" label}))
+  (set lines (config/remember-placements lines {"1" ["top" 0 800 450]}))
+  (set lines (config/remember-markdown lines {"1" document}))
+  (t/is= 2 (length lines))
+  (t/is= [["1" socket]] (config/terminals lines))
+  (t/is= {"1" label} (config/labels lines))
+  (t/is= {"1" document} (config/markdown lines))
+  (t/is= {"1" ["top" 0 800 450]} (config/placements lines))
+  (t/is= lines (config/tidy-lines lines))
+  (set lines (config/remember-terminals lines [["1" "/tmp/new.sock"]]))
+  (t/is= {"1" label} (config/labels lines))
+  (t/is= {"1" document} (config/markdown lines))
+  (t/is= {"1" ["top" 0 800 450]} (config/placements lines))
+  (set lines (config/remember-markdown lines @{}))
+  (set lines (config/remember-labels lines @{}))
+  (set lines (config/remember-placements lines @{}))
+  (t/is= ["lines" "@visualize terminal 1 socket /tmp/new.sock"] lines)
+  (t/is= ["lines"] (config/remember-terminals lines [])))
+
+(t/test "saving pane metadata never introduces command spacing"
+  (var lines ["box src.graphviz"])
+  (for i 0 10
+    (set lines (config/remember-terminals lines [["1" "/tmp/a.sock"]]))
+    (set lines (config/remember-labels lines {"1" "work"}))
+    (set lines (config/remember-placements lines {"1" ["bottom" 0 600 400]}))
+    (set lines (config/remember-markdown lines {"1" "/tmp/notes.md"})))
+  (set lines (config/tidy-lines (array ;lines "fold src.graphviz")))
+  (t/is= "fold src.graphviz" (last lines))
+  (t/is= ["box src.graphviz" "fold src.graphviz"] (filter |(not (config/note? $)) lines))
+  (t/is= 3 (length lines))
+  (t/is= ["box a" "" "fold a"] (config/tidy-lines ["" "box a" "" " " "" "fold a" "" ""])))

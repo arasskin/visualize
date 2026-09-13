@@ -19,9 +19,9 @@
 <div id="compose" class="shut">
 
   <div id="compose-box">
-    <span class="paren">(</span><textarea id="compose-input" rows="1"
+    <textarea id="compose-input" rows="1"
       spellcheck="false" autocomplete="off" autocapitalize="off"
-      aria-label="add a config line"></textarea><span class="paren">)</span>
+      aria-label="add a config line"></textarea>
   </div>
 
   <ul id="compose-list" role="listbox" aria-label="completions"></ul>
@@ -66,10 +66,7 @@
           role="textbox" aria-label="note for this tab"></span>
     <button class="tab-close" type="button" title="close configuration" aria-label="Close configuration">×</button>
   </div>
-  <div id="body" class="panel-body">
-    <div id="lines"></div>
-    <div id="problems"></div>
-  </div>
+  <div id="body" class="panel-body"></div>
   <div id="grip" class="grip" title="drag to resize"></div>
 </div>
 <script>

@@ -122,18 +122,6 @@
   (t/is= "b" (get-in by-name ["a.b" :label]) "the label is left alone")
   (t/is= "a.b" (get-in by-name ["a.b" :name]) "and so is the name"))
 
-(t/test "a prefix shortens the labels it covers"
-  (def aliases [{:alias "~" :prefix "src.server"}])
-  (t/is= "~.color" (select/alias-label aliases "src.server.color"))
-  (t/is= "~" (select/alias-label aliases "src.server") "the path itself")
-  (t/is= nil (select/alias-label aliases "src.test") "an unrelated node")
-
-  (t/is= nil (select/alias-label aliases "src.serverr.x"))
-
-  (def two [{:alias "~~" :prefix "src.server"} {:alias "~" :prefix "src"}])
-  (t/is= "~~.color" (select/alias-label two "src.server.color"))
-  (t/is= "~.test" (select/alias-label two "src.test")))
-
 (t/test "fold turns a region into one node"
   (def graph
     {:nodes [{:name "p.go" :label "go" :ours true}

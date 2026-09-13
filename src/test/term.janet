@@ -448,17 +448,6 @@
   (check/is= 50 (get-in replacement ["screen" "cols"]))
   (stop))
 
-(check/test "supervisor enforces Computer ownership after manual replacement"
-  (:start-once client ["/bin/cat"] (os/cwd) 24 80 nil "computer")
-  (check/is= "computer" (get (:request client {"op" "state"}) "owner"))
-  (def replacement (start ["/bin/cat"] (os/cwd) 24 80))
-  (check/is= nil (get (:request client {"op" "state"}) "owner"))
-  (check/ok (try
-    (do (:request client {"op" "shutdown" "owner" "computer" "generation" (replacement :generation)}) false)
-    ([_] true)))
-  (check/ok ((state) :running) "a denied cleanup leaves the user session running")
-  (stop))
-
 (check/test "shutdown ends the supervisor and takes the socket with it"
 
   (start ["/bin/sh" "-c" "sleep 30"] (os/cwd) 24 80)

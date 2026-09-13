@@ -1,3 +1,4 @@
+import { configCompletions } from './config-completion.js';
 import './file-command.js';
 import { refreshSession } from './transport.js';
 import { pane, wire as wireGraph, paint, repaint, fit, fitSoon, isTouched, hatchFolded } from './graph.js';
@@ -9,7 +10,7 @@ import { moduleNames, hideEdge, wireEdges, keepEdgeLabel } from './hover.js';
 import {
   configPanel, makeConfigPanel, rail, EDGES,
   selectPane, pickedPanel, revealTab, openTerminal, resnap,
-  startRail, syncAgentPanes, wire as wirePanes,
+  startRail, syncPanes, wire as wirePanes,
 } from './panes.js';
 
 wireGraph({ onRepaint: () => placeArrow(), onNavigate: hideEdge });
@@ -26,6 +27,9 @@ window.addEventListener('resize', () => {
 });
 
 let sourceGeneration = Number.isInteger(window.GRAPH_GENERATION) ? window.GRAPH_GENERATION : -1;
+let pageLeaving = false;
+window.addEventListener('pagehide', () => { pageLeaving = true; });
+window.addEventListener('pageshow', () => { pageLeaving = false; });
 
 async function watchSource() {
   for (;;) {
@@ -61,223 +65,27 @@ const panel = document.getElementById('config');
 const bar = document.getElementById('bar');
 const body = document.getElementById('body');
 const grip = document.getElementById('grip');
-const rows = document.getElementById('lines');
-const problems = document.getElementById('problems');
-
 let lines = [];
-let configFile = null;
-
-let faults = {};
 let busy = false;
-
-let picked = -1;
-
-function icon(glyph, title, cls) {
-  const b = document.createElement('button');
-  b.textContent = glyph;
-  b.title = title;
-  b.className = cls;
-  b.disabled = busy;
-  return b;
-}
-
-function uncomment(text) {
-  const at = text.indexOf('#');
-  const head = text.slice(0, at);
-  let rest = text.slice(at + 1);
-
-  if (rest.startsWith(' ') && !rest.startsWith('  ')) rest = rest.slice(1);
-  else if (rest.startsWith('\t')) rest = rest.slice(1);
-  return head + rest;
-}
-
-function toggleComment(at) {
-  const text = lines[at];
-  if (text === undefined) return;
-  lines[at] = text.trim().startsWith('#') ? uncomment(text) : '#' + text;
-  send('run', at);
-}
-
-function draw() {
-
-  if (picked >= lines.length) picked = lines.length - 1;
-  if (!lines.length) picked = -1;
-  rows.replaceChildren();
-  lines.forEach((text, i) => {
-    const row = document.createElement('div');
-    const commented = text.trim().startsWith('#');
-    row.className = 'row' + (commented ? ' comment' : '')
-                          + (i === picked ? ' picked' : '');
-
-    const hold = document.createElement('span');
-    hold.className = 'hold';
-    hold.textContent = '⋮⋮';
-    hold.title = 'drag to reorder  (alt+h and alt+l carry the selected line)';
-
-    const box = document.createElement('input');
-    box.value = text;
-    box.spellcheck = false;
-    box.disabled = busy;
-
-    box.oninput = () => { lines[i] = box.value; };
-
-    box.addEventListener('beforeinput', (e) => {
-      if (altDown) e.preventDefault();
-    });
-
-    box.onfocus = () => { pick(i, false); };
-    box.onkeydown = (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); send('run', i); }
-    };
-
-    const up = icon('↑', `insert a line above  (alt+N on the selected line)`, 'up');
-    up.onclick = () => send('insert-above', i);
-    const down = icon('↓', `insert a line below  (alt+n on the selected line)`, 'down');
-    down.onclick = () => send('insert-below', i);
-    const hash = icon('#',
-      (commented ? 'uncomment this line' : 'comment this line out')
-        + '  (alt+c on the selected line)', 'hash');
-    hash.onclick = () => toggleComment(i);
-    const del = icon('✕', 'delete this line  (alt+d on the selected line)', 'del');
-    del.onclick = () => send('delete', i);
-
-    row.append(box, up, down, hash, del, hold);
-
-    const slot = document.createElement('div');
-    slot.className = 'slot';
-    slot.appendChild(row);
-    slot.dataset.at = i;
-    if (!busy) hold.onpointerdown = (e) => lift(e, i, slot);
-
-    if (faults[i]) {
-      row.classList.add('bad');
-      const why = document.createElement('div');
-      why.className = 'why';
-      why.textContent = faults[i];
-      slot.appendChild(why);
-    }
-    rows.appendChild(slot);
-  });
-
-}
-
-function lift(down, at, slot) {
-  if (busy) return;
-  down.preventDefault();
-
-  const box = slot.getBoundingClientRect();
-  const grabbedAt = down.clientY - box.top;
-
-  const ghost = slot.cloneNode(true);
-  ghost.className = 'slot ghost';
-  ghost.style.width = box.width + 'px';
-  ghost.style.left = box.left + 'px';
-  ghost.style.top = box.top + 'px';
-  document.body.appendChild(ghost);
-
-  slot.classList.add('gap');
-  slot.style.height = box.height + 'px';
-
-  const others = [...rows.querySelectorAll('.slot')].filter(s => s !== slot);
-  others.forEach(s => s.classList.add('sliding'));
-  document.body.classList.add('carrying');
-  let to = at;
-
-  const anchors = others.map(s => {
-    const r = s.getBoundingClientRect();
-    return { at: Number(s.dataset.at), middle: r.top + r.height / 2 };
-  });
-  const height = box.height;
-
-  const follow = (m) => {
-    ghost.style.top = (m.clientY - grabbedAt) + 'px';
-
-    const over = anchors.find(a => m.clientY < a.middle);
-    to = over ? (over.at > at ? over.at - 1 : over.at) : lines.length - 1;
-    to = Math.max(0, Math.min(lines.length - 1, to));
-
-    for (const s of others) {
-      const j = Number(s.dataset.at);
-      const shifted = (j > at && j <= to) ? -height
-                    : (j < at && j >= to) ? height : 0;
-      s.style.transform = shifted ? `translateY(${shifted}px)` : '';
-    }
-  };
-
-  const drop = () => {
-    removeEventListener('pointermove', follow);
-    removeEventListener('pointerup', drop);
-    removeEventListener('pointercancel', drop);
-    document.body.classList.remove('carrying');
-
-    const rest = slot.getBoundingClientRect();
-    ghost.classList.add('landing');
-    ghost.style.top = (rest.top + (to - at) * height) + 'px';
-    ghost.style.left = rest.left + 'px';
-    let settled = false;
-    const finish = () => {
-
-      if (settled) return;
-      settled = true;
-      ghost.remove();
-      slot.classList.remove('gap');
-      slot.style.height = '';
-      others.forEach(s => { s.classList.remove('sliding'); s.style.transform = ''; });
-      if (to !== at) move(at, to);
-      else draw();
-    };
-    ghost.addEventListener('transitionend', finish, { once: true });
-
-    setTimeout(finish, 200);
-  };
-
-  addEventListener('pointermove', follow);
-  addEventListener('pointerup', drop);
-  addEventListener('pointercancel', drop);
-}
-
-function move(at, to) {
-  const moved = lines.slice();
-  moved.splice(to, 0, moved.splice(at, 1)[0]);
-  lines = moved;
-
-  picked = afterMove(picked, at, to);
-
-  send('reorder', -1);
-}
-
-function afterMove(i, at, to) {
-  if (i < 0) return i;
-  if (i === at) return to;
-  if (at < i && i <= to) return i - 1;
-  if (to <= i && i < at) return i + 1;
-  return i;
-}
 
 async function send(action, index, keepView) {
   if (busy) return;
   busy = true;
-  draw();
 
   try {
 
     const r = await fetch(`/config?k=${encodeURIComponent(window.TOKEN)}`, {
       method: 'POST',
 
-      body: JSON.stringify({ action, index, lines, file: configFile, draw: !!keepView }),
+      body: JSON.stringify({ action, index, draw: !!keepView }),
     });
     const out = await r.json();
 
     if (!out.lines) {
-      problems.textContent = out.error || 'request failed';
+      throw new Error(out.error || 'Unable to redraw graph');
     } else {
       lines = out.lines;
 
-      faults = {};
-      for (const [at, why] of Object.entries(out.problems || {})) {
-        faults[Number(at)] = why;
-      }
-      problems.textContent = out.error || '';
       if (out.svg) {
 
         hideEdge();
@@ -301,10 +109,9 @@ async function send(action, index, keepView) {
     }
     return out;
   } catch (e) {
-    problems.textContent = e.message;
+    if (!pageLeaving && e.name !== 'AbortError') console.error('Graph redraw failed', e);
   } finally {
     busy = false;
-    draw();
   }
 }
 
@@ -376,90 +183,18 @@ function composing() { return !compose.classList.contains('shut'); }
 
 const composeList = document.getElementById('compose-list');
 
-function prefixesOf(name) {
-  const parts = name.split('.');
-  const out = [];
-  for (let i = 1; i <= parts.length; i++) out.push(parts.slice(0, i).join('.'));
-  return out;
+function completionResult() {
+  const prefixes = [...pane.querySelectorAll('svg g.node > title')].map(title => title.textContent);
+  return configCompletions(composeInput.value, composeInput.selectionStart ?? composeInput.value.length,
+    {docs: window.CONFIG_DOCS, colours: window.CONFIG_COLOURS, prefixes});
 }
 
-function bindings() {
-  const out = [];
-  for (const line of lines) {
-
-    for (const form of (line || '').match(/\([^)]*\)/g) || []) {
-      const m = /^\(\s*prefix\s+(\S+)\s+(\S+?)\s*\)$/.exec(form);
-      if (m) out.push([m[1], m[2]]);
-    }
-  }
-  return out;
-}
-
+function wordAtCaret() { return completionResult(); }
+function completions() { return completionResult().items; }
 function prefixCandidates() {
-  const svg = pane.querySelector('svg');
-  const names = [];
-  if (svg) {
-    for (const node of svg.querySelectorAll('g.node')) {
-      const title = node.querySelector('title');
-      if (title) names.push(title.textContent.trim());
-    }
-  }
-  const seen = new Set();
-  for (const name of names) for (const p of prefixesOf(name)) seen.add(p);
-
-  for (const [alias, stands] of bindings()) {
-    seen.add(alias);
-    for (const p of seen.size ? [...seen] : []) {
-      if (p === stands) continue;
-      if (p.startsWith(stands + '.')) seen.add(alias + p.slice(stands.length));
-    }
-  }
-  return [...seen];
-}
-
-function rank(candidates, typed) {
-  const q = typed.toLowerCase();
-  const hits = [];
-  for (const c of candidates) {
-    const at = c.toLowerCase().indexOf(q);
-    if (at < 0) continue;
-    hits.push({ text: c, at, len: c.length });
-  }
-  hits.sort((a, b) => (a.at - b.at) || (a.len - b.len) || a.text.localeCompare(b.text));
-  return hits.map(h => h.text);
-}
-
-function wordAtCaret() {
-  const text = composeInput.value;
-  const caret = composeInput.selectionStart ?? text.length;
-  const before = text.slice(0, caret);
-  const start = before.lastIndexOf(' ') + 1;
-
-  const slot = before.slice(0, start).split(/\s+/).filter(Boolean).length;
-  return { word: before.slice(start), start, end: caret, slot };
-}
-
-function poolFor(slot) {
-  const text = composeInput.value;
-  const verb = text.trimStart().split(/\s+/)[0] || '';
-  if (slot === 0) return (window.CONFIG_DOCS || []).map(d => d.name);
-
-  const spec = (window.CONFIG_DOCS || []).find(d => d.name === verb);
-  if (!spec) return [];
-
-  const kind = (spec.args || [])[slot - 1];
-  if (!kind) return [];
-  switch (kind.replace(/\?$/, '')) {
-    case 'color': return window.CONFIG_COLOURS || [];
-
-    case 'name': return prefixCandidates();
-    default: return [];
-  }
-}
-
-function completions() {
-  const { word, slot } = wordAtCaret();
-  return rank(poolFor(slot), word);
+  const prefixes = [...pane.querySelectorAll('svg g.node > title')].map(title => title.textContent);
+  return configCompletions('fold ', 5,
+    {docs: window.CONFIG_DOCS, prefixes}).items;
 }
 
 function composeTarget() { return null; }
@@ -659,45 +394,21 @@ function shutCompose() {
   if (back && back.root && back.root.isConnected) selectPane(back.root);
 }
 
-async function checkLines(candidate, at) {
-  try {
-    const r = await fetch(`/config?k=${encodeURIComponent(window.TOKEN)}`, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'check', index: -1, lines: candidate }),
-    });
-    const out = await r.json();
-    return (out.problems || {})[String(at)] || '';
-  } catch (_) {
-
-    return '';
-  }
-}
-
 async function commitCompose() {
-
-  const text = composeInput.value.trim();
-  if (!text) { shutCompose(); return; }
+  const command = composeInput.value.trim();
+  if (!command) { shutCompose(); return; }
   if (busy) return;
-
-  const call = `(${text})`;
-  const at = picked >= 0 && picked < lines.length ? picked : lines.length;
-  const base = (lines[at] ?? '').trim();
-  const merged = base ? `${base} ${call}` : call;
-  const candidate = lines.slice(0, at).concat([merged], lines.slice(at + 1));
-
-  composeFault.textContent = '';
-  const why = await checkLines(candidate, at);
-  if (why) {
-    composeFault.textContent = why;
-    composeInput.focus();
-    composeInput.setSelectionRange(text.length, text.length);
-    return;
-  }
-
-  lines = candidate;
-  picked = at;
-  await send('run', -1);
-  shutCompose();
+  busy = true;
+  try {
+    const response = await fetch('/config?k=' + encodeURIComponent(window.TOKEN), {
+      method: 'POST', body: JSON.stringify({action: 'append', command}),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.lines) throw new Error(result.error || 'Unable to add command');
+    lines = result.lines;
+    shutCompose();
+  } catch (error) { composeFault.textContent = error.message; }
+  finally { busy = false; }
 }
 
 compose.addEventListener('mousemove', () => compose.classList.add('mousing'));
@@ -793,74 +504,14 @@ let altPeeked = null;
 
 const ALT_HOLD_MS = 400;
 
-function pick(at, focus = true) {
-  if (!lines.length) { picked = -1; return; }
-
-  picked = ((at % lines.length) + lines.length) % lines.length;
-  const slots = [...rows.children];
-  slots.forEach((slot, i) => {
-    slot.querySelector('.row')?.classList.toggle('picked', i === picked);
-  });
-  const box = slots[picked]?.querySelector('input');
-  if (box) {
-
-    box.scrollIntoView({ block: 'nearest' });
-    if (focus) box.focus();
-  }
-}
-
 function altChord(e) {
-
-  const down = e.code === 'KeyJ' || e.code === 'ArrowDown';
-  const up = e.code === 'KeyK' || e.code === 'ArrowUp';
-  const del = e.code === 'KeyD';
-  const comment = e.code === 'KeyC';
-
   const walkLeft = e.code === 'KeyH' || e.code === 'ArrowLeft';
   const walkRight = e.code === 'KeyL' || e.code === 'ArrowRight';
-
-  const fresh = e.code === 'KeyN';
-
   const newTab = e.code === 'Enter' || e.code === 'NumpadEnter';
-  if (!down && !up && !del && !comment && !fresh && !walkLeft && !walkRight
-      && !newTab) {
-    return false;
-  }
+  if (!walkLeft && !walkRight && !newTab) return false;
   e.preventDefault();
-
-  if (newTab) {
-    openTerminal('top');
-    return true;
-  }
-
-  if (walkLeft || walkRight) {
-    altWalk(walkRight ? 1 : -1);
-    return true;
-  }
-
-  const nothingPicked = picked < 0 || picked >= lines.length;
-
-  if (configPanel.shut) configPanel.open();
-
-  if (down || up) {
-    pick(picked < 0 ? (down ? 0 : -1) : picked + (down ? 1 : -1));
-    return true;
-  }
-
-  if (busy) return true;
-
-  if (fresh) {
-
-    const at = nothingPicked ? lines.length : picked + (e.shiftKey ? 0 : 1);
-    lines = lines.slice(0, at).concat([''], lines.slice(at));
-    picked = at;
-    send('run', at);
-    return true;
-  }
-
-  if (nothingPicked) return true;
-  if (del) send('delete', picked);
-  else toggleComment(picked);
+  if (newTab) openTerminal('top');
+  else altWalk(walkRight ? 1 : -1);
   return true;
 }
 
@@ -976,13 +627,12 @@ window.addEventListener('blur', () => {
 
 makeConfigPanel(panel, () => {
 
-  const boxes = body.querySelectorAll('input');
-  (boxes[picked >= 0 ? picked : 0])?.focus();
+  body.querySelector('.config-command input')?.focus({preventScroll: true});
 });
 
 const configPaneSaved = !!(window.PANE_POSITIONS && window.PANE_POSITIONS.config);
 if (window.START_EMPTY || configPaneSaved) configPanel.showDocument?.(window.CONFIG_FILE);
-else configPanel.root.remove();
+else { configPanel.dispose(); configPanel.root.remove(); }
 
 wirePanes({
   refitCompose: () => refitCompose(),
@@ -1005,7 +655,7 @@ watchSource();
         throw new Error('pane watch failed');
       }
       const out = await response.json();
-      syncAgentPanes(out.ids, out.labels, out.documents, out.harnessRequest);
+      syncPanes(out.ids, out.labels, out.documents);
       generation = out.generation;
     } catch (_) { await new Promise(resolve => setTimeout(resolve, 2000)); }
   }

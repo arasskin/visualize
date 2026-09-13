@@ -21,14 +21,16 @@ The report groups durations in milliseconds with counts, total, median, p95, and
 - `raf-wait`: scheduling a paint to entering its animation-frame callback.
 - `wheel-handler`, `pan-handler`: navigation handler execution.
 - `geometry-rebuild`: compiling SVG geometry and file-label hit boxes.
-- `raster`: drawing a cache surface, with reason, pixel count, and item counts. Reasons distinguish overview creation, missing detail, changed revision, changed scale/viewport, and panning outside cached bounds.
+- `raster`: drawing a missing tile, with `reason: "tile"`, tile column/row, pixel density, pixel count, and item counts.
 - `canvas-composite`: clearing the display canvas and submitting cached images.
 - `overlays`: selection, hover, arrow, and fresh-node drawing.
 - `selection-compile`, `repaint-hook`: SVG arrow measurements and repaint callbacks.
 - `file-hit`, `edge-hit`: pointer hit testing.
 - `search-match`, `search-suggestions`: search processing.
-- `canvas-render`, `graph-repaint`: enclosing render durations, with scale and navigation state.
+- `canvas-render`, `graph-repaint`: enclosing render durations, with scale and navigation state. `canvas-render` also records the number of tiles rebuilt, cached, and visible.
 - `long-task`: browser-reported main-thread tasks over 50 ms, when supported. Firefox may not expose this entry type.
+
+The main graph caches 512×512 device-pixel tiles at the current zoom resolution. Missing visible tiles render during navigation; there is no lower-resolution overview fallback. Cached pans only composite images, with translation snapped to device pixels. Two extra pixels around each tile preserve antialiasing at the edges; only the interior is composited, so translucent shapes do not overlap. An LRU cache retains up to 96 tiles (about 98 MiB of RGBA pixels). Zoom or pixel-density changes, geometry rebuilds, font changes, and theme changes invalidate tiles. Viewport resizing retains tiles when pixel density stays the same. Hover, selection, and search arrows remain separate overlays.
 
 These measure JavaScript work and canvas command submission, not GPU completion or physical screen presentation. Browser performance traces are needed if the visual hitch occurs without a corresponding delay here.
 

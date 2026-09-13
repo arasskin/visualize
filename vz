@@ -1,4 +1,4 @@
 #!/bin/sh
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
-exec "$here/external-src/janet/janet" "$here/src.mcp/cli.janet" "$@"
+exec "$here/external-src/janet/janet" "$here/src.server/cli.janet" "$@"

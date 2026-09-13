@@ -3,36 +3,33 @@
 set -e
 
 here=$(cd "$(dirname "$0")" && pwd)
-# Invocation is used to declare the main harness opened on every launch with the following options:
-#   disable native subagents
-#   inject Visualize instructions
-#   connect to visualize's MCP
-# Default harness is used to declare what harness will be invoked when the main agent tries to create a subagent through the visualize mcp
 
-# For Codex:
-invocation='exec codex \
-  -c agents.enabled=false \
-  -c "developer_instructions=$VISUALIZE_AGENT_JSON" \
-  -c "mcp_servers.visualize={command=$VISUALIZE_MCP_COMMAND_JSON,args=[$VISUALIZE_SOCKET_JSON],required=true}"'
-default_harness=codex
+startup_prompt='You are running inside Visualize, a program that parses files and directories into dependency graphs.
+
+When asked to build a plan, create or update a .visualize file in the project. A line starting in column 1 defines a node; indented lines below it list the nodes it depends on. Use one identifier per line, with letters, digits, underscores, hyphens, or dots. Use underscores instead of spaces in names; Visualize displays them as spaces. Indentation lists dependencies of the last unindented node, not nested levels.
+
+Reference an existing file by writing its exact, case-sensitive path on a dependency line: README.md refers to a file at the project root, and src/search.py refers to a file inside src. Paths are relative to the project root, even when the .visualize file is in a subdirectory. A matching file becomes the dependency; an unmatched reference stays a plan node. An explicitly defined plan node with the same name takes precedence over a file.
+
+Example plan.visualize:
+Ship_search
+    Implement_search
+    Test_search
+    README.md
+Implement_search
+    src/search.py
+Test_search
+    Implement_search
+    tests/test_search.py
+
+Here Ship_search depends on implementation, tests, and README.md; Test_search also depends on Implement_search. The file paths link directly to those files when present in the project.'
+export VISUALIZE_STARTUP_PROMPT="$startup_prompt"
+
+# Main harness on a fresh start or when running vz without arguments.
+# Harnesses use their own agent tools and settings.
+invocation='exec codex -c "developer_instructions=$VISUALIZE_STARTUP_PROMPT_JSON"'
+# For Claude Code: invocation='exec claude --append-system-prompt "$VISUALIZE_STARTUP_PROMPT"'
 export VISUALIZE_MAIN_HARNESS_COMMAND="$invocation"
-
-# Injected harness instructions:
-# You are working in Visualize, a visual harness.
-# Use the Visualize MCP to orchestrate subagents when necessary.
-# When given a list of features, prefer working in parallel worktrees with separate pull requests, merging them at the end.
-agent_instructions='You are working in Visualize, a visual harness.
-Use the Visualize MCP to orchestrate subagents when necessary.
-When given a list of features, prefer working in parallel worktrees with separate pull requests, merging them at the end.'
-export VISUALIZE_AGENT_INSTRUCTIONS="$agent_instructions"
-
-# For Claude:
-# invocation='exec claude \
-#   --disallowedTools "Agent" \
-#   --append-system-prompt "$VISUALIZE_AGENT_INSTRUCTIONS" \
-#   --mcp-config "{\"mcpServers\":{\"visualize\":{\"type\":\"stdio\",\"command\":$VISUALIZE_MCP_COMMAND_JSON,\"args\":[$VISUALIZE_SOCKET_JSON]}}}"'
-# default_harness=claude
 
 "$here/build"
 
-exec "$here/external-src/janet/janet" "$here/src.server/core.janet" --command "$invocation" --default-harness "$default_harness" "$@"
+exec "$here/external-src/janet/janet" "$here/src.server/core.janet" --command "$invocation" "$@"

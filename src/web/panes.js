@@ -118,9 +118,15 @@ export function makePanel(root, options = {}) {
   const panel = {
     root, bar, body, grip,
     place,
+    get size() {
+      const box = root.getBoundingClientRect();
+      const height = root.style.height || options.height || '22rem';
+      const unit = height.endsWith('rem') ? parseFloat(getComputedStyle(document.documentElement).fontSize) : 1;
+      return [box.width, panel.shut ? Math.max(options.minHeight || 120, parseFloat(height) * unit) : box.height];
+    },
     get shut() { return root.classList.contains('shut'); },
-    open() { if (panel.shut) bar.click(); },
-    toggle() { bar.click(); },
+    open() { if (root.isConnected && panel.shut) bar.click(); },
+    toggle() { if (root.isConnected) bar.click(); },
 
     resized() {
       const box = root.getBoundingClientRect();
@@ -133,6 +139,9 @@ export function makePanel(root, options = {}) {
     },
   };
   panelsByRoot.set(root, panel);
+  const geometry = new ResizeObserver(() => { packRail(); savePlacementSoon(); });
+  geometry.observe(root);
+  panel.dispose = () => geometry.disconnect();
   const closeButton = bar.querySelector('.tab-close');
   closeButton?.addEventListener('pointerdown', event => event.stopPropagation());
   closeButton?.addEventListener('click', event => {
@@ -189,6 +198,7 @@ export function makePanel(root, options = {}) {
 
     if (e.target.closest && e.target.closest('.label')) return;
     const opening = root.classList.contains('shut');
+    if (!opening) root.style.height = root.getBoundingClientRect().height + 'px';
     root.classList.toggle('shut', !opening);
     if (opening) {
       raise(root);
@@ -200,6 +210,7 @@ export function makePanel(root, options = {}) {
     }
 
     if (onRail(panel)) packRail();
+    savePlacementSoon();
   });
 
   return panel;
@@ -210,11 +221,12 @@ export function raise(root) { root.style.zIndex = ++topmost; }
 
 export let configPanel = null;
 export function makeConfigPanel(root, onOpen) {
+  let reader = null;
   configPanel = makePanel(root, {
-    width: COMPACT_WIDTH, minWidth: 240, minHeight: 120, onOpen,
+    width: COMPACT_WIDTH, minWidth: 240, minHeight: 120,
+    onOpen: panel => { reader?.focus(); onOpen?.(panel); },
     onLabel: (text) => saveLabel('config', text),
   });
-  let reader = null;
   configPanel.showDocument = file => {
     if (configPanel.documentFile === file) return;
     reader?.stop();
@@ -246,6 +258,8 @@ export function makeTerminalPane(root, prefix, launch = {}) {
   const nameLabel = root.querySelector('.name');
   const screen = root.querySelector('.screen');
   let reader = null;
+  let disposed = false;
+  const lifetime = new AbortController();
 
   let following = true;
   let resizing = false;
@@ -257,6 +271,7 @@ export function makeTerminalPane(root, prefix, launch = {}) {
   });
 
   let paintedLines = 0;
+  let paintedRows = 0, paintedCols = 0;
 
   let lastKey = 0;
   if (latency.enabled) screen.addEventListener('keydown', (event) => {
@@ -269,10 +284,12 @@ export function makeTerminalPane(root, prefix, launch = {}) {
     isFollowing: () => following,
     onReady: () => syncSize(),
     onTheme: theme => { if (generation) post('theme', { theme }).catch(() => {}); },
-    onPaint: (lines) => {
+    onPaint: (lines, rows, cols) => {
       const grew = lines !== paintedLines;
       paintedLines = lines;
-      if (grew && following) screen.scrollTop = screen.scrollHeight;
+      paintedRows = rows; paintedCols = cols;
+      if ((grew || resizing) && following) screen.scrollTop = screen.scrollHeight;
+      if (rows === term.rows && cols === term.cols) resizing = false;
     },
 
     onData: (bytes) => { sendInput(bytes); },
@@ -345,7 +362,7 @@ export function makeTerminalPane(root, prefix, launch = {}) {
   }
 
   function startPolling() {
-    if (reader) return;
+    if (reader || disposed || termPanel.shut || !root.isConnected) return;
     if (unsubscribe) return;
     unsubscribe = transport.subscribe(prefix, { at, generation }, receive, setState);
   }
@@ -356,7 +373,7 @@ export function makeTerminalPane(root, prefix, launch = {}) {
   }
 
   function sendInput(text, quiet) {
-    if (!text) return Promise.resolve();
+    if (!text || disposed || reader) return Promise.resolve();
     const queued = latency.enabled ? performance.now() : 0;
     const sent = [];
     for (let offset = 0; offset < text.length;) {
@@ -392,8 +409,8 @@ export function makeTerminalPane(root, prefix, launch = {}) {
   }, { passive: false });
 
   const termPanel = makePanel(root, {
-    minWidth: prefix.startsWith('agent-') ? 240 : 360, minHeight: 200,
-    width: prefix.startsWith('agent-') ? COMPACT_WIDTH : 'min(52rem, 94vw)', height: '24rem',
+    minWidth: 360, minHeight: 200,
+    width: 'min(52rem, 94vw)', height: '24rem',
     onLabel: (text) => saveLabel(prefix, text),
 
     onOpen: async () => {
@@ -402,9 +419,10 @@ export function makeTerminalPane(root, prefix, launch = {}) {
 
       await new Promise(r => setTimeout(r, 50));
 
-      if (termPanel.shut) return;
+      if (disposed || termPanel.shut || reader || !root.isConnected) return;
 
-      await termPanel.boot();
+      if (!await termPanel.boot()) return;
+      if (disposed || termPanel.shut || reader || !root.isConnected) return;
       syncSize();
       startPolling();
 
@@ -418,7 +436,7 @@ export function makeTerminalPane(root, prefix, launch = {}) {
   let sizing = null;
   let remoteSize = null;
   function syncSize() {
-    if (reader) return;
+    if (reader || disposed || !generation) return;
     const revision = ++sizeRevision;
     resizing = true;
     clearTimeout(sizing);
@@ -430,37 +448,44 @@ export function makeTerminalPane(root, prefix, launch = {}) {
       term.resize(size.rows, size.cols);
       if (!remoteSize || size.rows !== remoteSize.rows || size.cols !== remoteSize.cols) {
         post('resize', size).then(() => { remoteSize = size; }).catch(error => {
-          reportError(error, { pane: prefix, phase: 'resize-delivery', ...size });
+          if (!error.reconnect) reportError(error, { pane: prefix, phase: 'resize-delivery', ...size });
           if (revision === sizeRevision && !termPanel.shut && root.isConnected) {
             sizing = setTimeout(syncSize, 300);
           }
         });
       }
-      requestAnimationFrame(() => { if (revision === sizeRevision) resizing = false; });
+      requestAnimationFrame(() => {
+        if (revision === sizeRevision && paintedRows === size.rows && paintedCols === size.cols) resizing = false;
+      });
     }, 150);
   }
 
-  window.addEventListener('resize', () => { if (!termPanel.shut) syncSize(); });
+  window.addEventListener('resize', () => { if (!termPanel.shut) syncSize(); }, {signal: lifetime.signal});
 
   for (const signal of ['visibilitychange', 'focus', 'online']) {
-    window.addEventListener(signal, () => {
+    (signal === 'visibilitychange' ? document : window).addEventListener(signal, () => {
       if (document.hidden || termPanel.shut || generation === 0) return;
       startPolling();
-    });
+    }, {signal: lifetime.signal});
   }
 
   termPanel.type = (text) => { if (text) sendInput(text); };
 
   let booting = null;
+  let bootRetry = null;
   termPanel.boot = () => {
-    if (reader) return Promise.resolve();
-    if (generation) return Promise.resolve();
+    if (reader || disposed) return Promise.resolve(false);
+    if (generation) return Promise.resolve(true);
     if (booting) return booting;
+    clearTimeout(bootRetry);
     booting = (async () => {
+      let starting = false;
       try {
         const now = await post('screen', { at: 0, generation: 0 });
+        if (reader || disposed) return;
         if (now.generation) {
           await post('theme', { theme: term.theme });
+          if (reader || disposed) return;
           generation = now.generation;
           setName(now.argv);
           setProgram(now.program);
@@ -471,21 +496,34 @@ export function makeTerminalPane(root, prefix, launch = {}) {
         } else {
           if (launch?.recover) { setState(now.absent ? 'exited' : 'reconnecting...'); return; }
           if (now.reachable === false && !now.absent) throw new Error('supervisor unreachable');
+          starting = true;
           const out = await post('start', { rows: 24, cols: 80, theme: term.theme, ...launch });
           generation = out.generation;
           at = 0;
           setName(out.argv);
         }
         if (!termPanel.shut) startPolling();
-      } catch (error) { reportError(error, { pane: prefix, phase: 'boot' }); setState(error.message); }
+        return true;
+      } catch (error) {
+        if (disposed || reader) return false;
+        if (error.reconnect && !starting) {
+          setState('reconnecting...');
+          bootRetry = setTimeout(async () => { if (await termPanel.boot()) syncSize(); }, 500);
+        } else {
+          reportError(error, { pane: prefix, phase: 'boot' }); setState(error.message);
+        }
+        return false;
+      }
     })().finally(() => { booting = null; });
     return booting;
   };
 
   termPanel.showDocument = file => {
-    if (termPanel.documentFile === file) return;
+    if (disposed || termPanel.documentFile === file) return;
+    lifetime.abort();
     stopPolling();
     clearTimeout(sizing);
+    clearTimeout(bootRetry);
     reader?.stop();
     termPanel.documentFile = file;
     root.classList.add('document-pane');
@@ -497,12 +535,21 @@ export function makeTerminalPane(root, prefix, launch = {}) {
     if (!termPanel.shut && root.classList.contains('picked')) reader.focus();
   };
   termPanel.showMarkdown = termPanel.showDocument;
-  termPanel.detach = () => { stopPolling(); reader?.stop(); };
-  termPanel.stop = async () => {
+  termPanel.detach = () => {
+    if (disposed) return;
+    disposed = true;
+    lifetime.abort();
+    clearTimeout(sizing);
+    clearTimeout(bootRetry);
     stopPolling();
     reader?.stop();
-    try { await post('stop', {}); } catch (e) {                              }
-    try { await post('shutdown', {}); } catch (e) {                }
+    term.destroy();
+  };
+  termPanel.stop = async () => {
+    termPanel.detach();
+    await booting;
+    try { await post('shutdown', {}); }
+    catch (error) { reportError(error, {pane: prefix, phase: 'close'}); }
   };
 
   termPanel.setLabel((window.PANE_LABELS || {})[prefix] || '');
@@ -632,15 +679,24 @@ function removeFromRail(panel) {
   packRail();
 }
 
+const closingPanes = new Map();
+
 function closePanel(panel, remote = false) {
+  if (!panel.root.isConnected) return;
   removeFromRail(panel);
   const at = extraPanes.indexOf(panel);
   if (at >= 0) extraPanes.splice(at, 1);
 
-  if (panel.root.classList.contains('picked')) selectPane(configPanel.root);
+  if (panel.root.classList.contains('picked')) selectPane([...panelsByRoot.values()]
+    .find(other => other !== panel && other.root.isConnected)?.root);
   packRail();
   if (remote) panel.detach?.();
-  else if (panel.stop) panel.stop();
+  else if (panel.stop) {
+    const id = paneId(panel);
+    closingPanes.set(id, false);
+    Promise.resolve(panel.stop()).finally(() => closingPanes.set(id, true));
+  }
+  panel.dispose?.();
   panel.root.remove();
   panelsByRoot.delete(panel.root);
   savePlacementSoon();
@@ -784,7 +840,7 @@ export function selectPane(root) {
 
 export function pickedPanel() {
   const root = document.querySelector('.panel.picked');
-  return (root && panelsByRoot.get(root)) || configPanel;
+  return (root && panelsByRoot.get(root)) || (configPanel?.root.isConnected ? configPanel : null);
 }
 
 document.addEventListener('pointerdown', (e) => {
@@ -797,23 +853,27 @@ const paneTemplate = (() => {
 
   copy.querySelector('.screen').textContent = '';
   copy.querySelector('.state').textContent = '';
+  copy.querySelector('.side-grip')?.remove();
   copy.classList.remove('picked');
   return copy;
 })();
 
 function reopenTerminal(id) {
   const pane = buildTerminal(id, { recover: true });
-  addToRail(pane, undefined, id.startsWith('agent-') ? 'bottom' : 'top');
+  addToRail(pane);
 
   pane.boot();
   return pane;
 }
 
 let remotePanes = new Set();
-let harnessRequest = 0;
-export function syncAgentPanes(ids, labels = {}, documents = {}, requestedHarness = 0) {
+export function syncPanes(ids, labels = {}, documents = {}) {
   window.PANE_LABELS = labels;
   const wanted = new Set(ids);
+  for (const [id, finished] of closingPanes) {
+    if (finished && !wanted.has(id)) closingPanes.delete(id);
+    else wanted.delete(id);
+  }
   for (const pane of [harnessPane, ...extraPanes]) {
     const id = pane === harnessPane ? 'harness' : pane.root.id.slice(5);
     if (remotePanes.has(id) && !wanted.has(id)) closePanel(pane, true);
@@ -823,12 +883,7 @@ export function syncAgentPanes(ids, labels = {}, documents = {}, requestedHarnes
       harnessPane = buildTerminal('harness', { recover: true });
       addToRail(harnessPane);
       harnessPane.boot();
-    } else if (id.startsWith('agent-') && !document.getElementById('pane-' + id)) reopenTerminal(id);
-  }
-  if (requestedHarness > harnessRequest) {
-    harnessRequest = requestedHarness;
-    harnessPane.open();
-    selectPane(harnessPane.root);
+    } else if (![configPanel, harnessPane, ...extraPanes].some(pane => pane && paneId(pane) === id && pane.root.isConnected)) reopenTerminal(id);
   }
   for (const panel of [configPanel, harnessPane, ...extraPanes]) {
     const id = paneId(panel);
@@ -932,10 +987,8 @@ function paneId(panel) {
 function placementSnapshot() {
   return Object.fromEntries([configPanel, harnessPane, ...extraPanes]
     .filter(p => p.root.isConnected)
-    .filter(p => p !== configPanel || !p.shut)
     .map(p => {
-      const box = p.root.getBoundingClientRect();
-      const size = [Math.round(box.width), Math.round(box.height)];
+      const size = p.size.map(Math.round);
       return [paneId(p), onRail(p)
         ? [railSide(p), railPanels(railSide(p)).indexOf(p), ...size]
         : ['floating', p.root.offsetLeft, p.root.offsetTop, ...size]];

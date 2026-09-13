@@ -47,9 +47,9 @@ class CDP {
 try {
   await mkdir(join(root, 'project'));
   await mkdir(join(root, 'bin'));
-  for (const part of ['src', 'src.server', 'src.mcp', 'src.vterm', 'src.wterm', 'src.graphviz', 'external-src', 'tools']) await cp(join(repo, part), join(root, 'project', part), { recursive: true });
-  const config = (await readFile(join(repo, 'visualize.conf'), 'utf8')).split('\n').filter(line => !line.startsWith('@visualize')).join('\n');
-  await writeFile(join(root, 'project', 'visualize.conf'), config);
+  for (const part of ['src', 'src.server', 'src.vterm', 'src.wterm', 'src.graphviz', 'external-src', 'tools']) await cp(join(repo, part), join(root, 'project', part), { recursive: true });
+  const config = (await readFile(join(repo, 'visualize_config'), 'utf8')).split('\n').filter(line => !line.startsWith('@visualize')).join('\n');
+  await writeFile(join(root, 'project', 'visualize_config'), config);
   await writeFile(join(root, 'bin', 'open'), '#!/bin/sh\nfor browser_arg do\n  browser_arg=${browser_arg%%#*}\n  case "$browser_arg" in\n    http://*|https://*) printf "%s" "$browser_arg" > "$VZ_BENCH_URL" ;;\n    --app=*) printf "%s" "${browser_arg#--app=}" > "$VZ_BENCH_URL" ;;\n  esac\ndone\n', { mode: 0o755 });
   const core = join(repo, 'src.server/core.janet');
   const serverOptions = {
@@ -100,6 +100,28 @@ try {
     let d=g.drawing();
     check(d.canvas.width>0 && d.canvas.height>0,'canvas has backing pixels');
     check(getComputedStyle(d.svg).visibility==='hidden','SVG is only a hidden geometry source');
+    const misplaced=[...d.svg.querySelectorAll('g.node')].flatMap(node=>{
+      const oval=node.querySelector('ellipse');
+      const center=new DOMPoint(oval.cx.baseVal.value,oval.cy.baseVal.value).matrixTransform(oval.getCTM());
+      return [...node.querySelectorAll('text')].filter(text=>text.textContent.trim()).flatMap(text=>{
+        const box=text.getBBox();
+        const label=new DOMPoint(box.x+box.width/2,box.y).matrixTransform(text.getCTM());
+        const anchor=new DOMPoint(text.x.baseVal[0].value,text.y.baseVal[0].value).matrixTransform(text.getCTM());
+        return getComputedStyle(text).textAnchor==='middle' && near(anchor.x,center.x) && Math.abs(label.x-center.x)<1 ? [] : [{text:text.textContent,delta:label.x-center.x}];
+      });
+    });
+    check(!misplaced.length,'each title and metadata line is centered on its node oval: '+JSON.stringify(misplaced.slice(0,5)));
+    const boxTitles=[...d.svg.querySelectorAll('g.cluster')];
+    check(boxTitles.length>0 && boxTitles.every(group=>{
+      const box=group.querySelector(':scope > polygon').getBBox();
+      return [...group.querySelectorAll(':scope > text')].every(text=>{
+        const label=text.getBBox();
+        return label.x>=box.x+5.5 && label.x+label.width<=box.x+box.width-5.5;
+      });
+    }),'box titles fit within their borders with padding');
+    const titleSizes=boxTitles.flatMap(group=>[...group.querySelectorAll(':scope > text')].map(text=>text.getAttribute('font-size')));
+    d.rebuild();
+    check(JSON.stringify(titleSizes)===JSON.stringify(boxTitles.flatMap(group=>[...group.querySelectorAll(':scope > text')].map(text=>text.getAttribute('font-size')))),'rebuilding does not progressively shrink box titles');
     const node=d.svg.querySelector('g.node');
     const before=g.screenBounds(node);
     const oldSVG=d.svg.outerHTML;
@@ -117,15 +139,35 @@ try {
     check(d.svg.outerHTML===oldSVG,'pan and zoom do not mutate SVG');
     CanvasRenderingContext2D.prototype.fillText=fillText;
     SVGGraphicsElement.prototype.getBBox=getBBox;
-    check(textDraws===0,'cached gestures do not redraw labels');
+    check(textDraws>0,'zoom redraws labels at the new resolution during navigation');
     check(geometryReads===0,'cached gestures do not query SVG geometry');
+    const rendered = () => window.__renderTrace.snapshot().filter(s=>s.kind==='canvas-render').at(-1);
+    d.rebuild();
+    d.render({scale:1,tx:-64,ty:-64},true);
+    check(rendered().rebuilt===rendered().visible,'all visible tiles render immediately during navigation');
+    d.render({scale:1,tx:-65,ty:-65},true);
+    check(rendered().rebuilt===0,'panning inside cached tiles only composites');
+    d.render({scale:1,tx:-576,ty:-64},true);
+    check(rendered().rebuilt>0 && rendered().rebuilt<rendered().visible,'crossing a tile boundary renders only the newly exposed column');
+    d.render({scale:1,tx:-64,ty:-64},true);
+    check(rendered().rebuilt===0,'panning back reuses previously visible tiles');
+    for(let i=1;i<=24;i++) d.render({scale:1,tx:-i*4096,ty:-64},true);
+    check(rendered().cached<=96,'long pans keep the tile cache bounded');
+    d.render({scale:1,tx:-64,ty:-64},true);
+    check(rendered().rebuilt===rendered().visible,'evicted tiles are regenerated when revisited');
+    d.render({scale:1.25,tx:-64,ty:-64},true);
+    check(rendered().rebuilt===rendered().visible,'zoom invalidates tiles from the previous resolution');
+    g.repaint();
     await settle();
     const pixels=d.canvas.getContext('2d').getImageData(0,0,d.canvas.width,d.canvas.height).data;
     let ink=0;
     for(let i=0;i<pixels.length;i+=4)if(pixels[i+3]>100 && pixels[i]+pixels[i+1]+pixels[i+2]<650)ink++;
     check(ink>100,'canvas contains visible graph pixels');
     const input=document.getElementById('find-input');
-    input.value='graph';input.dispatchEvent(new Event('input',{bubbles:true}));
+    input.value='grph';input.dispatchEvent(new Event('input',{bubbles:true}));
+    await settle();
+    check(!d.svg.querySelector('#find-arrow'),'search rejects noncontiguous text');
+    input.value='GRAPH';input.dispatchEvent(new Event('input',{bubbles:true}));
     await settle();
     const arrow=d.svg.querySelector('#find-arrow');
     check(!!arrow,'search creates arrow geometry');
@@ -148,6 +190,30 @@ try {
     g.pane.replaceChildren(document.importNode(fresh,true));h.keepEdgeLabel();h.wireEdges();g.hatchFolded();f.forgetUnit();f.redrawFind();g.fit();await settle();
     check(document.querySelectorAll('#graph canvas').length===1,'redraw replaces the canvas');
     check(g.drawing()!==d,'redraw replaces cached geometry');
+    const host=document.createElement('div');
+    host.style.cssText='position:absolute;left:0;top:0;width:1024px;height:512px';
+    host.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="2048"><rect width="4096" height="2048" fill="#abc"/><rect x="350" y="50" width="1800" height="380" fill="#b32" opacity=".5"/><path d="M 0 20 L 3000 850" fill="none" stroke="#123" stroke-width="3"/><text x="400" y="200" font-family="sans-serif" font-size="24">Labels across tile boundaries</text></svg>';
+    document.body.append(host);
+    const {createRenderer}=await import('/graph-canvas.js');
+    const tiled=createRenderer(host.querySelector('svg'),()=>{});
+    tiled.canvas.style.cssText='position:absolute;left:0;top:0;width:1024px;height:512px';
+    await settle();
+    const reference=document.createElement('canvas');reference.width=1024;reference.height=512;
+    const context=reference.getContext('2d');
+    for(const offset of [-64,-640]) {
+      tiled.render({scale:1.25,tx:offset+.2,ty:-64.2},true);
+      context.setTransform(1,0,0,1,0,0);context.clearRect(0,0,1024,512);
+      context.setTransform(1.25,0,0,1.25,offset,-64);
+      context.fillStyle='#abc';context.fillRect(0,0,4096,2048);
+      context.globalAlpha=.5;context.fillStyle='#b32';context.fillRect(350,50,1800,380);context.globalAlpha=1;
+      context.strokeStyle='#123';context.lineWidth=3;context.beginPath();context.moveTo(0,20);context.lineTo(3000,850);context.stroke();
+      context.fillStyle='#000';context.font='24px sans-serif';context.fillText('Labels across tile boundaries',400,200);
+      const actual=tiled.canvas.getContext('2d').getImageData(0,0,1024,512).data;
+      const expected=context.getImageData(0,0,1024,512).data;
+      let difference=0;for(let i=0;i<actual.length;i++) difference=Math.max(difference,Math.abs(actual[i]-expected[i]));
+      check(difference<=2,'tiles match a direct render within antialiasing rounding at pan '+offset);
+    }
+    tiled.dispose();host.remove();
     return passed;
   })()`);
   console.log(JSON.stringify(checks,null,2));

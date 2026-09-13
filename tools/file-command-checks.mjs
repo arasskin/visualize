@@ -47,14 +47,14 @@ class CDP {
 try {
   await mkdir(join(root, 'project'));
   await mkdir(join(root, 'bin'));
-  const config = '(only sample) (only group) (only ?)\n(fold group)\n(prefix short sample)\n';
+  const config = 'only sample\nonly group\nonly ?\nfold group\nprefix short sample\n';
   await mkdir(join(root,'project','group'));
   await writeFile(join(root,'project','sample.py'),'import missing_dependency\n');
   await writeFile(join(root,'project','sample.md'),'# Reading test\n\nA **bold** word and an [unsafe link](javascript:alert(1)).\n\n<script>window.markdownUnsafe=true</script>\n\n' + '| Bug | Retailer | Status / cause | Evidence | Fix / verification |\n| --- | --- | --- | --- | --- |\n| Premature payment handoff | iHerb | Open; confirmed: checkout matches the cart hostname. | Latest run reached the cart. | Verify locale redirects reach the cart on the affected configuration. |\n\n' + 'A long paragraph with words that wrap naturally. '.repeat(2000));
   await writeFile(join(root,'project',"sample ' $` ü.txt"),'file payload');
   await writeFile(join(root,'project','group','a.py'),'a=1');
   await writeFile(join(root,'project','group','b.py'),'b=1');
-  await writeFile(join(root, 'project', 'visualize.conf'), config);
+  await writeFile(join(root, 'project', 'visualize_config'), config);
   await writeFile(join(root, 'bin', 'open'), '#!/bin/sh\nfor browser_arg do\n  browser_arg=${browser_arg%%#*}\n  case "$browser_arg" in\n    http://*|https://*) printf "%s" "$browser_arg" > "$VZ_BENCH_URL" ;;\n    --app=*) printf "%s" "${browser_arg#--app=}" > "$VZ_BENCH_URL" ;;\n  esac\ndone\n', { mode: 0o755 });
   const core = join(repo, 'src.server/core.janet');
   const serverOptions = {

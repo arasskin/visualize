@@ -28,10 +28,10 @@
   (t/is= `"back\\slash"` (json/encode "back\\slash")))
 
 (t/test "decoding reads what the page sends"
-  (def got (json/decode `{"action":"run","index":3,"lines":["(hide ~.A)",""]}`))
+  (def got (json/decode `{"action":"run","index":3,"lines":["hide ~.A",""]}`))
   (t/is= "run" (got "action"))
   (t/is= 3 (got "index"))
-  (t/is= ["(hide ~.A)" ""] (got "lines")))
+  (t/is= ["hide ~.A" ""] (got "lines")))
 
 (t/test "decoding handles the escapes encoding produces"
   (t/is= "</script>" (json/decode `"</script>"`)
@@ -42,7 +42,7 @@
   (t/is= [] (json/decode "[]")))
 
 (t/test "a round trip through both is the identity"
-  (def original {"lines" ["(only ~)" "(box ~.A red)"]
+  (def original {"lines" ["only ~" "box ~.A red"]
                  "problems" {"0" "went wrong"}
                  "error" ""
                  "svg" "<svg><path d=\"M0,0\"/></svg>"})

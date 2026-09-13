@@ -47,9 +47,9 @@ class CDP {
 try {
   await mkdir(join(root, 'project'));
   await mkdir(join(root, 'bin'));
-  for (const part of ['src', 'src.server', 'src.mcp', 'src.vterm', 'src.wterm', 'src.graphviz', 'external-src', 'tools']) await cp(join(repo, part), join(root, 'project', part), { recursive: true });
-  const config = (await readFile(join(repo, 'visualize.conf'), 'utf8')).split('\n').filter(line => !line.startsWith('@visualize')).join('\n');
-  await writeFile(join(root, 'project', 'visualize.conf'), config);
+  for (const part of ['src', 'src.server', 'src.vterm', 'src.wterm', 'src.graphviz', 'external-src', 'tools']) await cp(join(repo, part), join(root, 'project', part), { recursive: true });
+  const config = (await readFile(join(repo, 'visualize_config'), 'utf8')).split('\n').filter(line => !line.startsWith('@visualize')).join('\n');
+  await writeFile(join(root, 'project', 'visualize_config'), config);
   await writeFile(join(root, 'bin', 'open'), '#!/bin/sh\nfor browser_arg do\n  browser_arg=${browser_arg%%#*}\n  case "$browser_arg" in\n    http://*|https://*) printf "%s" "$browser_arg" > "$VZ_BENCH_URL" ;;\n    --app=*) printf "%s" "${browser_arg#--app=}" > "$VZ_BENCH_URL" ;;\n  esac\ndone\n', { mode: 0o755 });
   const core = join(repo, 'src.server/core.janet');
   const serverOptions = {
@@ -88,7 +88,7 @@ try {
   await sleep(1000);
   const checks=[];
   async function check(expression,name) {
-    if(!await cdp.evaluate(`(async()=>(${expression}))()`))throw new Error(name);
+    if(!await cdp.evaluate(`(async()=>(${expression}))()`))throw new Error(name+'\n'+JSON.stringify(await cdp.evaluate('({box:config.root.getBoundingClientRect().toJSON(),grip:config.grip.getBoundingClientRect().toJSON(),shut:config.shut})')));
     checks.push(name);
   }
   async function drag(x,y,dx,dy) {
@@ -116,7 +116,7 @@ try {
   await drag(25,20,0,960);
   await check('config.root.dataset.rail==="bottom"','native drag docks at bottom');
   await check('Math.abs(config.root.getBoundingClientRect().bottom-994)<1','closed tab has 6px bottom inset');
-  await cdp.evaluate('config.open();panes.packRailNow()');
+  await cdp.evaluate('config.bar.dragged=false;config.open();panes.packRailNow()');
   await check('!config.shut && config.body.getBoundingClientRect().bottom<=config.bar.getBoundingClientRect().top+1','bottom panel opens upward');
   await check('Math.abs(config.root.getBoundingClientRect().bottom-994)<1','opening preserves bottom inset');
   const before=await cdp.evaluate('({width:config.root.offsetWidth,height:config.root.offsetHeight,grip:config.grip.getBoundingClientRect().toJSON()})');
@@ -134,7 +134,7 @@ try {
   await check('Math.abs(config.root.getBoundingClientRect().bottom-694)<1','bottom tabs follow viewport resize');
   await drag(25,680,0,-660);
   await check('config.root.dataset.rail==="top" && !config.root.classList.contains("bottom-docked")','native drag moves bottom tab to top');
-  await cdp.evaluate('config.open();panes.packRailNow()');
+  await cdp.evaluate('config.bar.dragged=false;config.open();panes.packRailNow()');
   await check('config.body.getBoundingClientRect().top>=config.bar.getBoundingClientRect().bottom-1','top panel opens downward');
   await cdp.evaluate('config.toggle();panes.packRailNow()');
   await drag(25,20,250,260);
@@ -203,16 +203,21 @@ try {
   const floatingBar = await cdp.evaluate('created.bar.getBoundingClientRect().toJSON()');
   await drag(floatingBar.x+10,floatingBar.y+12,260,220);
   await check('!panes.onRail(created)', 'recovery fixture has a floating terminal');
+  await cdp.evaluate('config.bar.dragged=false;config.open();panes.addToRail(config,0,"top");panes.packRailNow()');
   const snapshot = `JSON.stringify({rails:['top','bottom'].map(side=>panes.rail.filter(p=>p.root.dataset.rail===side).map(p=>p.root.id)),floating:(()=>{const r=document.getElementById(${JSON.stringify(floatingId)});return [r.offsetLeft,r.offsetTop]})()})`;
   const expected = await cdp.evaluate(snapshot);
   await waitFor(async () => {
-    const lines = await readFile(join(root,'project','visualize.conf'),'utf8');
+    const lines = await readFile(join(root,'project','visualize_config'),'utf8');
     const [x,y] = JSON.parse(expected).floating;
-    return lines.includes(`@visualize placement ${floatingId.slice(5)} floating ${x} ${y}`);
+    return lines.split('\n').some(line => line.startsWith('@visualize terminal config ') && line.includes(' placement top 0'))
+      && lines.split('\n').some(line => line.startsWith(`@visualize terminal ${floatingId.slice(5)} `)
+        && line.includes(` placement floating ${x} ${y}`));
   });
   await cdp.send('Page.reload');
   await waitFor(() => cdp.evaluate(`!!document.getElementById(${JSON.stringify(floatingId)})`));
   await cdp.evaluate("import('/panes.js').then(module=>{window.panes=module})");
+  const restored = await cdp.evaluate(snapshot);
+  if (restored !== expected) throw new Error(`Restored layout differs: expected ${expected}, got ${restored}; saved ${await readFile(join(root,'project','visualize_config'),'utf8')}`);
   await check(`${snapshot}===${JSON.stringify(expected)}`, 'reload restores both rail orders and floating terminal coordinates');
   await cdp.send('Page.navigate', {url:'about:blank'});
   const stopped = new Promise(resolve=>server.once('exit',resolve));

@@ -1,4 +1,4 @@
-Visualize's embedded Graphviz bridge takes a DOT string and returns SVG or diagnostics. `src.server/graphviz.janet` owns the returned buffer until it has copied it into Janet, then frees it. `src.server/layout.janet` uses this bridge from the graph worker.
+Visualize's embedded Graphviz bridge takes a DOT string and returns SVG or diagnostics. `src.server/graphviz.janet` owns the returned buffer until it has copied it into Janet, then frees it. The graph worker uses `dot` for both the project graph and the config editor.
 
 `./build` builds `libvisualize-graphviz.so` with the system C compiler on macOS and Linux. `./src.graphviz/build --force` rebuilds it; `--clean` removes the generated library. Publication uses an atomic rename so a running server keeps its loaded library until restart. No `dot`, CMake, package manager, plugin cache, or network connection is required to build or run it.
 
@@ -10,6 +10,6 @@ Text measurement uses Graphviz's built-in metrics rather than Pango or platform 
 
 `src/test/graphviz.janet` covers rendering without `dot` or installed plugins, HTML and Unicode labels, nested clusters, errors followed by valid renders, repeated layouts, and concurrent callers. The existing graph and canvas checks exercise integration with Visualize.
 
-`./src.graphviz/build --check` builds a temporary executable with UndefinedBehaviorSanitizer and runs 400 valid and 400 malformed renders across four native threads. It leaves the application library untouched. This caught a null-pointer arithmetic bug in upstream's list helpers; the small patch is documented in `external-src/graphviz/README.visualize.md`.
+`./src.graphviz/build --check` builds a temporary executable with UndefinedBehaviorSanitizer and runs 400 valid and 400 malformed renders across four native threads. It leaves the application library untouched. Local correctness patches are documented in `external-src/graphviz/README.visualize.md`.
 
-Validated on macOS ARM64: 1,002 Janet assertions, the browser canvas integration suite, and the native UBSan check pass. The Janet suite still emits its existing HTTP shutdown warnings. Linux has not been tested because the local Docker daemon is unavailable. Apple Clang 17's AddressSanitizer hangs during runtime initialization on this macOS installation, before the test program starts, so no ASan result is claimed.
+Validated on macOS ARM64: the Janet suite, browser canvas and config editor integration suites, and native UBSan check pass. Temporary check executables and their macOS debug-symbol bundles are removed on exit. Linux has not been tested because the local Docker daemon is unavailable. Apple Clang 17's AddressSanitizer hangs during runtime initialization on this macOS installation, before the test program starts, so no ASan result is claimed.

@@ -46,7 +46,6 @@
 (var- base 0)
 (var- generation 0)
 (var- session-root nil)
-(var- session-owner nil)
 
 (var- pty-rows 24)
 (var- pty-cols 80)
@@ -163,11 +162,7 @@
   (default want-program true)
   {"running" (truthy? (if settled (or starting (and session (not exited) (pty/alive? session))) (running?)))
    "error" emulator-fault
-   "controlVersion" 1
    "launchEnvironment" true
-   "paneOwnership" true
-   "promptInput" true
-   "owner" session-owner
    "generation" generation
    "cwd" session-root
    "argv" (if session (session :argv) [])
@@ -184,7 +179,7 @@
 
 (defn- session-start
 
-  [argv root rows cols &opt theme environment owner]
+  [argv root rows cols &opt theme environment]
   (def next-emulator (vterm/create rows cols))
   (try (when theme (:theme next-emulator theme))
     ([e] (:close next-emulator) (error e)))
@@ -207,7 +202,6 @@
   (set pty-cols cols)
   (++ generation)
   (set session-root root)
-  (set session-owner owner)
 
   (def tools-dir install-dir)
   (def channel (ev/thread-chan 64))
@@ -227,7 +221,7 @@
                                      (put environment "VISUALIZE_ROOT" directory)
 
                                      (put environment "VISUALIZE_TOOLS"
-                                          "vz file | vz list_agents|spawn_agent|read_agent|send_message|close_agent [JSON arguments]"))
+                                          "vz [file] — launch the main harness or open a document"))
                                    environment)
 
                                  directory)
@@ -329,17 +323,9 @@
   (def op (string (get message "op" "")))
   (defn number-at [key fallback]
     (math/floor (or (get message key) fallback)))
-  (when (and (= op "input") (get message "paste")) (drain))
-  (def paste? (and (= op "input") (get message "paste") emulator (:bracketed-paste? emulator)))
-  (def input-text (if (and (= op "input") (get message "paste"))
-    (string (if paste? "\x1b[200~" "") (get message "text" "")
-            (if paste? "\x1b[201~" "") (if (get message "submit") "\r" ""))
-    (get message "text" "")))
+  (def input-text (get message "text" ""))
   (def started (os/clock :monotonic))
   (def out (cond
-    (and (not= op "start") (get message "owner") (not= (get message "owner") session-owner))
-    [{"error" "Worker controls only apply to sessions created through the worker API"} false]
-
     (and (get message "generation")
          (index-of op ["input" "stop" "shutdown" "resize" "redraw" "theme" "capture" "state"])
          (not= (get message "generation") generation))
@@ -350,18 +336,10 @@
             (string (get message "root" "."))
             (number-at "rows" 24)
             (number-at "cols" 100)
-            (get message "theme") (get message "environment") (get message "owner"))
+            (get message "theme") (get message "environment"))
      false]
 
     (= op "stop") [(session-stop) false]
-
-    (and (= op "input") (get message "paste")
-         (not (get (session-state false true) "running")))
-    [{"error" "worker session is not running"} false]
-
-    (and (= op "input") (get message "paste") (not paste?)
-         (some |(index-of $ [10 13 9]) (get message "text" "")))
-    [{"error" "terminal has not enabled bracketed paste; inspect it before sending a multiline prompt"} false]
 
     (and (= op "input") (> (+ (length unsent) (length input-text)) 1048576))
     [{"error" "terminal input buffer full"} false]

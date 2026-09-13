@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { once } from 'node:events';
@@ -8,7 +8,7 @@ import { once } from 'node:events';
 const repo = resolve(import.meta.dirname, '..');
 const root = await mkdtemp(join(tmpdir(), 'visualize-launch-checks-'));
 const project = join(root, 'project with spaces');
-let server, logs = '', count = 0;
+let server, request, page, logs = '', count = 0;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const check = (value, message) => { assert.ok(value, message); count++; };
 const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
@@ -44,9 +44,10 @@ const env = process.env;
 fs.writeFileSync(env.VZ_TEST_RECORDS + '/' + env.VISUALIZE_PANE_ID + '.json', JSON.stringify({
   args: process.argv.slice(2), cwd: process.cwd(), login: env.VZ_TEST_LOGIN,
   pane: env.VISUALIZE_PANE_ID, project: env.VISUALIZE_PROJECT,
-  agentFile: env.VISUALIZE_AGENT_FILE, agent: env.VISUALIZE_AGENT_JSON,
-  command: env.VISUALIZE_MCP_COMMAND, socket: env.VISUALIZE_SOCKET,
+  socket: env.VISUALIZE_SOCKET, command: env.VISUALIZE_MAIN_HARNESS_COMMAND,
+  startupPrompt: env.VISUALIZE_STARTUP_PROMPT, startupPromptJSON: env.VISUALIZE_STARTUP_PROMPT_JSON,
 }));
+if (env.VZ_TEST_EXIT) process.exit(0);
 process.stdin.setRawMode?.(true);
 process.stdin.resume();
 let input = '';
@@ -80,78 +81,77 @@ setInterval(() => {}, 1000);
     for (const stream of [server.stdout, server.stderr]) stream.on('data', b => { logs += b; });
     const url = await until(() => readFile(join(root, 'url'), 'utf8'));
     const token = (await (await fetch(url + '/session')).json()).token;
-    return async (id, op, body = {}) => {
-      const response = await fetch(url + '/pane/' + id + '/' + op + '?k=' + token, { method: 'POST', body: JSON.stringify(body) });
+    page = () => fetch(url).then(response => response.text());
+    request = async (path, body = {}) => {
+      const response = await fetch(url + path + '?k=' + token, { method: 'POST', body: JSON.stringify(body) });
       const result = await response.json();
       assert.ok(response.ok && !result.error, JSON.stringify(result));
       return result;
     };
+    return (id, op, body) => request('/pane/' + id + '/' + op, body);
   }
   let post = await start();
   const original = await post('harness', 'capture');
   const record = await until(async () => JSON.parse(await readFile(join(root, 'records/harness.json'), 'utf8')));
-  const instructions = await readFile(join(repo, 'src.mcp/agent.md'), 'utf8');
   check(record.login === 'loaded', 'login shell setup precedes invocation');
   check(record.cwd.endsWith('/project with spaces'), 'harness cwd is the attached project');
-  check(record.pane === 'harness', 'coordinator knows its own pane');
-  check(record.args.length === 6 && [0, 2, 4].every(i => record.args[i] === '-c'), 'default command supplies runtime overrides');
-  check(record.args[1] === 'agents.enabled=false', 'main harness disables native subagents');
-  check(JSON.parse(record.args[3].slice('developer_instructions='.length)) === instructions, 'agent.md injected exactly');
-  check(record.args[5].includes(JSON.stringify(record.socket)), 'MCP override names this instance');
-  const settings = JSON.parse(await run('codex', [...record.args, 'mcp', 'get', 'visualize', '--json']));
-  check(settings.transport.command === record.command && settings.transport.args[0] === record.socket, 'installed Codex accepts the inline MCP settings');
-  check((await post('harness', 'capture')).running, 'default harness remains running');
-  const ownFiles = await readdir(project);
-  check(ownFiles.every(name => ['a.janet', 'visualize.conf'].includes(name)), 'no harness config or instruction files written to the project');
-  const customFile = join(root, "agent 'quoted' $name.md");
-  const workerRole = (await readFile(join(repo, 'src.mcp/worker.md'), 'utf8')).trim();
-  const customText = '# Test role\nKeep "quotes", $(touch ' + join(root, 'must-not-exist') + '), `false`, backslashes \\ and 🚀 literally.\n';
-  await writeFile(customFile, customText);
+  check(record.pane === 'harness', 'main harness has a pane identity');
+  check(record.args.length === 2 && record.args[0] === '-c' && record.args[1].startsWith('developer_instructions='), 'default harness only adds startup instructions');
+  check(JSON.parse(record.args[1].slice('developer_instructions='.length)) === record.startupPrompt, 'startup instructions arrive intact');
+  check(record.startupPrompt.includes('Example plan.visualize:\nShip_search\n    Implement_search'), 'startup prompt includes the plan example');
+  check(record.startupPrompt.includes('Paths are relative to the project root'), 'startup prompt explains file reference resolution');
+  check(record.command.includes('VISUALIZE_STARTUP_PROMPT_JSON'), 'vz receives the configured invocation');
+  check((await post('harness', 'capture')).running, 'main harness remains running');
+  check((await readdir(project)).every(name => ['a.janet', 'visualize_config'].includes(name)), 'no harness settings written to the project');
+  await run(join(repo, 'vz'), [], {env: {...env, VISUALIZE_MAIN_HARNESS_COMMAND: record.command, VISUALIZE_STARTUP_PROMPT_JSON: record.startupPromptJSON, VISUALIZE_PANE_ID: 'cli', VZ_TEST_EXIT: '1'}});
+  const cli = JSON.parse(await readFile(join(root, 'records/cli.json'), 'utf8'));
+  check(JSON.stringify(cli.args) === JSON.stringify(record.args) && cli.login === 'loaded', 'vz without arguments includes the same startup prompt after login setup');
+  await run(join(repo, 'vz'), [join(project, 'a.janet')], {env: {...env, VISUALIZE_SOCKET: record.socket, VISUALIZE_PANE_ID: 'harness'}});
+  const {createConnection} = await import('node:net');
+  async function control(op) {
+    return new Promise((resolve, reject) => {
+      const socket = createConnection(record.socket); let text = '';
+      socket.on('connect', () => socket.write(JSON.stringify({op, args:{}}) + '\n'));
+      socket.on('error', reject);
+      socket.on('data', chunk => { text += chunk; if (text.includes('\n')) { socket.end(); resolve(JSON.parse(text)); } });
+    });
+  }
+  check((await control('spawn_agent')).error === 'unknown document operation', 'document socket exposes no worker creation');
+  const second = await post('2', 'start');
+  const positions = {harness: ['bottom', 2, 640, 480], '2': ['floating', -15, 70, 350, 420]};
+  await request('/panes/placements', positions);
+  await request('/label', {id: 'harness', text: 'Project "work"'});
+  const beforeRecovery = await request('/panes/watch', {generation: -1});
+  const saved = await readFile(join(project, 'visualize_config'), 'utf8');
+  const harnessLine = saved.split('\n').filter(line => line.startsWith('@visualize terminal harness '));
+  check(harnessLine.length === 1 && harnessLine[0].includes(' placement bottom 2 640 480 label "Project \\"work\\"" document '), 'socket, placement, label, and document share one terminal line');
+  check(!/@visualize (placement|label|markdown) /.test(saved), 'saves contain no split metadata records');
   await stop('SIGTERM');
   await rm(join(root, 'records/harness.json'));
-  const script = 'values=("argument with spaces" "literal \'quote\'")\nexec codex "${values[@]}" "$(cat "$VISUALIZE_AGENT_FILE")"';
-  post = await start(['--command', script, '--agent', customFile]);
-  check((await post('harness', 'capture')).generation === original.generation, 'recovery does not invoke the new startup command');
-  check(!(await readdir(join(root, 'records'))).includes('harness.json'), 'recovery leaves the invocation untouched');
+  const script = 'values=("argument with spaces" "literal quote")\nexec codex "${values[@]}"';
+  post = await start(['--command', script]);
+  check((await post('harness', 'capture')).generation === original.generation, 'recovery preserves the running harness');
+  check(!(await readdir(join(root, 'records'))).includes('harness.json'), 'recovery does not invoke the new startup command');
+  check((await post('2', 'capture')).generation === second.generation, 'floating terminal survives restart');
+  const restoredPage = await page();
+  check(JSON.stringify(JSON.parse(restoredPage.match(/window.PANE_POSITIONS = (.*);/)[1])) === JSON.stringify(Object.fromEntries(Object.entries(positions).sort())), 'restart restores rail and floating positions and sizes');
+  check(JSON.parse(restoredPage.match(/window.PANE_LABELS = (.*);/)[1]).harness === 'Project "work"', 'restart restores the quoted title');
+  const recovered = await request('/panes/watch', {generation: -1});
+  check(JSON.stringify(recovered.documents) === JSON.stringify(beforeRecovery.documents), 'restart restores the document associated with the terminal');
   const replacement = await post('harness', 'start');
-  check(replacement.generation > original.generation, 'manual restart reuses supervisor');
-  check(!(await readdir(join(root, 'records'))).includes('harness.json'), 'manual restart opens a shell without invoking Codex');
-  await post('harness', 'shutdown');
+  check(replacement.generation > original.generation, 'manual restart reuses the supervisor');
+  check(!(await readdir(join(root, 'records'))).includes('harness.json'), 'manual restart opens a plain shell');
   await stop('SIGINT');
-  post = await start(['--command', script, '--agent', customFile]);
-  const fresh = await post('harness', 'capture');
+  post = await start(['--command', script]);
   const updated = await until(async () => JSON.parse(await readFile(join(root, 'records/harness.json'), 'utf8')));
-  check(updated.args[0] === 'argument with spaces' && updated.args[1] === "literal 'quote'", 'CLI override runs Bash array syntax without splitting');
-  check(updated.args[2] === customText.replace(/\n+$/, ''), 'custom instruction file injected without shell reinterpretation');
-  check(JSON.parse(updated.agent) === customText && updated.agentFile === await realpath(customFile), 'cold startup receives custom launch environment');
-  check(!(await readdir(root)).includes('must-not-exist'), 'instruction text cannot execute shell substitutions');
-  const list = JSON.parse(await run(join(repo, 'vz'), ['--socket', updated.socket, 'list_agents']));
-  check(!list.workers.some(p => p.id === 'harness'), 'MCP excludes the coordinator after recovery');
-  await post('harness', 'theme', { theme: { foreground: 0xe6e6e6, background: 0x212734 } });
-  const child = JSON.parse(await run(join(repo, 'vz'), ['--socket', updated.socket, 'spawn_agent', JSON.stringify({ title: 'Worker', message: customText })]));
-  check(child.promptSent === true, 'initial prompt was sent');
-  const childRecord = await until(async () => { const r = JSON.parse(await readFile(join(root, 'records', child.id + '.json'), 'utf8')); return r.prompt === workerRole + ' ' + customText && r; });
-  check(childRecord.background === '2121/2727/3434', 'worker receives the active dark theme before its startup color query');
-  check(childRecord.args.length === 0 && childRecord.prompt === workerRole + ' ' + customText, 'default worker receives a multiline task through terminal paste, with no CLI arguments');
-  await run(join(repo, 'vz'), ['--socket', updated.socket, 'send_message', JSON.stringify({ id: child.id, message: 'Follow up\nwith details 🚀' })]);
-  await until(async () => JSON.parse(await readFile(join(root, 'records', child.id + '.json'), 'utf8')).prompt === 'Follow up\nwith details 🚀');
-  check(true, 'follow-up prompt uses the same generic terminal interface');
-  check(childRecord.pane === child.id && childRecord.pane !== updated.pane, 'workers receive their own pane identity');
-  check(childRecord.socket === updated.socket && JSON.parse(childRecord.agent) === customText, 'workers inherit the active instance context');
-  await run(join(repo, 'vz'), ['--socket', updated.socket, 'close_agent', JSON.stringify({ id: child.id })]);
-  await stop('SIGTERM');
-  const alternate = join(root, 'bin', 'another harness');
-  await writeFile(alternate, '#!/bin/sh\nexec ' + quote(process.execPath) + ' ' + quote(join(root, 'record.cjs')) + ' "$@"\n', { mode: 0o755 });
-  post = await start(['--default-harness', alternate]);
-  await post('harness', 'theme', { theme: { foreground: 0x3a4851, background: 0xffffff } });
-  const override = JSON.parse(await run(join(repo, 'vz'), ['--socket', updated.socket, 'spawn_agent', JSON.stringify({ title: 'Override', message: 'Investigate lag' })]));
-  const overrideRecord = await until(async () => { const r = JSON.parse(await readFile(join(root, 'records', override.id + '.json'), 'utf8')); return r.prompt === workerRole + ' Investigate lag' && r; });
-  check(overrideRecord.background === 'ffff/ffff/ffff', 'later worker receives the active light theme before startup');
-  check(overrideRecord.args.length === 0 && overrideRecord.prompt === workerRole + ' Investigate lag', 'CLI overrides default worker harness after recovery');
-  await run(join(repo, 'vz'), ['--socket', updated.socket, 'close_agent', JSON.stringify({ id: override.id })]);
+  check(updated.args[0] === 'argument with spaces' && updated.args[1] === 'literal quote', 'custom Bash invocation preserves arguments');
+  check(updated.command === script, 'custom invocation is passed to vz');
+  await run(join(repo, 'vz'), [], {env: {...env, VISUALIZE_MAIN_HARNESS_COMMAND: script, VISUALIZE_PANE_ID: 'custom-cli', VZ_TEST_EXIT: '1'}});
+  const custom = JSON.parse(await readFile(join(root, 'records/custom-cli.json'), 'utf8'));
+  check(JSON.stringify(custom.args) === JSON.stringify(updated.args), 'vz executes custom Bash scripts like cold startup');
   await stop('SIGINT');
-  console.log(JSON.stringify({ passed: count }));
+  console.log(JSON.stringify({passed: count}));
 } finally {
   await stop('SIGINT');
-  await rm(root, { recursive: true, force: true });
+  await rm(root, {recursive: true, force: true});
 }

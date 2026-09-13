@@ -2,6 +2,7 @@
 (import ./trace)
 (import ./color)
 (import ./config)
+(import ./config-graph)
 (import ./command)
 (import ./launch)
 
@@ -11,7 +12,6 @@
 (import ./worker)
 (import ./http)
 (import ./json)
-(import ./mcp)
 
 (import ./scan)
 (import ./graphviz)

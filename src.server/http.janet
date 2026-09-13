@@ -96,11 +96,8 @@
 
   [server bound
    (fn []
-     (forever
-       (def conn (:accept server))
-
-       (ev/go
-         (fn []
+     (net/accept-loop server
+         (fn [conn]
            (defer (:close conn)
              (def carry @"")
              (var serving true)
@@ -148,7 +145,7 @@
                      (try
                        (respond conn "500 Internal Server Error" "text/plain"
                                 (string err))
-                       ([_] nil))))])))))))])
+                       ([_] nil))))]))))))])
 
 (defn static-file
 

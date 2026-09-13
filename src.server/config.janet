@@ -20,9 +20,7 @@
 
     :animated false
 
-    :palette color/for-drawing
-
-    :aliases @[]})
+    :palette color/for-drawing})
 
 (defn- reflow
 
@@ -47,9 +45,7 @@
             (state :groups))))
 
 (def verb-specs
-  [{:name "prefix" :args [:alias :name]
-    :blurb "Bind a name to a prefix. This lets you use an arbitrary name as an arbitrary prefix. Binding the same name twice is an error."}
-   {:name "box" :args [:name :color?]
+  [{:name "box" :args [:name :color?]
     :blurb "Draw a box around nodes starting with the provided prefix. Give an optional color (blue, red, ..., or rrggbb)."}
    {:name "fold" :args [:name]
     :blurb "Fold all nodes starting with prefix into one node aggregating line counts, incoming, and outgoing edges. Outer folds absorb nested folds regardless of declaration order."}
@@ -62,36 +58,33 @@
    {:name "animate" :args []
     :blurb "Flash a node when its file is new or has been written since the last drawing. Nothing flashes on the first drawing, since there is no earlier one to differ from."}
    {:name "visualize" :args [:name]
-    :blurb "Draw the subproject at p using its own visualize.conf. Every line of that file is read as though written here, with p put in front of the names it mentions, so a nested project keeps its own layout inside the bigger drawing."}])
+    :blurb "Draw the subproject at prefix using its own visualize_config. Every line of that file is read as though written here, with prefix put in front of the names it mentions, so a nested project keeps its own layout inside the bigger drawing."}])
 
 (def- verb-rules
   (map (fn [spec]
          (def parts @[~(constant ,(keyword (spec :name))) (spec :name)])
-         (if (empty? (spec :args))
-           (array/push parts :space)
-           (each arg (spec :args)
+         (each arg (spec :args)
              (case arg
-               :alias (do (array/push parts :space) (array/push parts :alias))
-               :name (array/push parts :name)
-               :color? (array/push parts ~(? :color)))))
+               :name (array/push parts '(* :gap :name))
+               :color? (array/push parts '(? (* :gap :color)))))
          (tuple ;(array '* ;parts)))
        (sorted-by |(- (length ($ :name))) verb-specs)))
 
 (def grammar
   ~{:space (any (set " \t"))
+    :gap (some (set " \t"))
 
-    :bare (<- (some (if-not (+ (set " \t()\"#") -1) 1)))
+    :bare (<- (some (if-not (+ (set " \t\r\n()\"#") -1) 1)))
 
-    :alias (<- (some (if-not (+ (set " \t()\"") -1) 1)))
     :quoted (* `"` (<- (any (if-not `"` 1))) `"`)
-    :name (* :space (+ :quoted :bare) :space)
+    :name (+ :quoted :bare)
 
-    :color (* :space (+ :quoted :bare) :space)
+    :color (+ :quoted :bare)
 
-    :verb (* "(" :space ,(tuple ;(array '+ ;verb-rules)) ")")
+    :verb ,(tuple ;(array '+ ;verb-rules))
 
     :comment (* "#" (any 1))
-    :main (* :space (any (* :verb :space)) (? :comment) -1)})
+    :main (* :space (? :verb) :space (? :comment) -1)})
 
 (defn- code-of [line]
   (var cut nil)
@@ -113,12 +106,11 @@
   (def parts
     (map (fn [arg]
            (case arg
-             :alias "name"
-             :name "p"
+             :name "prefix"
              :color? "color?"
              (string arg)))
          (spec :args)))
-  (string "(" (string/join (array (spec :name) ;parts) " ") ")"))
+  (string/join (array (spec :name) ;parts) " "))
 
 (defn docs
 
@@ -127,7 +119,8 @@
          {:name (spec :name)
           :usage (usage spec)
           :args (map |(string $) (spec :args))
-          :blurb (spec :blurb)})
+          :blurb (string (spec :blurb) " Enter un" (usage spec)
+                         " to comment out matching active commands; absent commands are left alone.")})
        verb-specs))
 
 (defn colours
@@ -139,19 +132,6 @@
 
   [text]
   (string/replace-all "/" "." (string/trim text "./")))
-
-(defn expand-aliases
-
-  [aliases text]
-  (var out text)
-  (var done false)
-  (each entry aliases
-    (unless done
-      (def token (entry :alias))
-      (when (string/has-prefix? token text)
-        (set out (string (entry :prefix) (string/slice text (length token))))
-        (set done true))))
-  out)
 
 (defn- nested-dir
 
@@ -195,19 +175,19 @@
   (def [verb & args] form)
   (case verb
     :hide
-    (let [text (normalise (expand-aliases (state :aliases) (first args)))]
+    (let [text (normalise (first args))]
       (unless (index-of text (state :hidden))
         (array/push (state :hidden) text))
       nil)
 
     :only
-    (let [text (normalise (expand-aliases (state :aliases) (first args)))]
+    (let [text (normalise (first args))]
       (unless (index-of text (state :only))
         (array/push (state :only) text))
       nil)
 
     :box
-    (let [text (normalise (expand-aliases (state :aliases) (first args)))
+    (let [text (normalise (first args))
           wanted (get args 1)]
       (var hue "")
       (var wrong nil)
@@ -232,27 +212,8 @@
             (reflow state)
             nil)))
 
-    :prefix
-    (let [token (first args)
-          full (normalise (get args 1))
-          bound (find |(= ($ :alias) token) (state :aliases))]
-      (cond
-
-        (empty? full)
-        "a prefix needs something to stand for -- (prefix name p), like (prefix ~ src.server)"
-
-        bound
-        (string "`" token "` is already bound to `" (bound :prefix)
-                "` -- a name stands for one path")
-
-        (do
-          (put state :aliases
-               (sorted-by |(- (length ($ :alias)))
-                          (array ;(state :aliases) {:alias token :prefix full})))
-          nil)))
-
     :fold
-    (let [text (normalise (expand-aliases (state :aliases) (first args)))]
+    (let [text (normalise (first args))]
       (unless (index-of text (state :folded))
         (array/push (state :folded) text))
       nil)
@@ -264,33 +225,17 @@
     (let [named (string/trim (or (first args) "") "./")]
       (cond
         (empty? named)
-        "a nested project needs a directory -- (visualize p), like (visualize lib)"
+        "a nested project needs a directory -- visualize prefix, like visualize lib"
 
         (and (state :root) (not (nested-dir (state :root) named)))
-        (string "there is no `" named "` here -- (visualize p) names a "
+        (string "there is no `" named "` here -- visualize prefix names a "
                 "directory of this project")
 
         nil))))
 
-(defn- complain
-
-  [line]
-  (def text (string/trim line))
-
-  (def forms (peg/match ~(any (+ (<- (* "(" (any (if-not ")" 1)) ")"))
-                                 (if-not "(" 1)))
-                        text))
-  (def broken (find |(nil? (peg/match grammar $)) (or forms [])))
-  (def named (peg/match ~(* "(" (any (set " \t")) (<- (some (range "az" "AZ" "--"))))
-                        (or broken text)))
-  (def verb (and named (first named)))
+(defn- complain [line]
+  (def verb (first (string/split " " (string/trim line))))
   (cond
-    (not (string/has-prefix? "(" text))
-    "a config line is a form in parentheses, like (hide src.test)"
-
-    (not (string/has-suffix? ")" text))
-    "this line is missing its closing parenthesis"
-
     (and verb (not (index-of verb verbs)))
     (string "there is no verb `" verb "` -- try " (string/join verbs ", "))
 
@@ -299,13 +244,17 @@
       (string "`" verb "` takes " (usage spec)
               (if (empty? (spec :args))
                 " and nothing else"
-                (string " -- p is a prefix of the labels on the graph, so"
+                (string " -- prefix matches the start of the labels on the graph, so"
                         " src.server catches every node under it"
                         (if (index-of :color? (spec :args))
                           ". A colour is rrggbb or a name like blue"
                           "")))))
 
-    (string "not a config form -- try " (string/join verbs ", "))))
+    (string "use one command per line -- try " (string/join verbs ", "))))
+
+(defn command [line]
+  (def forms (peg/match grammar (string/trim (code-of line))))
+  (when (and forms (not (empty? forms))) forms))
 
 (def marker "@visualize")
 
@@ -314,34 +263,14 @@
   [line]
   (string/has-prefix? marker (string/trim (or line ""))))
 
-(defn eval-line
-
-  [line state &opt only]
+(defn eval-line [line state]
   (def text (string/trim (code-of line)))
-  (cond
-    (empty? text) nil
-    (string/has-prefix? "#" text) nil
-
-    (note? text) nil
-    (if-let [forms (peg/match grammar text)]
-      (do
-        (var wrong nil)
-
-        (var i 0)
-        (while (< i (length forms))
-          (def verb (forms i))
-          (def args @[])
-          (++ i)
-          (while (and (< i (length forms)) (string? (forms i)))
-            (array/push args (forms i))
-            (++ i))
-          (def mine (if only (= verb only) (not= verb :prefix)))
-          (when (and mine (not wrong))
-            (set wrong (apply-verb state [verb ;args]))))
-        wrong)
+  (unless (or (empty? text) (note? text))
+    (if-let [form (command text)]
+      (apply-verb state form)
       (complain text))))
 
-(def config-name "visualize.conf")
+(def config-name "visualize_config")
 
 (defn- visualize-targets
 
@@ -382,26 +311,6 @@
   (def prefix (normalise dir))
   (def out @[])
 
-  (def aliases @[])
-  (each line (string/split "\n" (string text))
-    (def trimmed (string/trim (code-of line)))
-    (when (and (not (empty? trimmed))
-               (not (string/has-prefix? "#" trimmed))
-               (not (note? trimmed)))
-      (when-let [forms (peg/match grammar trimmed)]
-        (var i 0)
-        (while (< i (length forms))
-          (def verb (forms i))
-          (++ i)
-          (def args @[])
-          (while (and (< i (length forms)) (string? (forms i)))
-            (array/push args (forms i))
-            (++ i))
-          (when (and (= verb :prefix) (= 2 (length args)))
-            (array/push aliases
-                        {:alias (first args) :prefix (normalise (get args 1))}))))))
-
-  (def aliases (sorted-by |(- (length ($ :alias))) aliases))
   (each line (string/split "\n" (string text))
     (def trimmed (string/trim (code-of line)))
     (when (and (not (empty? trimmed))
@@ -417,7 +326,7 @@
             (array/push args (forms i))
             (++ i))
 
-          (unless (or (empty? args) (= verb :prefix))
+          (unless (empty? args)
             (def spec (find |(= ($ :name) (string verb)) verb-specs))
             (def kinds (if spec (spec :args) []))
 
@@ -425,7 +334,7 @@
               (seq [[at arg] :pairs args]
                 (if (= (get kinds at) :name)
 
-                  (let [raw (string/trim (expand-aliases aliases arg))
+                  (let [raw (string/trim arg)
                         marked (or (names/external? raw) (= raw "?"))
                         full (normalise raw)]
 
@@ -436,7 +345,8 @@
                         (string prefix "." full))))
                   arg)))
             (array/push out
-                        (string "(" verb " " (string/join moved " ") ")")))))))
+                        (string verb " " (string/join
+                          (map |(if (peg/find '(set " \t#\"") $) (json/encode $) $) moved) " "))))))))
   out)
 
 (defn- pasted
@@ -471,96 +381,147 @@
   (def problems @{})
 
   (eachp [i line] lines
-    (when-let [wrong (eval-line line state :prefix)]
-      (put problems i wrong)))
-
-  (eachp [i line] lines
     (when-let [wrong (eval-line line state)]
-
-      (unless (problems i) (put problems i wrong))))
+      (put problems i wrong)))
   [state problems])
 
 (def config-title "visualize")
 
 (def starter
-  ``# One verb per line. Press ? for the full list.
-# A name is the dotted path a node shows: (box src.parsers) draws a box
-# round that directory, (hide src.test) drops it. A name from OUTSIDE the
-# tree wears the ?. the drawing shows it with: (hide ?.os), (box ?.SwiftUI).
-# Comment out with '#'.
-(lines)
-``)
+  "lines\n")
 
-(defn notes
+(defn- note-records [line]
+  (unless (note? line) (break nil))
+  (def text (string/trim (string/slice (string/trim line) (length marker))))
+  (try
+    (cond
+      (string/has-prefix? "markdown " text)
+      (let [documents (json/decode (string/slice text 9))]
+        (when (dictionary? documents)
+          (seq [[id file] :pairs documents] [id {:document file}])))
+      (string/has-prefix? "label " text)
+      (let [parts (peg/match '(* "label " (<- (some (if-not " " 1))) (some " ") (<- (any 1)) -1) text)]
+        (when parts [[(parts 0) {:label (parts 1)}]]))
+      (do
+        (def tokens (peg/match
+          ~{:gap (any (set " \t"))
+            :quoted (/ (<- (* `"` (any (+ (* "\\" 1) (if-not `"` 1))) `"`)) ,json/decode)
+            :bare (<- (some (if-not (set " \t\"") 1)))
+            :main (* :gap (some (* (+ :quoted :bare) :gap)) -1)} text))
+        (def kind (get tokens 0))
+        (def id (get tokens 1))
+        (when (and id (index-of kind ["terminal" "placement"]))
+          (def fields @{})
+          (if (= kind "placement")
+            (put fields :placement (slice tokens 2))
+            (do
+              (var i 2)
+              (while (< i (length tokens))
+                (def key (keyword (tokens i)))
+                (++ i)
+                (case key
+                  :placement
+                  (let [start i]
+                    (++ i)
+                    (while (and (< i (length tokens)) (scan-number (tokens i))) (++ i))
+                    (put fields key (slice tokens start i)))
+                  (if (and (index-of key [:socket :label :document]) (< i (length tokens)))
+                    (do (put fields key (tokens i)) (++ i))
+                    (error "invalid terminal field"))))))
+          [[id fields]])))
+    ([_] nil)))
 
-  [lines]
-  (seq [line :in lines :when (note? line)]
-    (filter |(not (empty? $))
-            (string/split " " (string/trim (string/slice (string/trim line)
-                                                         (length marker)))))))
-
-(defn terminals
-
-  [lines]
-  (seq [words :in (notes lines)
-        :when (and (= "terminal" (get words 0))
-                   (= "socket" (get words 2))
-                   (get words 1) (get words 3))]
-    [(get words 1) (get words 3)]))
-
-(defn labels
-
-  [lines]
+(defn- records [lines]
   (def out @{})
   (each line lines
-    (when (note? line)
-      (def rest (string/trim (string/slice (string/trim line) (length marker))))
-      (when (string/has-prefix? "label " rest)
-        (def body (string/slice rest (length "label ")))
-        (def at (string/find " " body))
-        (when at
-          (def id (string/slice body 0 at))
-          (def text (string/trim (string/slice body (+ at 1))))
-          (unless (or (empty? id) (empty? text)) (put out id text))))))
+    (each [id fields] (or (note-records line) [])
+      (put out id (merge (get out id @{}) fields))))
   out)
 
-(defn remember-labels
+(defn- note-token [value]
+  (def text (string value))
+  (if (or (empty? text) (peg/find '(set " \t\r\n\"\\#") text)) (json/encode text) text))
 
-  [lines named]
-  (def kept (array ;(filter |(not (and (note? $)
-                                       (string/has-prefix?
-                                         "label "
-                                         (string/trim
-                                           (string/slice (string/trim $)
-                                                         (length marker))))))
-                            lines)))
-  (def written (seq [id :in (sorted (keys named))
-                     :let [text (string/trim (or (get named id) ""))]
-                     :when (not (empty? text))]
-                 (string marker " label " id " " text)))
-  (if (empty? written)
-    kept
-    (array ;kept ;(if (or (empty? kept) (empty? (string/trim (last kept))))
-                    []
-                    [""])
-           ;written)))
+(defn- with-records [lines saved]
+  (def out @[])
+  (def written @{})
+  (defn write-record [id]
+    (def fields (saved id))
+    (unless (or (written id) (empty? fields))
+      (put written id true)
+      (def words @[marker "terminal" (note-token id)])
+      (each key [:socket :placement :label :document]
+        (when-let [value (fields key)]
+          (array/push words (string key))
+          (if (= key :placement)
+            (array/concat words (map note-token value))
+            (array/push words (note-token value)))))
+      (array/push out (string/join words " "))))
+  (each line lines
+    (if-let [old (note-records line)]
+      (each [id _] old (write-record id))
+      (array/push out line)))
+  (while (and (not (empty? out)) (empty? (string/trim (last out)))) (array/pop out))
+  (each id (sorted (keys saved)) (write-record id))
+  out)
 
-(defn remember-terminals
+(defn- field-values [lines key]
+  (def out @{})
+  (eachp [id fields] (records lines)
+    (when-let [value (fields key)] (put out id value)))
+  out)
 
-  [lines pairs]
-  (def kept (array ;(filter |(or (not (note? $))
-    (string/has-prefix? "@visualize markdown " (string/trim $))) lines)))
+(defn- remember-field [lines key values]
+  (def saved (records lines))
+  (eachp [id fields] saved (put fields key (get values id)))
+  (eachp [id value] values
+    (unless (has-key? saved id) (put saved id @{key value})))
+  (with-records lines saved))
 
-  (while (and (> (length kept) 1) (empty? (string/trim (last kept))))
-    (array/pop kept))
-  (def written (seq [[id socket] :in pairs]
-                 (string marker " terminal " id " socket " socket)))
-  (if (empty? written)
-    kept
-    (array ;kept ;(if (or (empty? kept) (empty? (string/trim (last kept))))
-                    []
-                    [""])
-           ;written)))
+(defn terminals [lines]
+  (def sockets (field-values lines :socket))
+  (seq [id :in (sorted (keys sockets))] [id (sockets id)]))
+
+(defn remember-terminals [lines pairs]
+  (remember-field lines :socket (table ;(mapcat identity pairs))))
+
+(defn labels [lines] (field-values lines :label))
+
+(defn remember-labels [lines named]
+  (def values @{})
+  (eachp [id text] named
+    (def trimmed (string/trim (or text "")))
+    (unless (empty? trimmed) (put values id trimmed)))
+  (remember-field lines :label values))
+
+(defn unique-lines [lines]
+  (def seen @{})
+  (filter (fn [line]
+    (def text (string/trim line))
+    (if (or (empty? text) (note? line))
+      true
+      (let [commented (string/has-prefix? "#" text)
+            form (command (if commented (string/triml (string/slice text 1)) text))
+            key (if form (tuple :command commented ;form) [:text text])]
+        (if (seen key) false (do (put seen key true) true))))) lines))
+
+(defn tidy-lines [lines]
+  (def out @[])
+  (each line (unique-lines (with-records lines (records lines)))
+    (if (empty? (string/trim line))
+      (when (and (not (empty? out)) (not (empty? (last out)))) (array/push out ""))
+      (array/push out line)))
+  (while (and (not (empty? out)) (empty? (last out))) (array/pop out))
+  out)
+
+(defn write-config
+
+  [path lines]
+  (def lines (tidy-lines lines))
+  (def next (if (empty? lines) "" (string (string/join lines "\n") "\n")))
+  (def now (try (string (slurp path)) ([_] nil)))
+  (unless (= next now)
+    (spit path next)))
 
 (defn read-config
 
@@ -569,19 +530,13 @@
     (spit path (string (string/trimr starter "\n") "\n")))
   (def text (try (slurp path) ([_] "")))
 
-  (def lines (string/split "\n" text))
-  (if (and (> (length lines) 0) (= "" (last lines)))
-    (slice lines 0 -2)
-    lines))
-
-(defn write-config
-
-  [path lines]
-  (def next (string (string/join lines "\n") "\n"))
-
-  (def now (try (string (slurp path)) ([_] nil)))
-  (unless (= next now)
-    (spit path next)))
+  (def split (string/split "\n" text))
+  (def lines (if (and (> (length split) 0) (= "" (last split)))
+    (slice split 0 -2)
+    split))
+  (def unique (tidy-lines lines))
+  (unless (= (tuple ;unique) (tuple ;lines)) (write-config path unique))
+  unique)
 
 (def draws {"run" true "delete" true "reorder" true "regenerate" true})
 
@@ -601,37 +556,25 @@
 
 (defn placements [lines]
   (def out @{})
-  (each words (notes lines)
-    (when (= "placement" (get words 0))
-      (def id (get words 1))
-      (def side (get words 2))
-      (def x (scan-number (get words 3 "")))
-      (def y (scan-number (get words 4 "")))
-      (def w (scan-number (get words (if (index-of side ["top" "bottom"]) 4 5) "")))
-      (def h (scan-number (get words (if (index-of side ["top" "bottom"]) 5 6) "")))
+  (eachp [id words] (field-values lines :placement)
+      (def side (get words 0))
+      (def x (scan-number (get words 1 "")))
+      (def y (scan-number (get words 2 "")))
+      (def w (scan-number (get words (if (index-of side ["top" "bottom"]) 2 3) "")))
+      (def h (scan-number (get words (if (index-of side ["top" "bottom"]) 3 4) "")))
       (when (and id x (<= -100000 x 100000))
         (cond
           (and (index-of side ["top" "bottom"]) (>= x 0) (= x (math/floor x)))
           (put out id (if (and w h (> w 0) (> h 0)) [side x w h] [side x]))
           (and (= side "floating") y (<= -100000 y 100000))
-          (put out id (if (and w h (> w 0) (> h 0)) [side x y w h] [side x y]))))))
+          (put out id (if (and w h (> w 0) (> h 0)) [side x y w h] [side x y])))))
   out)
 
 (defn remember-placements [lines positions]
-  (def kept (filter |(not (and (note? $)
-    (string/has-prefix? "placement " (string/trim (string/slice (string/trim $) (length marker)))))) lines))
-  (array ;kept ;(seq [id :in (sorted (keys positions))]
-    (string marker " placement " id " " (string/join (map string (get positions id)) " ")))))
+  (remember-field lines :placement positions))
 
 (defn markdown [lines]
-  (or (some (fn [line]
-    (def text (string/trim line))
-    (when (string/has-prefix? "@visualize markdown " text)
-      (try (let [value (json/decode (string/slice text 20))]
-        (when (dictionary? value) value)) ([_] nil)))) lines) @{}))
+  (field-values lines :document))
 
 (defn remember-markdown [lines documents]
-  (def kept (array ;(filter |(not (string/has-prefix? "@visualize markdown " (string/trim $))) lines)))
-  (if (empty? documents)
-    kept
-    (array ;kept (string "@visualize markdown " (json/encode documents)))))
+  (remember-field lines :document documents))

@@ -66,7 +66,7 @@ try {
     await mkdir(variant);
     await cp(join(repo, 'src'), join(variant, 'src'), { recursive: true });
     await cp(join(repo, 'src.server'), join(variant, 'src.server'), { recursive: true });
-    for (const dir of ['external-src', 'src.mcp', 'src.vterm', 'src.wterm', 'src.graphviz']) await symlink(join(repo, dir), join(variant, dir));
+    for (const dir of ['external-src', 'src.vterm', 'src.wterm', 'src.graphviz']) await symlink(join(repo, dir), join(variant, dir));
     const host = join(variant, 'src.server/term/host.janet');
     let source = await readFile(host, 'utf8');
     source = source.replace('before (length backlog)', 'before (+ base (length backlog))')
@@ -148,8 +148,9 @@ try {
     } });
   }
   else if (process.env.LATENCY_CASE === 'default-backlog') {
-    const conf = await readFile(join(root, 'project', 'visualize.conf'), 'utf8');
-    const path = conf.match(/@visualize terminal harness socket (.+)/)[1];
+    const conf = await readFile(join(root, 'project', 'visualize_config'), 'utf8');
+    const socket = conf.match(/@visualize terminal harness socket ("(?:\\.|[^"\\])*"|\S+)/)[1];
+    const path = socket.startsWith('"') ? JSON.parse(socket) : socket;
     const conn = createConnection(path);
     await new Promise((resolve, reject) => { conn.once('connect', resolve); conn.once('error', reject); });
     let carry = '';
@@ -182,7 +183,7 @@ try {
     const files = join(root, 'project', 'files');
     await mkdir(files);
     for (let i = 0; i < 3000; i++) await writeFile(join(files, `f${i}.js`), `export const a = ${i};\n`);
-    await writeFile(join(root, 'project', 'visualize.conf'), '(fold files)\n');
+    await writeFile(join(root, 'project', 'visualize_config'), 'fold files\n');
     await sleep(3000);
     await scenario('3000-files-idle', 150);
     await scenario('3000-files-edits', 150, 25, async () => {

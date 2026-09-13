@@ -9,7 +9,7 @@
 
 (t/test "a name may not describe a path"
 
-  (t/is= nil (http/static-file "/../visualize.conf"))
+  (t/is= nil (http/static-file "/../visualize_config"))
   (t/is= nil (http/static-file "/../../etc/passwd"))
   (t/is= nil (http/static-file "/src/pty.janet"))
   (t/is= nil (http/static-file "/web/term.js"))
@@ -103,6 +103,24 @@
   (t/is= (inc port-one) port-two "it lands on the very next port")
   (:close one)
   (:close two))
+
+(t/test "closing a listener ends its accept task without a failed or phantom connection"
+  (for iteration 0 6
+    (def events (ev/chan 8))
+    (def [server port accept-loop] (http/serve 8941 5 |["200 OK" "text/plain" "ok"]))
+    (def accepting (ev/go accept-loop nil events))
+    (ev/sleep 0)
+    (when (even? iteration)
+      (def conn (net/connect "127.0.0.1" (string port)))
+      (:write conn "GET / HTTP/1.1\r\n")
+      (:close conn)
+      (def [signal client-task] (ev/take events))
+      (t/is= :ok signal "an incomplete request ends normally at EOF")
+      (t/ok (not= accepting client-task)))
+    (:close server)
+    (def [signal completed] (ev/take events))
+    (t/is= :ok signal "closing the listener completes its accept loop")
+    (t/is= accepting completed)))
 
 (t/test "a refused Unix connection cannot close a later socket during GC"
   (def path (string "/tmp/visualize-connect-gc-" (os/getpid) ".sock"))

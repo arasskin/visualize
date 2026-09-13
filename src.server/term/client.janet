@@ -192,14 +192,14 @@ shift
                         true))))
 
    :start-once
-   (fn [_ run-argv root rows cols &opt environment owner theme]
+   (fn [_ run-argv root rows cols &opt environment theme]
      (def connection (or (ensure) (error "terminal supervisor unreachable")))
      (defer (:close connection)
        (when environment
          (unless (get (checked (json/decode (talk connection {"op" "state"}))) "launchEnvironment")
            (error "This pane uses an older supervisor. Close and recreate it to apply launch settings.")))
        (client-state (checked (json/decode (talk connection
-         {"op" "start" "argv" run-argv "root" root "rows" rows "cols" cols "environment" environment "owner" owner "theme" theme}))))))
+         {"op" "start" "argv" run-argv "root" root "rows" rows "cols" cols "environment" environment "theme" theme}))))))
 
    :stop
    (fn [_] (client-state (asked {"op" "stop"})))

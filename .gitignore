@@ -1,6 +1,8 @@
 bin/
+*.swp
+*.swo
 
-/visualize.conf
+/visualize_config
 
 .probe/
 

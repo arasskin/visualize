@@ -1,4 +1,5 @@
 (import ./config)
+(import ./config-graph)
 (import ./scan)
 (import ./graph)
 (import ./json)
@@ -23,13 +24,13 @@
   (var drawing nil)
   (var drawing-key nil)
   (var working false)
+  (def diagrams @{})
   (defn hidden []
     (def out @[])
     (each line (config/read-config path)
-      (each hit (or (peg/match ~(any (+ (* "(hide" (some (set " \t"))
-                                         (<- (some (if-not (+ (set " \t()") -1) 1)))) 1))
-                             (string line)) [])
-        (def name (string/trim hit "./"))
+      (def form (config/command line))
+      (when (= (get form 0) :hide)
+        (def name (string/trim (get form 1) "./"))
         (unless (or (empty? name) (string/find "." name))
           (when (= :directory (os/stat (string root "/" name) :mode))
             (array/push out name)))))
@@ -70,10 +71,7 @@
       :notes
       (do
         (def lines (config/read-config path))
-        (config/write-config path
-          (config/remember-placements
-            (config/remember-labels (config/remember-terminals lines sent) (config/labels lines))
-            (config/placements lines)))
+        (config/write-config path (config/remember-terminals lines sent))
         true)
       :placements
       (let [lines (config/read-config path)]
@@ -102,15 +100,21 @@
         (def disk (config/read-config target))
         (def redraw (and (truthy? (get sent "draw")) (= action "run")))
         (def reload (= action "reload"))
-        (def edited (if (or redraw reload) disk (config/edit (map string (get sent "lines" [])) action index)))
-        (def edited-lines (if (or redraw reload) edited
+        (def graph-action (index-of action ["append" "subtree-comment" "subtree-delete" "rename-prefix"]))
+        (def target-root (string/join (slice (string/split "/" target) 0 -2) "/"))
+        (def edited (cond
+          graph-action (config-graph/change disk sent target-root)
+          (or redraw reload) disk
+          (config/edit (map string (get sent "lines" [])) action index)))
+        (def edited-lines (if (or graph-action redraw reload) edited
                      (config/remember-placements
                        (config/remember-labels (config/remember-terminals edited (config/terminals disk)) (config/labels disk))
                        (config/placements disk))))
-        (def lines (config/remember-markdown edited-lines (config/markdown disk)))
+        (def lines (config/tidy-lines
+          (if graph-action edited-lines (config/remember-markdown edited-lines (config/markdown disk)))))
         (unless (or redraw reload (= action "check")) (config/write-config target lines))
         (when (and (= target path) (= action "regenerate")) (set tree nil) (set drawing nil))
-        (def [state problems] (config/run lines root))
+        (def [state problems] (config/run lines target-root))
         (def [visible moved] (shown lines problems))
         (var ok true)
         (var svg "")
@@ -120,8 +124,18 @@
           (set ok (result 2))
           (set svg (result 3))
           (set drawn-generation (result 4)))
-        (json/encode {"lines" visible "problems" moved "svg" (if ok svg "")
-                      "error" (if ok "" svg) "generation" drawn-generation}))
+        (def response @{"lines" visible "problems" moved "svg" (if ok svg "")
+                        "error" (if ok "" svg) "generation" drawn-generation})
+        (when (get sent "diagram")
+          (def key (tuple ;visible))
+          (var cached (diagrams target))
+          (unless (= key (get cached 0))
+            (def model (config-graph/model visible))
+            (set cached [key model (config-graph/render model)])
+            (put diagrams target cached))
+          (put response "graph" (cached 1))
+          (put response "diagram" (cached 2)))
+        (json/encode response))
       :diagnostics (trace/snapshot)
       (error "unknown graph operation")))
   (refresh)

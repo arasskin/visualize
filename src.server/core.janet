@@ -9,8 +9,7 @@
 
 (when dev? (put root-env *redef* true))
 
-(import ../src.mcp/local :as control)
-(import ../src.mcp/workers :as worker-api)
+(import ./control)
 (import ./http)
 (import ./trace)
 (import ./json)
@@ -94,7 +93,7 @@
 
   (def repo here)
   (def launch-environment @{})
-  (eachp [key value] (launch/environment repo root "")
+  (eachp [key value] (launch/environment root "")
     (put launch-environment key value))
 
 
@@ -111,13 +110,8 @@
   (def panes @{})
   (def documents (merge @{} (config/markdown (:call graph-worker :read))))
   (var pane-generation 0)
-  (var harness-request 0)
-  (def ready-panes @{})
-  (defn panes-changed [&opt id]
-    (when id (put ready-panes id true))
-    (++ pane-generation))
-  (defn visible-panes []
-    (filter |(or (not (string/has-prefix? "agent-" $)) (get ready-panes $)) (keys panes)))
+  (defn panes-changed [] (++ pane-generation))
+  (defn visible-panes [] (keys panes))
 
   (def pane-sockets @{})
 
@@ -149,7 +143,6 @@
     (when-let [client (get panes id)] (:disconnect client))
     (put panes id nil)
     (put pane-sockets id nil)
-    (put ready-panes id nil)
     (panes-changed)
     (remember-panes))
 
@@ -161,10 +154,7 @@
 
   (each [id socket] (config/terminals (:call graph-worker :read))
     (if (answers? socket)
-      (do
-
-        (pane-for id)
-        (put ready-panes id true))
+      (pane-for id)
 
       (try (os/rm socket) ([_] nil))))
 
@@ -176,12 +166,10 @@
   (defn set-pane-title [id text]
     (:call graph-worker :label [id text])
     (panes-changed))
-  (def dispatch-control (worker-api/make root panes pane-for forget-pane panes-changed launch-environment
-                                      pane-labels set-pane-title (options :default-harness) (fn [] terminal-theme)))
   (defn document-language [file]
     (def lower (string/ascii-lower file))
     (cond
-      (string/has-suffix? "visualize.conf" lower) "config"
+      (= (last (string/split "/" file)) config/config-name) "config"
       (some |(string/has-suffix? $ lower) [".md" ".markdown" ".mdown"]) "markdown"
       (some |(string/has-suffix? $ lower) [".c" ".h" ".cc" ".hh" ".cpp" ".cxx" ".hpp"]) "c"
       (some |(string/has-suffix? $ lower) [".lisp" ".lsp" ".cl" ".clj" ".cljs" ".cljd" ".janet" ".scm" ".ss"]) "lisp"
@@ -190,8 +178,6 @@
       "text"))
   (defn control-call [operation arguments]
     (try (cond
-      (= operation "open_harness")
-      (do (++ harness-request) (panes-changed) {"ok" true})
       (= operation "document_open")
       (let [id (get arguments "id") file (os/realpath (get arguments "file" ""))]
         (unless (get panes id) (error "unknown pane id"))
@@ -201,9 +187,9 @@
         (:call graph-worker :markdown documents)
         (panes-changed)
         {"ok" true "file" file "language" (document-language file)})
-      (dispatch-control operation arguments))
+      (error "unknown document operation"))
       ([e]
-        (try (:write error-log {"phase" "mcp-control" "pane" (get arguments "id" "")
+        (try (:write error-log {"phase" "document-control" "pane" (get arguments "id" "")
                                "operation" operation "message" (string e)}) ([_] nil))
         (error e))))
 
@@ -368,8 +354,7 @@
           (ev/sleep 0.1))
         ["200 OK" "application/json"
          (json/encode {"generation" pane-generation
-                       "ids" (visible-panes) "labels" (pane-labels) "documents" documents
-                       "harnessRequest" harness-request})]))
+                       "ids" (visible-panes) "labels" (pane-labels) "documents" documents})]))
 
       (and (= method "POST") (= path "/document"))
       (guarded (fn []
@@ -410,13 +395,16 @@
 
       (and (= (request :method) "POST") (= path "/config"))
       (guarded (fn []
-        (def sent (json/decode (or (request :body) "{}")))
-        (def file (get sent "file"))
-        (when file
-          (def full (os/realpath file))
-          (unless (and full (= :file (os/stat full :mode))) (error "configuration file is unavailable"))
-          (put sent "file" full))
-        ["200 OK" "application/json" (config-edit (json/encode sent))]))
+        (try
+          (do
+            (def sent (json/decode (or (request :body) "{}")))
+            (def file (get sent "file"))
+            (when file
+              (def full (os/realpath file))
+              (unless (and full (= :file (os/stat full :mode))) (error "configuration file is unavailable"))
+              (put sent "file" full))
+            ["200 OK" "application/json" (config-edit (json/encode sent))])
+          ([err] ["400 Bad Request" "application/json" (json/encode {"error" (string err)})]))))
 
       (and (= method "POST") (= path "/panes/placements"))
       (guarded (fn []
@@ -531,13 +519,12 @@
   (def control-path (socket-for root (string "." bound ".control.sock")))
   (def close-control (control/serve control-path control-call))
   (put launch-environment "VISUALIZE_SOCKET" control-path)
-  (put launch-environment "VISUALIZE_SOCKET_JSON" (json/encode control-path))
   (put launch-environment "VISUALIZE_MAIN_HARNESS_COMMAND" (options :command))
   (os/setenv "VISUALIZE_SOCKET" control-path)
   (os/setenv "VISUALIZE_MAIN_HARNESS_COMMAND" (options :command))
   (when start-empty?
     (:start-once (pane-for "harness") (harness-argv) root 24 100
-      (merge launch-environment {"VISUALIZE_PANE_ID" "harness"}) nil terminal-theme))
+      (merge launch-environment {"VISUALIZE_PANE_ID" "harness"}) terminal-theme))
   (def url (string "http://127.0.0.1:" bound))
 
   (os/sigaction :int
@@ -596,7 +583,6 @@ exec "$@"``
   (print "visualize: " root " on " url)
   (print (align-word "config: " "visualize: ") config-path)
   (print (align-word "parsers: " "visualize: ") (string/join (scan/languages) ", "))
-  (print "mcp: " repo "/visualize-mcp " control-path)
   (print "ctrl-c stops the server and terminal sessions.")
   (print "ctrl-d restarts the server, keeping terminal sessions.")
 

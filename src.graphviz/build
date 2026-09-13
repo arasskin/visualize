@@ -15,7 +15,7 @@ if [ "$graphviz_check" -eq 0 ] && [ "${1:-}" != --force ] && [ -f "$graphviz_out
   exit 0
 fi
 graphviz_tmp=$(mktemp "$graphviz_out.XXXXXX")
-trap 'rm -f "$graphviz_tmp"' EXIT HUP INT TERM
+trap 'rm -f "$graphviz_tmp"; rm -rf "$graphviz_tmp.dSYM"' EXIT HUP INT TERM
 case $(uname -s) in
   Darwin) set -- -dynamiclib -Wl,-install_name,@rpath/libvisualize-graphviz.so ;;
   Linux) set -- -shared -Wl,-z,defs ;;

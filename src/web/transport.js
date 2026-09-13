@@ -11,8 +11,12 @@ const limit = 262144;
 const decoder = new TextDecoder();
 const encoder = new TextEncoder();
 
+class ConnectionError extends Error {
+  constructor(message) { super(message); this.reconnect = true; }
+}
+
 function send(message) {
-  if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error('terminal disconnected');
+  if (!socket || socket.readyState !== WebSocket.OPEN) throw new ConnectionError('terminal disconnected');
   const text = JSON.stringify(message);
   if (socket.bufferedAmount + encoder.encode(text).length > limit) throw new Error('terminal send buffer full');
   socket.send(text);
@@ -32,8 +36,9 @@ function reconnect() {
 }
 
 export async function refreshSession() {
-  const response = await fetch('/session', { cache: 'no-store', signal: AbortSignal.timeout(5000) });
-  if (!response.ok) throw new Error('terminal connection unavailable');
+  const response = await fetch('/session', { cache: 'no-store', signal: AbortSignal.timeout(5000) })
+    .catch(() => { throw new ConnectionError('terminal connection unavailable'); });
+  if (!response.ok) throw new ConnectionError('terminal connection unavailable');
   const session = await response.json();
   window.TOKEN = session.token;
   return session;
@@ -83,16 +88,16 @@ export function connect() {
       socket = null;
       for (const entry of pending.values()) {
         clearTimeout(entry.timer);
-        entry.reject(new Error('terminal disconnected; delivery unconfirmed'));
+        entry.reject(new ConnectionError('terminal disconnected; delivery unconfirmed'));
       }
       pending.clear(); pendingBytes = 0;
       for (const sub of subscriptions.values()) sub.state('reconnecting...');
       reconnect();
     };
     await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { ws.close(); reject(new Error('terminal connection timed out')); }, 5000);
+      const timer = setTimeout(() => { ws.close(); reject(new ConnectionError('terminal connection timed out')); }, 5000);
       ws.onopen = () => { clearTimeout(timer); resolve(); };
-      ws.onerror = () => { clearTimeout(timer); reject(new Error('terminal connection failed')); };
+      ws.onerror = () => { clearTimeout(timer); reject(new ConnectionError('terminal connection failed')); };
     });
     for (const [pane, sub] of subscriptions) attach(pane, sub);
   })().finally(() => { connecting = null; });

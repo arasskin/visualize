@@ -170,19 +170,6 @@
   [name groups ours]
   (last (boxes-for name groups ours)))
 
-(defn alias-label
-
-  [aliases name]
-  (var out nil)
-  (each entry aliases
-    (unless out
-      (def full (entry :prefix))
-      (cond
-        (= name full) (set out (entry :alias))
-        (string/has-prefix? (string full ".") name)
-        (set out (string (entry :alias) (string/slice name (length full)))))))
-  out)
-
 (defn resolve
 
   [graph groups flashing palette]

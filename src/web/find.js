@@ -1,6 +1,6 @@
 import { measure } from './render-trace.js';
 import { pane, scale, panBy, drawing, renderedScale, screenBounds, selectGraphNode } from './graph.js';
-import { fuzzyScore, fuzzyRank } from './fuzzy.js';
+import { matchesText } from './text-match.js';
 
 let deps = {
   moduleNames: () => [],
@@ -37,11 +37,9 @@ function matchNodes(query) {
     if (!title) continue;
     const key = title.textContent.trim();
     const label = names.get(key) || key;
-    const rank = Math.min(fuzzyScore(key, query), fuzzyScore(label, query));
-    if (!Number.isFinite(rank)) continue;
-    found.push({ node, key, label, rank });
+    if (!matchesText(key, query) && !matchesText(label, query)) continue;
+    found.push({ node, key, label });
   }
-  found.sort((a, b) => a.rank - b.rank || a.key.length - b.key.length || a.key.localeCompare(b.key));
   return found;
 }
 
@@ -307,7 +305,7 @@ function renderFindRows() {
 function renderFindList() {
   const typed = findInput.value.trim();
 
-  findItems = finding() ? measure('search-suggestions', () => fuzzyRank(deps.prefixCandidates(), typed)) : [];
+  findItems = finding() ? measure('search-suggestions', () => deps.prefixCandidates().filter(text => matchesText(text, typed))) : [];
   findAt = -1;
   renderFindRows();
 }

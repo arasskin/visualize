@@ -1,5 +1,4 @@
 (import ./select)
-(import ./names)
 (import ./layout)
 
 (var- seen nil)
@@ -29,34 +28,16 @@
       (def [folded sizes]
         (select/fold trimmed (state :folded) (tree :sizes)))
 
-      (def aliased
-        (if (empty? (state :aliases))
-          folded
-          (merge folded
-                 {:nodes (map (fn [node]
-                                (if-let [short (select/alias-label (state :aliases)
-                                                                   (node :name))]
-
-                                  (merge node
-                                         {:label
-                                          (let [cut (if (node :folded) short (names/stem short))
-                                                ext (unless (node :folded) (names/extension short))
-                                                rows (string/join
-                                                       (string/split "." cut) ".\n")]
-                                            (if ext (string rows "\n." ext) rows))})
-                                  node))
-                              (folded :nodes))})))
-
       (def labelled
         (if (state :sized)
-          (merge aliased
+          (merge folded
                  {:nodes (map (fn [node]
                                 (if-let [size (get sizes (node :name))]
 
                                   (merge node {:label (string (node :label) "\n" size)})
                                   node))
-                              (aliased :nodes))})
-          aliased))
+                              (folded :nodes))})
+          folded))
 
       (def flashing (moved-since (tree :stamps)))
       (set seen (tree :stamps))
