@@ -5,13 +5,15 @@ set -e
 here=$(cd "$(dirname "$0")" && pwd)
 janet_src="$here/external-src/janet"
 janet_out="$here/external-src/janet/janet"
+pty_src="$here/src.server/term/pty.c"
+pty_out="$here/src.server/term/libvisualize-pty.so"
 
 "$here/src.vterm/build"
 "$here/src.graphviz/build" "$@"
 
 case "${1:-}" in
   --clean)
-    rm -f "$janet_out"
+    rm -f "$janet_out" "$pty_out"
     echo "removed $janet_out"
     exit 0
     ;;
@@ -26,6 +28,18 @@ case "${1:-}" in
     exit 2
     ;;
 esac
+
+if [ "$force" -eq 1 ] || [ ! -f "$pty_out" ] || [ "$pty_src" -nt "$pty_out" ] || [ "$here/build" -nt "$pty_out" ]; then
+  pty_tmp=$(mktemp "$pty_out.XXXXXX")
+  trap 'rm -f "$pty_tmp"' EXIT HUP INT TERM
+  case $(uname -s) in
+    Darwin) pty_link=-dynamiclib ;;
+    *) pty_link=-shared ;;
+  esac
+  "${CC:-cc}" -std=c99 -O2 -fPIC "$pty_link" "$pty_src" -o "$pty_tmp"
+  mv "$pty_tmp" "$pty_out"
+  trap - EXIT HUP INT TERM
+fi
 
 if [ "$force" -eq 0 ] && [ -x "$janet_out" ]; then
   stale=0

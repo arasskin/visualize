@@ -1,6 +1,5 @@
-import { createConnection } from 'node:net';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, readFile, rm, cp, symlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +12,7 @@ const chromePath = process.env.CHROME || '/Applications/Google Chrome.app/Conten
 let server, chrome, socket;
 const logs = [];
 const results = [];
-const metadata = { platform: process.platform, arch: process.arch, trace: process.env.VISUALIZE_TRACE || '1', workload: process.env.LATENCY_CASE || 'panes', variant: process.env.LATENCY_VARIANT || 'current', backlog: process.env.VISUALIZE_BACKLOG || '4000' };
+const metadata = { platform: process.platform, arch: process.arch, trace: process.env.VISUALIZE_TRACE || '1', workload: process.env.LATENCY_CASE || 'panes' };
 async function waitFor(fn, ms = 30000) {
   const end = Date.now() + ms;
   while (Date.now() < end) {
@@ -61,19 +60,6 @@ try {
   await writeFile(join(root, 'project', 'main.js'), 'export const a = 1;\n');
   await writeFile(join(root, 'bin', 'open'), '#!/bin/sh\nfor browser_arg do\n  browser_arg=${browser_arg%%#*}\n  case "$browser_arg" in\n    http://*|https://*) printf "%s" "$browser_arg" > "$VZ_BENCH_URL" ;;\n    --app=*) printf "%s" "${browser_arg#--app=}" > "$VZ_BENCH_URL" ;;\n  esac\ndone\n', { mode: 0o755 });
   let core = join(repo, 'src.server/core.janet');
-  if (process.env.LATENCY_VARIANT === 'backlog-counter') {
-    const variant = join(root, 'variant');
-    await mkdir(variant);
-    await cp(join(repo, 'src'), join(variant, 'src'), { recursive: true });
-    await cp(join(repo, 'src.server'), join(variant, 'src.server'), { recursive: true });
-    for (const dir of ['external-src', 'src.vterm', 'src.wterm', 'src.graphviz']) await symlink(join(repo, dir), join(variant, dir));
-    const host = join(variant, 'src.server/term/host.janet');
-    let source = await readFile(host, 'utf8');
-    source = source.replace('before (length backlog)', 'before (+ base (length backlog))')
-      .replaceAll('(= (length backlog) before)', '(= (+ base (length backlog)) before)');
-    await writeFile(host, source);
-    core = join(variant, 'src.server/core.janet');
-  }
   const serverOptions = {
     cwd: repo, stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, VISUALIZE_TRACE: process.env.VISUALIZE_TRACE || '1',
@@ -136,7 +122,7 @@ try {
     await writeFile(output, JSON.stringify({ metadata, results, logs }, null, 2));
     console.log(name, JSON.stringify(result.summary));
   }
-  await scenario('one-pane');
+  if (process.env.LATENCY_CASE !== 'protocol') await scenario('one-pane');
   if (process.env.LATENCY_CASE === 'protocol') {
     const { check } = await import('./stream-checks.mjs');
     await check({ cdp, url, root, waitFor, restart: async during => {
@@ -147,38 +133,6 @@ try {
       startServer();
     } });
   }
-  else if (process.env.LATENCY_CASE === 'default-backlog') {
-    const conf = await readFile(join(root, 'project', 'visualize_config'), 'utf8');
-    const socket = conf.match(/@visualize terminal harness socket ("(?:\\.|[^"\\])*"|\S+)/)[1];
-    const path = socket.startsWith('"') ? JSON.parse(socket) : socket;
-    const conn = createConnection(path);
-    await new Promise((resolve, reject) => { conn.once('connect', resolve); conn.once('error', reject); });
-    let carry = '';
-    const pending = [];
-    conn.on('data', b => {
-      carry += String(b);
-      for (;;) {
-        const end = carry.indexOf('\n'); if (end < 0) break;
-        const line = carry.slice(0, end); carry = carry.slice(end + 1);
-        pending.shift()(JSON.parse(line));
-      }
-    });
-    const ask = message => new Promise(resolve => { pending.push(resolve); conn.write(JSON.stringify(message)+'\n'); });
-    try {
-      let chunks = 0;
-      while (chunks < 4100) {
-        for (let i = 0; i < 100; i++) {
-          await ask({ op: 'input', text: 'x\x7f', quiet: true });
-          await sleep(1);
-        }
-        chunks = (await ask({ op: 'state' })).chunks;
-      }
-      console.log('Warmed default backlog:', chunks, 'chunks');
-    } finally { conn.end(); }
-    await sleep(250);
-    await scenario('default-full-backlog', 100);
-  }
-  else if (process.env.LATENCY_CASE === 'backlog') await scenario('full-backlog', 100);
   else if (process.env.LATENCY_CASE === 'scan') {
     const files = join(root, 'project', 'files');
     await mkdir(files);
@@ -194,7 +148,7 @@ try {
     });
   }
   else for (let panes = 2; panes <= 5; panes++) {
-    await cdp.evaluate('(async () => { const m = await import("/panes.js"); m.openTerminal(); })()');
+    await cdp.evaluate('(async () => { const m = await import("/app.js"); m.workspace.openTerminal(); })()');
     await sleep(1500);
     await scenario(panes + '-panes', 60);
   }

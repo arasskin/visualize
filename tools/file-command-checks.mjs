@@ -90,7 +90,7 @@ try {
   await cdp.send('Runtime.enable');
   const failures=[];
   socket.addEventListener('message',event=>{const m=JSON.parse(event.data);if(m.method==='Runtime.exceptionThrown')failures.push(m.params)});
-  await cdp.evaluate(`(async()=>{window.graph=await import('/graph.js');window.panes=await import('/panes.js');for(const p of panes.rail)if(!p.shut)p.toggle();graph.fit()})()`);
+  await cdp.evaluate(`(async()=>{window.graph=(await import('/app.js')).graph;window.panes=(await import('/app.js')).workspace;for(const p of panes.rail)if(!p.shut)p.toggle();graph.fit()})()`);
   await sleep(200);
   const checks=[];
   function assert(value,name){if(!value)throw new Error(name);checks.push(name)}
@@ -147,12 +147,12 @@ try {
   await cdp.evaluate('window.readingHeading=document.querySelector(".markdown-document h1")');
   await sleep(2500);
   assert(await cdp.evaluate('document.querySelector(".markdown-status").textContent==="" && document.querySelector(".markdown-document h1")===window.readingHeading'),'unchanged refreshes preserve the rendered document without a parser error');
-  const reader = await cdp.evaluate(`(()=>{const p=document.querySelector('.markdown-pane');return {id:p.id,box:p.getBoundingClientRect().toJSON(),rail:p.dataset.rail}})()`);
+  const reader = await cdp.evaluate(`(()=>{const p=document.querySelector('.panel:has(.markdown-document)');return {id:p.id,box:p.getBoundingClientRect().toJSON(),rail:p.dataset.rail}})()`);
   assert(!reader.rail && Math.abs(reader.box.x-Math.max(6,Math.min(markdownPoint.x,1440-reader.box.width-6)))<2,'vz turns the file command pane into a floating Markdown reader in place');
   assert(await cdp.evaluate('document.querySelector(".markdown-document strong").textContent==="bold" && !window.markdownUnsafe && !document.querySelector(".markdown-document script, .markdown-document a[href^=javascript]")'),'Markdown formatting renders without executing embedded HTML or unsafe links');
   assert(await cdp.evaluate(`(()=>{const v=document.querySelector('.markdown-viewport');v.scrollTop=13;return v.scrollTop===13 && v.scrollHeight>v.clientHeight})()`),'reader scrolls by pixels through browser content');
   assert(await cdp.evaluate(`(()=>{const wrapper=document.querySelector('.markdown-table');return wrapper.scrollWidth<=wrapper.clientWidth+1})()`),'automatic table columns fit the available reading width');
-  await cdp.evaluate(`document.querySelector('.markdown-pane').style.width='400px'`);
+  await cdp.evaluate(`document.querySelector('.panel:has(.markdown-document)').style.width='400px'`);
   assert(await cdp.evaluate(`(()=>{const v=document.querySelector('.markdown-viewport');return v.scrollWidth<=v.clientWidth+1})()`),'Markdown reflows to a narrow pane without horizontal paragraph overflow');
   assert(await cdp.evaluate(`(()=>{const wrapper=document.querySelector('.markdown-table');const table=wrapper.querySelector('table');return wrapper.scrollWidth>wrapper.clientWidth && getComputedStyle(table).overflowWrap==='normal' && getComputedStyle(table.querySelector('td')).verticalAlign==='top'})()`),'wide tables scroll independently and preserve whole words');
   await cdp.evaluate("document.querySelector('.markdown-column-resize').scrollIntoView({block:'center',inline:'center'})");
@@ -173,7 +173,7 @@ try {
   assert(true,'reader refreshes after file edits');
   await cdp.send('Page.reload');
   await waitFor(()=>cdp.evaluate('!!document.querySelector(".markdown-document h1")'));
-  assert(await cdp.evaluate(`document.querySelector('.markdown-pane').id===${JSON.stringify(reader.id)}`),'browser reload recovers the Markdown reader in its original pane');
+  assert(await cdp.evaluate(`document.querySelector('.panel:has(.markdown-document)').id===${JSON.stringify(reader.id)}`),'browser reload recovers the Markdown reader in its original pane');
   await cdp.send('Page.navigate',{url:'about:blank'});
   const stopped = new Promise(resolve=>server.once('exit',resolve));
   server.kill('SIGTERM');
@@ -183,7 +183,7 @@ try {
   const recoveredUrl = await waitFor(()=>readFile(join(root,'url'),'utf8'));
   await cdp.send('Page.navigate',{url:recoveredUrl});
   await waitFor(()=>cdp.evaluate('document.querySelector(".markdown-document h1")?.textContent === "Updated reading test"'));
-  assert(await cdp.evaluate(`document.querySelector('.markdown-pane').id===${JSON.stringify(reader.id)}`),'server restart recovers the Markdown file association');
+  assert(await cdp.evaluate(`document.querySelector('.panel:has(.markdown-document)').id===${JSON.stringify(reader.id)}`),'server restart recovers the Markdown file association');
   assert(!failures.length,'no browser exceptions');
   console.log(JSON.stringify(checks,null,2));
   const shot=await cdp.send('Page.captureScreenshot',{format:'png'});

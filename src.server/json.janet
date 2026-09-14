@@ -1,3 +1,15 @@
+(defn base64 [bytes]
+  (def alphabet "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
+  (def out @"")
+  (for group 0 (math/ceil (/ (length bytes) 3))
+    (def i (* group 3))
+    (def n (+ (* (get bytes i) 65536) (* (get bytes (+ i 1) 0) 256) (get bytes (+ i 2) 0)))
+    (buffer/push-byte out (alphabet (band 63 (brushift n 18)))
+                         (alphabet (band 63 (brushift n 12)))
+                         (if (< (+ i 1) (length bytes)) (alphabet (band 63 (brushift n 6))) 61)
+                         (if (< (+ i 2) (length bytes)) (alphabet (band 63 n)) 61)))
+  (string out))
+
 (def- special
   (let [t (array/new-filled 256 false)]
     (each b [(chr `"`) (chr "\\") (chr "<") (chr ">") (chr "&")] (put t b true))

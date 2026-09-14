@@ -1,5 +1,3 @@
-(import ../websocket)
-
 (def- library-path (string (os/realpath (string (dyn :current-file) "/../../..")) "/src.vterm/libvisualize-vterm.so"))
 (var- bindings nil)
 
@@ -52,7 +50,7 @@
         (def size (invoke "line" terminal (if history 1 0) row scratch (length scratch)))
         (when (neg? size) (error "libvterm row serialization failed"))
         (array/push out [(if history (+ (info 13) row) row)
-                         (websocket/base64 (string/slice scratch 0 size))])))
+                         (string/slice scratch 0 size)])))
     out)
   {:write (fn [_ bytes]
             (var offset 0)
@@ -85,7 +83,7 @@
    :synchronized? (fn [_] (synchronized?))
    :release-output (fn [_] (invoke "unsync" terminal))
    :snapshot (fn [_ at]
-               {"version" 1 "revision" (info 10)
+               {"revision" (info 10)
                 "rows" (info 0) "cols" (info 1)
                 "cursor" {"row" (info 2) "col" (info 3) "visible" (= 1 (info 4))}
                 "alternate" (= 1 (info 5)) "title" (invoke "title" terminal)

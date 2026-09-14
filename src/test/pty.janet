@@ -1,4 +1,5 @@
 (import ../../src.server/term/pty)
+(import ../../src.server/term/host)
 (import ./harness :as t)
 
 (defn- capture
@@ -68,27 +69,62 @@
   (t/ok found "what was written to the pty was executed by the shell")
   (pty/close session))
 
-(t/test "resize is applied by the kernel"
+(t/test "resize reaches the kernel and notifies the foreground process"
 
   (def ready (ev/thread-chan 4))
   (def out-chan (ev/thread-chan 512))
   (ev/thread
     (fn [[rc oc]]
-      (def session (pty/open ["/bin/sh" "-i"] 24 80))
+      (def session (pty/open ["/bin/sh" "-c"
+        "trap 'printf WINCH:; stty size' WINCH\nprintf 'READY\\n'\nwhile :; do read -r line || :; done"] 24 80))
       (ev/give rc session)
       (pty/pump session (fn [chunk] (ev/give oc chunk)))
       (ev/give oc :eof)
       :done)
     [ready out-chan] :nt (ev/thread-chan 4))
   (def session (ev/take ready))
-  (ev/sleep 0.3)
-  (t/ok (pty/resize session 40 120) "stty reported success")
-  (ev/sleep 0.2)
-  (def asked (os/spawn ["stty" "-f" (session :device) "size"] :px {:out :pipe}))
-  (def answer (string/trim (or (:read (asked :out) :all) "")))
-  (os/proc-wait asked)
-  (t/is= "40 120" answer "the kernel agrees the terminal is now this size")
-  (pty/close session))
+  (defer (pty/close session)
+    (defn heard? [wanted]
+      (def seen @"")
+      (var tries 0)
+      (var found false)
+      (while (< tries 100)
+        (while (pos? (ev/count out-chan))
+          (def chunk (ev/take out-chan))
+          (when (string? chunk) (buffer/push-string seen chunk)))
+        (when (string/find wanted seen) (set found true) (break))
+        (++ tries)
+        (ev/sleep 0.02))
+      found)
+    (t/ok (heard? "READY") "the foreground process has installed its signal handler")
+    (each [rows cols] [[40 120] [12 51] [24 80]]
+      (t/ok (pty/resize session rows cols) "ioctl reported success")
+      (t/ok (heard? (string "WINCH:" rows " " cols)) "SIGWINCH reports the new kernel dimensions"))
+    (def env (require "../../src.server/term/host"))
+    (def saved @{})
+    (each key ['session 'emulator 'pty-rows 'pty-cols]
+      (put saved key (get-in env [key :ref 0])))
+    (defer (eachp [key value] saved (put (get-in env [key :ref]) 0 value))
+      (defn set-state [key value] (put (get-in env [key :ref]) 0 value))
+      (set-state 'pty-rows 24)
+      (set-state 'pty-cols 80)
+      (var attempts 0)
+      (set-state 'emulator {:geometry (fn [& _] nil)
+                           :resize (fn [& _] (++ attempts) (error "emulator allocation failed"))})
+      (set-state 'session {:fd -1})
+      (def failure (try (host/handle {"op" "resize" "rows" 40 "cols" 120}) ([e] (string e))))
+      (t/ok (string/find "Bad file descriptor" failure) "kernel failure reaches the caller")
+      (t/is= 0 attempts "a failed ioctl leaves the emulator untouched")
+      (set-state 'session session)
+      (def failure (try (host/handle {"op" "resize" "rows" 40 "cols" 120}) ([e] (string e))))
+      (t/is= "emulator allocation failed" failure)
+      (t/is= 1 attempts)
+      (def asked (os/spawn ["stty" "-f" (session :device) "size"] :px {:out :pipe}))
+      (def answer (string/trim (or (:read (asked :out) :all) "")))
+      (os/proc-wait asked)
+      (t/is= "24 80" answer "emulator failure restores the previous kernel dimensions")
+      (t/is= 24 (get-in env ['pty-rows :ref 0]))
+      (t/is= 80 (get-in env ['pty-cols :ref 0])))))
 
 (t/test "a session reports the device it is attached to"
 

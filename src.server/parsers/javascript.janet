@@ -1,5 +1,6 @@
 (def- line-start '(+ (> -1 "\n") (! (> -1 1))))
-(def- space '(any (set " \t")))
+(def- space '(any (set " \t\r\n")))
+(def- boundary '(not (> -1 (+ (range "AZ") (range "az") (range "09") "_" "$" "."))))
 
 (def- specifier '(some (+ (range "AZ") (range "az") (range "09")
                           "_" "-" "." "/" "@")))
@@ -24,9 +25,9 @@
 
    :imports-are :paths
    :imports ~(+ (* ,line-start ,space
-                   (+ "import" "export")
-                   (+ (* (some (if-not (+ "from" "\n") 1)) "from" ,space)
+                   (+ "import" "export") (not (+ (range "AZ") (range "az") (range "09") "_" "$"))
+                   (+ (* (some (if-not (+ "from" ";" "'" `"` "`") 1)) "from" ,space)
                       ,space)
                    ,quoted)
 
-                (* "require" ,space "(" ,space ,quoted))})
+                (* ,boundary (+ "require" "import") ,space "(" ,space ,quoted ,space (+ ")" ",")))})

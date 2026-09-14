@@ -110,8 +110,8 @@ try {
     }
   });
   await cdp.evaluate(`(async()=>{
-    window.panes=await import('/panes.js');
-    window.transport=await import('/transport.js');
+    window.panes=(await import('/app.js')).workspace;
+    window.transport=await import('/shared/transport.js');
     window.emulators=new Map();
     const {WTerm}=await import('@wterm/dom');
     const init=WTerm.prototype.init;
@@ -123,7 +123,7 @@ try {
     subject.root.style.width='600px';subject.root.style.height='400px';subject.resized();
     window.fixtureSnapshot=async(p=subject)=>{
       const t=emulators.get(p.root.id);
-      const remote=await transport.request(p.root.id.slice(5),'poll',{at:0});
+      const remote=await transport.request(p.root.id.slice(5),'screen',{at:0});
       const el=p.root.querySelector('.screen');
       const grid=el.querySelector('.term-grid');
       const active=[...el.querySelectorAll('.term-row:not(.term-scrollback-row)')];
@@ -319,7 +319,7 @@ try {
   await cdp.evaluate(`transport.request(subject.root.id.slice(5),'start',{rows:24,cols:80})`);
   await cdp.evaluate(`transport.request(subject.root.id.slice(5),'input',{text:${JSON.stringify(fixtureCommand)}})`);
   await healthy('new terminal generation restores the pane size');
-  await cdp.evaluate('subject.toggle();other.toggle();window.config=panes.configPanel');
+  await cdp.evaluate('subject.toggle();other.toggle();window.config=panes.get("config")');
   for (const side of ['top','bottom','floating']) {
     await cdp.evaluate(`config.open();panes.selectPane(config.root);panes.addToRail(config,0,${JSON.stringify(side==='floating'?'top':side)});config.root.style.width='500px';config.root.style.height='350px';panes.packRailNow()`);
     await waitFor(() => cdp.evaluate('!!config.body.querySelector(".config-diagram .node")'));

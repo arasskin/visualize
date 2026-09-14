@@ -2,9 +2,6 @@
 (import ./graphviz)
 (import ./json)
 
-(defn visible [lines]
-  (filter |(not (config/note? $)) lines))
-
 (defn- uncomment [line]
   (def text (string/trim line))
   (if (string/has-prefix? "#" text) (string/triml (string/slice text 1)) text))
@@ -96,7 +93,7 @@
                 line)) disk))
             (config/unique-lines (if restored next (array ;disk text)))))))
     (do
-      (def lines (visible disk))
+      (def lines (config/visible disk))
       (unless (= (tuple ;lines) (tuple ;(get sent "base" [])))
         (error "Configuration changed. Reloaded the graph; try again."))
       (def node (find |(= ($ :id) (get sent "node")) ((model lines) :nodes)))
@@ -129,6 +126,19 @@
                   (if (string/has-prefix? "#" (string/trim line)) line (string "#" line))))
               (error "Unknown subtree action")))))
       (config/unique-lines out))))
+
+(defn update-file [path sent]
+  (def disk (config/read-config path))
+  (def action (get sent "action"))
+  (if (index-of action ["reload" "run" "regenerate"])
+    disk
+    (do
+      (unless (index-of action ["append" "subtree-comment" "subtree-delete" "rename-prefix"])
+        (error "unknown configuration action"))
+      (def root (string/join (slice (string/split "/" path) 0 -2) "/"))
+      (def lines (config/tidy-lines (change disk sent root)))
+      (config/write-config path lines)
+      lines)))
 
 (defn- html [text]
   (->> text (string/replace-all "&" "&amp;")

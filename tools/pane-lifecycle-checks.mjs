@@ -33,7 +33,7 @@ try {
   const ready = async () => {
     await waitFor(() => page.evaluate('!!document.querySelector("#harness textarea") && !!document.querySelector("#config .config-command")'));
     await page.evaluate(`(async()=>{
-      window.panes=await import('/panes.js');window.transport=await import('/transport.js');
+      window.panes=(await import('/app.js')).workspace;window.transport=await import('/shared/transport.js');
       window.sent=[];window.replies=[];const send=WebSocket.prototype.send;const observed=new WeakSet();
       WebSocket.prototype.send=function(text){
         if(!observed.has(this)){observed.add(this);this.addEventListener('message',event=>{
@@ -83,12 +83,12 @@ try {
     await page.evaluate('subject.root.style.height="360px";subject.resized()');
     await healthy();
   }
-  await page.evaluate('subject.toggle();panes.configPanel.open();panes.configPanel.toggle()');
+  await page.evaluate('subject.toggle();panes.get("config").open();panes.get("config").toggle()');
   await waitFor(async () => /placement bottom \d+ \d+ 360/.test(await readFile(join(project, 'visualize_config'), 'utf8')));
   await check('subject.shut', 'collapsed pane persists its expanded height');
   const generation = await page.evaluate(`transport.request(${JSON.stringify(id)},'capture').then(s=>s.generation)`);
   await page.navigate(url); await ready();
-  await page.evaluate(`window.subject=panes.extraPanes.find(p=>p.root.id===${JSON.stringify('pane-' + id)});subject.open()`);
+  await page.evaluate(`window.subject=panes.all.find(p=>p.root.id===${JSON.stringify('pane-' + id)});subject.open()`);
   await healthy();
   await check(`subject.root.offsetHeight===360 && subject.root.dataset.rail==='bottom'
     && (await transport.request(${JSON.stringify(id)},'capture')).generation===${generation}`, 'reload restores dimensions, rail, and the running session');
@@ -107,7 +107,7 @@ try {
       && !document.getElementById('pane-'+retiredId)`, `${cycle}: close during startup cannot resurrect a pane`);
   }
   await page.evaluate(`window.doc=panes.openFileTerminal({name:'notes.md',file:'notes.md'},'vz',{x:120,y:180})`);
-  await waitFor(() => page.evaluate('!!doc.root.querySelector(".markdown-document")'));
+  await waitFor(() => page.evaluate('doc.body.textContent.includes("Lifecycle document")'));
   await check('doc.body.textContent.includes("Lifecycle document")', 'document uses the pane lifecycle');
   await page.evaluate('doc.root.style.width="620px";doc.root.style.height="420px";doc.resized();doc.place(120,180)');
   const docId = await page.evaluate('doc.root.id.slice(5)');
@@ -119,18 +119,33 @@ try {
   await stopProcess(server);
   await rm(join(root, 'url')); startServer();
   assert.equal(await waitFor(() => readFile(join(root, 'url'), 'utf8')), url);
-  await page.evaluate(`window.subject=panes.extraPanes.find(p=>p.root.id==='pane-${id}');subject.open()`);
+  await page.evaluate(`window.subject=panes.all.find(p=>p.root.id==='pane-${id}');subject.open()`);
   await healthy();
   await check(`(await transport.request('${id}','capture')).generation===${generation}`, 'server restart reconnects the existing terminal');
   await click(`document.querySelector('#pane-${docId} .tab-close')`);
   await waitFor(() => page.evaluate(`!document.getElementById('pane-${docId}')`));
   await check('true', 'document closes after server recovery');
+  await page.evaluate(`(()=>{
+    const observer=new MutationObserver(()=>{});observer.observe(document.body,{childList:true,subtree:true});
+    window.direct=panes.createPane({file:window.CONFIG_FILE,remote:false});
+    window.emulatorCreated=observer.takeRecords().some(record=>[...record.addedNodes].some(node=>node.nodeType===1&&node.matches('.screen,.term-grid,textarea')));
+    observer.disconnect();panes.addToRail(direct,0,'bottom');panes.selectPane(direct.root);direct.open();
+  })()`);
+  await waitFor(()=>page.evaluate('!!direct.body.querySelector(".config-diagram svg")'));
+  await check('!emulatorCreated && direct.body.clientHeight>100 && direct.root.querySelectorAll(".side-grip").length===1', 'direct document creation uses the common frame without a terminal');
+  await click('direct.root.querySelector(".tab-close")');
+  await check('!panes.all.includes(direct) && !direct.root.isConnected', 'a directly created document closes through the common lifecycle');
+  await page.evaluate(`(async()=>{
+    await Promise.all(panes.all.map(panel=>panes.closePanel(panel)));
+    for(const type of ['keydown','keyup']) document.dispatchEvent(new KeyboardEvent(type,{key:'Alt',bubbles:true}));
+  })()`);
+  await check('panes.all.length===0 && panes.pickedPanel()===null', 'an empty workspace has no special pane fallback and accepts Alt');
   console.log(`Passed ${checks.length} ${engine} lifecycle checks.`);
 } catch (error) {
   if (page) console.error(await page.evaluate(`JSON.stringify([...document.querySelectorAll('.panel')].map(p=>({id:p.id,
     box:p.getBoundingClientRect().toJSON(),classes:p.className,text:p.innerText.slice(-1200)})))`).catch(()=>''));
   if (page) console.error(await page.evaluate(`(async()=>window.doc && ({connected:doc.root.isConnected,
-    state:await transport.request(doc.root.id.slice(5),'poll',{at:0}),messages:sent.filter(m=>m.pane===doc.root.id.slice(5) && m.op!=='resize')
+    state:await transport.request(doc.root.id.slice(5),'screen',{at:0}),messages:sent.filter(m=>m.pane===doc.root.id.slice(5) && m.op!=='resize')
       .map(m=>({...m,reply:replies.find(r=>r.id===m.id)}))}))()`).then(value=>JSON.stringify(value)).catch(()=>''));
   console.error(logs.join('').slice(-6000));
   throw error;

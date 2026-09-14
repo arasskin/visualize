@@ -29,6 +29,7 @@
 
   [text]
   (def out (buffer text))
+  (def code (buffer text))
   (def n (length text))
   (var i 0)
   (var in-string false)
@@ -36,15 +37,19 @@
     (def b (get text i))
     (cond
       in-string
-      (do (when (= b 92) (++ i))
+      (do (put code i 32)
+          (when (= b 92)
+            (++ i)
+            (when (< i n) (put code i 32)))
           (when (= b 34) (set in-string false)))
-      (= b 34) (set in-string true)
+      (= b 34) (do (put code i 32) (set in-string true))
       (= b 59)
       (while (and (< i n) (not= (get text i) 10))
         (put out i 32)
+        (put code i 32)
         (++ i)))
     (++ i))
-  (string out))
+  [(string out) (string code)])
 
 (defn- read-token
 
@@ -85,23 +90,25 @@
   (while (< j n)
     (def b (get text j))
     (cond
-      (= b 92) (do (++ j) (buffer/push-byte out (get text j)))
+      (= b 92) (do (++ j) (when (< j n) (buffer/push-byte out (get text j))))
       (= b 34) (break)
       (buffer/push-byte out b))
     (++ j))
   [(string out) (inc j)])
 
 (defn- parse [text path]
-  (def clean (blank-comments text))
+  (def [clean code] (blank-comments text))
   (def n (length clean))
   (def out @[])
 
   (each word ["(:require" "(:require-macros" "(:use" "(:import" "(require" "(use"]
     (var from 0)
-    (while (def at (string/find word clean from))
+    (while (def at (string/find word code from))
       (def end (skip-form clean at))
 
       (var i (+ at (length word)))
+      (unless (or (ws? (get clean i)) (open? (get clean i)) (close? (get clean i)))
+        (set i end))
       (while (< i (min end n))
         (def b (get clean i))
         (cond

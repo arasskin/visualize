@@ -1,6 +1,6 @@
 # Native terminal supervisors
 
-Each persistent Janet supervisor owns one libvterm instance and its PTY. Its existing PTY reader thread supplies bytes to the supervisor event loop; the loop serializes parsing, resizing, query responses, and snapshots. The HTTP/WebSocket server relays serialized messages. WTerm remains the browser renderer and input encoder, using `src/web/screen-core.js` as a screen cache. The browser receives screen state and encodes user input; parsing and terminal query responses run in the supervisor.
+Each persistent Janet supervisor owns one libvterm instance and its PTY. Its existing PTY reader thread supplies bytes to the supervisor event loop; the loop serializes parsing, resizing, query responses, and snapshots. The HTTP/WebSocket server relays serialized messages. WTerm remains the browser renderer and input encoder, using `src/web/terminal/screen-core.js` as a screen cache. The browser receives screen state and encodes user input; parsing and terminal query responses run in the supervisor.
 
 The native library is pinned and built from `src.vterm`; no separate runtime, Zig compiler, or installed libvterm is needed. The two correctness patches and their provenance are listed in `src.vterm/README.md`.
 

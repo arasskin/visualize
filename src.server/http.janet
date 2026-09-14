@@ -151,14 +151,13 @@
 
   [path]
   (def name (string/slice path 1))
-  (when (and (not (empty? name))
-             (not (string/find "/" name))
-             (not (string/find "\\" name))
-             (not (string/has-prefix? "." name))
-
-             (peg/match ~(* (some (+ (range "az") (range "AZ") (range "09")
-                                     "." "-" "_")) -1)
-                        name))
+  (when (and (string/has-prefix? "/" path)
+             (not (find (fn [part]
+                          (or (string/has-prefix? "." part)
+                              (not (peg/match ~(* (some (+ (range "az") (range "AZ") (range "09")
+                                                          "." "-" "_")) -1)
+                                              part))))
+                        (string/split "/" name))))
     name))
 
 (def content-types

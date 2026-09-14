@@ -1,3 +1,5 @@
+(import ./json)
+
 (def max-message 262144)
 
 (defn- i32 [n]
@@ -37,19 +39,7 @@
   (each n h (each shift [24 16 8 0] (buffer/push-byte out (% (math/floor (/ (if (neg? n) (+ n 4294967296) n) (math/pow 2 shift))) 256))))
   (string out))
 
-(defn base64 [bytes]
-  (def alphabet "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
-  (def out @"")
-  (for group 0 (math/ceil (/ (length bytes) 3))
-    (def i (* group 3))
-    (def n (+ (* (get bytes i) 65536) (* (get bytes (+ i 1) 0) 256) (get bytes (+ i 2) 0)))
-    (buffer/push-byte out (alphabet (band 63 (brushift n 18)))
-                         (alphabet (band 63 (brushift n 12)))
-                         (if (< (+ i 1) (length bytes)) (alphabet (band 63 (brushift n 6))) 61)
-                         (if (< (+ i 2) (length bytes)) (alphabet (band 63 n)) 61)))
-  (string out))
-
-(defn accept-key [key] (base64 (sha1 (string key "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))))
+(defn accept-key [key] (json/base64 (sha1 (string key "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))))
 
 (defn upgrade? [request]
   (def h (request :headers))

@@ -96,7 +96,7 @@ try {
   });
   await cdp.send('Tracing.start', { categories: 'devtools.timeline,blink.user_timing,cc,gpu,disabled-by-default-devtools.timeline,disabled-by-default-devtools.timeline.invalidationTracking', transferMode: 'ReportEvents' });
   async function gesture(name, zoom) {
-    await cdp.evaluate(`(async () => { const g = await import('/graph.js'); g.fit(); })()`);
+    await cdp.evaluate(`(async () => { const g = (await import('/app.js')).graph; g.fit(); })()`);
     await sleep(400);
     await cdp.evaluate(`performance.mark(${JSON.stringify(name + ':start')})`);
     if (!zoom) await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 600, y: 450, button: 'left', buttons: 1, clickCount: 1 });
@@ -136,7 +136,7 @@ try {
   await sleep(300);
   metadata.searchArrow = await cdp.evaluate('!!document.getElementById("find-arrow")');
   await gesture('zoom-with-search', true);
-  await cdp.evaluate(`(async () => { const g = await import('/graph.js'); g.wire({ onRepaint: () => {} }); })()`);
+  await cdp.evaluate(`(async () => { const {search} = await import('/app.js'); search.placeArrow = () => {}; })()`);
   await gesture('zoom-frozen-arrow', true);
   await cdp.evaluate(`document.querySelectorAll('#graph .edge .hit').forEach(p => p.style.display = 'none')`);
   await gesture('zoom-without-hit-paths', true);

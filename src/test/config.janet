@@ -1,6 +1,44 @@
 (import ../../src.server/config)
-(import ../../src.server/color)
 (import ./harness :as t)
+
+(t/test "as-hex resolves names, hex and rubbish"
+  (t/is= "#ff4d6d" (config/as-hex "red"))
+  (t/is= "#aabbcc" (config/as-hex "AABBCC") "bare hex, and case does not matter")
+  (t/is= nil (config/as-hex "#aabbcc")
+         "a leading hash is a comment in the config, so it is not a colour here")
+  (t/is= "#22a6f2" (config/as-hex "blue"))
+  (t/is= "#8d99ae" (config/as-hex "gray") "gray and grey are the same colour")
+  (t/is= nil (config/as-hex "nope"))
+  (t/is= nil (config/as-hex "ff") "a short hex is not a colour"))
+
+(t/test "tint holds the hue and lands on the endpoints Python gives"
+  (t/is= "#ff91a4" (config/tint "#ff4d6d" 0))
+  (t/is= "#ff4d6d" (config/tint "#ff4d6d" 1))
+  (t/is= "#ff91a4" (config/tint "#ff4d6d" -5) "weights clamp at 0")
+  (t/is= "#ff4d6d" (config/tint "#ff4d6d" 5) "weights clamp at 1"))
+
+(t/test "ink and ink-on-page clear WCAG"
+  (t/is= "#42141c" (config/ink "#ff4d6d"))
+  (t/is= "#8c2a3c" (config/ink-on-page "#ff4d6d"))
+  (t/is= "#f7f7f7" (config/ink "#101010") "a dark fill inverts to near-white")
+
+  (each hue config/palette
+    (t/ok (>= (config/contrast (config/ink hue) hue) 4.5)
+          (string "ink is legible on " hue))
+    (t/ok (>= (config/contrast (config/ink-on-page hue) "#ffffff") 4.5)
+          (string "ink-on-page is legible for " hue))))
+
+(t/test "ramp ranks rather than scales"
+
+  (t/is= {"a" 0 "b" 0 "c" 0.5 "d" 1}
+         (config/ramp {"a" 1 "b" 1 "c" 5 "d" 13}))
+  (t/is= {"only" 1} (config/ramp {"only" 3})
+         "a single tier is fully bright rather than divided by zero"))
+
+(t/test "the palette is distinct and excludes the ungrouped colour"
+  (t/is= (length config/palette) (length (distinct config/palette)))
+  (t/ok (not (index-of config/ungrouped config/palette))
+        "a group must never be handed the colour ungrouped nodes wear"))
 
 (defn- run [& lines] (config/run lines))
 (defn- state-of [& lines] (first (config/run lines)))
@@ -28,7 +66,7 @@
   (def state (state-of "box \"~.A\"" "box \"~.B\"" "box \"~.C\""))
   (def hues (map |($ :color) (state :groups)))
   (t/is= 3 (length (distinct hues)))
-  (t/ok (not (index-of color/ungrouped hues))
+  (t/ok (not (index-of config/ungrouped hues))
         "no group may wear the colour ungrouped nodes already have"))
 
 (t/test "an explicit colour wins and the automatic ones move around it"
@@ -52,7 +90,7 @@
 
 (t/test "the ungrouped colour is refused as a group colour"
 
-  (def bare (string/replace "#" "" color/ungrouped))
+  (def bare (string/replace "#" "" config/ungrouped))
   (def [_ problems] (run (string "box \"~.A\" " bare "")))
   (t/ok (problems 0))
   (t/ok (string/find "invisible" (problems 0))))
@@ -177,7 +215,7 @@
   (def named (config/colours))
   (t/ok (index-of "blue" named))
   (each colour named
-    (t/ok (not (nil? (color/as-hex colour)))
+    (t/ok (not (nil? (config/as-hex colour)))
           (string colour " must be a colour the config accepts"))))
 
 (t/test "a usage line comes from the arguments the parser takes"
@@ -221,6 +259,8 @@
   (t/is= expected (config/unique-lines lines))
   (def saved [" box b " "fold b" "#fold b" "" "@visualize terminal 1 placement top 0"])
   (spit scratch (string (string/join lines "\n") "\n"))
+  (t/is= lines (config/read-config scratch))
+  (config/write-config scratch lines)
   (t/is= saved (config/read-config scratch))
   (t/is= (string (string/join saved "\n") "\n") (string (slurp scratch)))
   (config/write-config scratch ["fold b" "box c" "fold b"])
@@ -242,6 +282,8 @@
   (t/is= expected (config/unique-lines expected))
   (def saved (array ;(slice expected 0 13) "" "@visualize terminal pane placement top 0"))
   (spit scratch (string (string/join lines "\n") "\n"))
+  (t/is= lines (config/read-config scratch))
+  (config/write-config scratch lines)
   (t/is= saved (config/read-config scratch))
   (t/is= (string (string/join saved "\n") "\n") (string (slurp scratch)))
   (config/write-config scratch lines)
@@ -263,18 +305,6 @@
   (t/is= "lines\nhide src.test\n" (string (slurp scratch))
          "and the file is the lines, newline-terminated"))
 
-(t/test "the editor's actions are the ones the page can send"
-  (t/is= ["a" "b"] (config/edit ["a" "b"] "run" -1))
-  (t/is= ["b"] (config/edit ["a" "b"] "delete" 0))
-  (t/is= [] (config/edit ["a"] "delete" 0)
-         "deleting the final line leaves an empty file")
-  (t/is= ["a" "b"] (config/edit ["a" "b"] "delete" 9)
-         "an index off the end deletes nothing")
-  (t/is= ["a" "" "b"] (config/edit ["a" "b"] "insert-above" 1))
-  (t/is= ["a" "" "b"] (config/edit ["a" "b"] "insert-below" 0))
-  (t/is= [""] (config/edit [] "insert-below" -1)
-         "the first line of an empty file"))
-
 (os/rm scratch)
 
 (t/test "visualize keeps its own notes in the config file"
@@ -291,9 +321,6 @@
   (def shown (filter |(not (config/note? $)) lines))
   (t/is= ["lines" "box src"] shown
          "a note is never a row the editor shows")
-
-  (t/is= ["lines"] (config/edit shown "delete" 1)
-         "an index from the editor means the line the editor showed")
 
   (def [_ problems] (config/run lines))
   (t/is= @{} problems "a note draws no complaint"))
@@ -484,6 +511,8 @@
   (def file (string "/tmp/vz-record-migration-" (os/getpid)))
   (spit file (string (string/join old "\n") "\n"))
   (defer (os/rm file)
+    (t/is= old (config/read-config file))
+    (config/write-config file old)
     (t/is= expected (config/read-config file))
     (t/is= (string (string/join expected "\n") "\n") (string (slurp file)))
     (t/is= expected (config/read-config file))
@@ -528,3 +557,35 @@
   (t/is= ["box src.graphviz" "fold src.graphviz"] (filter |(not (config/note? $)) lines))
   (t/is= 3 (length lines))
   (t/is= ["box a" "" "fold a"] (config/tidy-lines ["" "box a" "" " " "" "fold a" "" ""])))
+
+(t/test "config reads neither rewrite nor create files"
+  (def path (string "/tmp/vz-read-only-" (os/getpid)))
+  (spit path "fold src\nfold src\n\n\n")
+  (defer (os/rm path)
+    (def before (os/stat path))
+    (t/is= ["fold src" "fold src" "" ""] (config/read-config path))
+    (t/is= "fold src\nfold src\n\n\n" (string (slurp path)))
+    (t/is= (before :modified) (os/stat path :modified)))
+  (t/ok (try (do (config/read-config path) false) ([_] true)))
+  (t/ok (nil? (os/stat path)))
+  (config/initialize path)
+  (defer (os/rm path)
+    (t/is= ["lines"] (config/read-config path))
+    (spit path "fold src\n")
+    (config/initialize path)
+    (t/is= ["fold src"] (config/read-config path))))
+
+(t/test "config writes preserve permissions and update a symlink's target"
+  (def target (string "/tmp/vz-config-target-" (os/getpid)))
+  (def link (string target "-link"))
+  (spit target "lines\n")
+  (os/chmod target 8r600)
+  (os/symlink target link)
+  (defer (do (os/rm link) (os/rm target))
+    (config/write-config link ["fold src"])
+    (t/is= :link (os/lstat link :mode))
+    (t/is= "fold src\n" (string (slurp target)))
+    (t/is= 8r600 (os/stat target :int-permissions))
+    (def inode (os/stat target :inode))
+    (config/write-config link ["fold src"])
+    (t/is= inode (os/stat target :inode) "an unchanged save does not replace the file")))

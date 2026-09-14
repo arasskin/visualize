@@ -18,11 +18,11 @@
 
 <div id="compose" class="shut">
 
-  <div id="compose-box">
+  <label id="compose-box" for="compose-input">
     <textarea id="compose-input" rows="1"
       spellcheck="false" autocomplete="off" autocapitalize="off"
       aria-label="add a config line"></textarea>
-  </div>
+  </label>
 
   <ul id="compose-list" role="listbox" aria-label="completions"></ul>
 
@@ -30,11 +30,11 @@
 </div>
 
 <div id="find" class="shut">
-  <div id="find-box">
+  <label id="find-box" for="find-input">
     <input id="find-input" spellcheck="false" autocomplete="off"
       placeholder="find a node" aria-label="find a node">
     <span id="find-count" aria-live="polite"></span>
-  </div>
+  </label>
 
   <ul id="find-list" role="listbox" aria-label="node names"></ul>
 </div>
@@ -44,31 +44,18 @@
   <div id="help-verbs"></div>
 </div>
 
-<div id="harness" class="panel term shut">
-  <div class="bar" title="click to open, drag to move  (alt toggles the selected tab, hold to peek)">
-    <span class="name">{{HARNESS_NAME}}</span>
-
-    <span class="label" contenteditable="plaintext-only" spellcheck="false"
-          role="textbox" aria-label="note for this tab"></span>
-    <span class="state"></span>
-    <button class="tab-close" type="button" title="close terminal" aria-label="Close terminal">×</button>
+<template id="panel-template">
+  <div class="panel shut">
+    <div class="bar" title="click to open, drag to move (alt toggles the selected tab, hold to peek)">
+      <span class="name"></span>
+      <span class="label" contenteditable="plaintext-only" spellcheck="false" role="textbox" aria-label="note for this tab"></span>
+      <span class="state"></span>
+      <button class="tab-close" type="button" title="close pane" aria-label="Close pane">×</button>
+    </div>
+    <div class="panel-body"></div>
+    <div class="grip" title="drag to resize"></div>
   </div>
-  <div class="panel-body">
-    <pre class="screen" tabindex="0" spellcheck="false"></pre>
-  </div>
-  <div class="grip" title="drag to resize"></div>
-</div>
-
-<div id="config" class="panel shut">
-  <div id="bar" class="bar" title="click to open, drag to move  (alt toggles the selected tab, hold to peek)">
-    <span class="name">{{CONFIG_NAME}}</span>
-    <span class="label" contenteditable="plaintext-only" spellcheck="false"
-          role="textbox" aria-label="note for this tab"></span>
-    <button class="tab-close" type="button" title="close configuration" aria-label="Close configuration">×</button>
-  </div>
-  <div id="body" class="panel-body"></div>
-  <div id="grip" class="grip" title="drag to resize"></div>
-</div>
+</template>
 <script>
 
 window.GRAPH_GENERATION = {{GRAPH_GENERATION}};
@@ -78,6 +65,7 @@ window.START_EMPTY = {{START_EMPTY}};
 window.CONFIG_PROBLEMS = {{CONFIG_PROBLEMS}};
 window.PANE_POSITIONS = {{PANE_POSITIONS}};
 window.PANE_LABELS = {{PANE_LABELS}};
+window.PANE_DOCUMENTS = {{PANE_DOCUMENTS}};
 
 window.CONFIG_DOCS = {{CONFIG_DOCS}};
 

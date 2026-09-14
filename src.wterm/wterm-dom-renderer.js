@@ -214,6 +214,7 @@ function getBlockBackground(cp, fg, bg) {
     }
 }
 export class Renderer {
+    invalidateScrollback() { this._renderedScrollbackCount = -1; }
     get hasImageFlow() {
         return (this.container.parentElement?.classList.contains("has-image-flow") ??
             false);
@@ -361,9 +362,9 @@ export class Renderer {
                 runStart = col + 1;
                 continue;
             }
-            if (inBounds && width === 2) {
+            if (inBounds && (width === 2 || (cp > 0x7f && !(cp >= 0x2580 && cp <= 0x259f)))) {
                 flushRun(col);
-                if (col + 1 >= this.cols) {
+                if (width === 2 && col + 1 >= this.cols) {
                     const style = buildCellStyle(cell.fg, cell.bg, cell.flags, cell.fgRgb, cell.bgRgb);
                     const cursor = col === cursorCol;
                     appendStyledSpan(cursor ? "term-cursor" : "", cursor ? cursorCellStyle(style) : style, " ", cellLinkKey, cellLinkUri);
@@ -377,15 +378,16 @@ export class Renderer {
                 }
                 const ch = cell.chars ?? (cp >= 32 ? String.fromCodePoint(cp) : " ");
                 const style = buildCellStyle(cell.fg, cell.bg, cell.flags, cell.fgRgb, cell.bgRgb);
-                const cursor = cursorCol >= col && cursorCol < col + 2;
-                const cls = cursor ? "term-wide term-cursor" : "term-wide";
+                const cursor = cursorCol >= col && cursorCol < col + width;
+                const cellClass = width === 2 ? "term-wide" : "term-narrow";
+                const cls = cursor ? `${cellClass} term-cursor` : cellClass;
                 appendStyledSpan(cls, cursor ? cursorCellStyle(style) : style, ch, cellLinkKey, cellLinkUri);
                 runStyle = "";
                 runLinkKey = "";
                 runLinkUri = undefined;
                 runText = "";
                 runCells = [];
-                runStart = col + 2;
+                runStart = col + width;
                 continue;
             }
             if (inBounds && cp >= 0x2580 && cp <= 0x259f) {

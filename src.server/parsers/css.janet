@@ -14,10 +14,12 @@
 
 (defn- parse [text path]
 
-  (def code (peg/replace-all ~(* "/*" (any (if-not "*/" 1)) "*/") " " text))
+  (def noise ~(+ (* "/*" (any (if-not "*/" 1)) (opt "*/"))
+                (* `"` (any (+ (* "\\" 1) (if-not `"` 1))) (opt `"`))
+                (* "'" (any (+ (* "\\" 1) (if-not "'" 1))) (opt "'"))))
 
   (def found @[])
-  (each hit (or (peg/match ~(any (+ ,import-ref ,url-ref 1)) (string code)) [])
+  (each hit (or (peg/match ~(any (+ ,import-ref ,url-ref ,noise 1)) text) [])
     (array/push found hit))
 
   (def keep

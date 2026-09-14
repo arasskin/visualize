@@ -1,5 +1,4 @@
 (import ../../src.server/select)
-(import ../../src.server/color)
 (import ./harness :as t)
 
 (defn- sample []

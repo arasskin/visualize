@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { matchesText } from '../src/web/text-match.js';
+import { matchesText } from '../src/web/shared/text-match.js';
 
 assert(matchesText('plan.order_fulfillment', 'FULFILL'));
 assert(matchesText('order_fulfillment', 'ORDER FULFILLMENT'));

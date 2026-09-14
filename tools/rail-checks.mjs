@@ -101,8 +101,8 @@ try {
     await sleep(200);
   }
   await cdp.evaluate(`(async()=>{
-    window.panes=await import('/panes.js');
-    window.config=panes.configPanel;
+    window.panes=(await import('/app.js')).workspace;
+    window.config=panes.get("config");
     if(config.root.dataset.rail!=='bottom'||config.root.offsetWidth>416)throw new Error('Visualize default placement or width');
     panes.addToRail(config,0,'top');
     config.root.style.width='400px';
@@ -149,8 +149,8 @@ try {
   await cdp.evaluate('extra.root.style.width="480px";panes.packRailNow()');
   await sleep(400);
   await cdp.evaluate(`window.readTerminalSize=async()=>{
-    const {request}=await import('/transport.js');
-    const out=await request(extra.root.id.slice(5),'poll',{at:0});
+    const {request}=await import('/shared/transport.js');
+    const out=await request(extra.root.id.slice(5),'screen',{at:0});
     return JSON.stringify([out.rows,out.cols]);
   }`);
   const terminalSize=await cdp.evaluate('readTerminalSize()');
@@ -215,7 +215,7 @@ try {
   });
   await cdp.send('Page.reload');
   await waitFor(() => cdp.evaluate(`!!document.getElementById(${JSON.stringify(floatingId)})`));
-  await cdp.evaluate("import('/panes.js').then(module=>{window.panes=module})");
+  await cdp.evaluate("import('/app.js').then(module=>{window.panes=module.workspace})");
   const restored = await cdp.evaluate(snapshot);
   if (restored !== expected) throw new Error(`Restored layout differs: expected ${expected}, got ${restored}; saved ${await readFile(join(root,'project','visualize_config'),'utf8')}`);
   await check(`${snapshot}===${JSON.stringify(expected)}`, 'reload restores both rail orders and floating terminal coordinates');
@@ -228,7 +228,7 @@ try {
   const recoveredUrl = await waitFor(()=>readFile(join(root,'url'),'utf8'));
   await cdp.send('Page.navigate',{url:recoveredUrl});
   await waitFor(()=>cdp.evaluate(`!!document.getElementById(${JSON.stringify(floatingId)})`));
-  await cdp.evaluate("import('/panes.js').then(module=>{window.panes=module})");
+  await cdp.evaluate("import('/app.js').then(module=>{window.panes=module.workspace})");
   await check(`${snapshot}===${JSON.stringify(expected)}`, 'server restart recovers terminal rail order and floating coordinates');
   await check(`!document.getElementById(${JSON.stringify(floatingId)}).classList.contains('shut')`, 'recovered floating terminal opens at its saved position');
   console.log(JSON.stringify(checks,null,2));

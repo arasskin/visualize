@@ -1,19 +1,18 @@
 (import ./harness :as t)
 (import ./trace)
-(import ./color)
 (import ./config)
 (import ./config-graph)
-(import ./command)
-(import ./launch)
+(import ./cli)
 
 (import ./errors)
 (import ./select)
 (import ./websocket)
-(import ./worker)
+(import ./graph-thread)
 (import ./http)
 (import ./json)
 
 (import ./scan)
+(import ./parsers)
 (import ./graphviz)
 (import ./graph)
 

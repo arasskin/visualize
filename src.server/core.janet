@@ -1,34 +1,36 @@
 #!/usr/bin/env janet
 
-(import ./launch)
+(import ./cli)
 
 (def dev?
   (let [argv (or (dyn *args*) [])]
     (and (not= (get argv 1) "--supervise")
-         (try ((launch/parse (drop 1 argv)) :dev) ([_] true)))))
+         (try ((cli/parse (drop 1 argv)) :dev) ([_] true)))))
 
 (when dev? (put root-env *redef* true))
 
-(import ./control)
 (import ./http)
 (import ./trace)
 (import ./json)
 
 (import ./config)
-(import ./command)
 (import ./errors)
-(import ./worker)
+(import ./graph)
+(import ./config-graph)
 (import ./websocket)
-(import ./term/stream :as stream)
 (import ./scan)
 
 (import ./term/client :as term)
 (import ./term/host :as term-host)
 
-(def- this-env (curenv))
-
 (def default-port 8770)
 (def port-tries 20)
+
+(def- terminal-operations ["input" "start" "stop" "shutdown" "resize" "redraw" "screen" "theme" "capture" "diagnostics"])
+
+(defn- pane-id? [id]
+  (and (string? id) (<= (length id) 64)
+       (peg/match ~(* (some (+ (range "az") (range "09") "-")) -1) id)))
 
 (defn- query
 
@@ -73,8 +75,8 @@
     (term-host/host path)
     (os/exit 0))
 
-  (def options (launch/parse (drop 1 args)))
-  (when (options :help) (print launch/usage) (os/exit 0))
+  (def options (cli/parse (drop 1 args)))
+  (when (options :help) (print cli/usage) (os/exit 0))
   (def root (os/realpath (or (options :project) (os/cwd))))
   (unless (= :directory (os/stat root :mode)) (error "project must be a directory"))
 
@@ -93,13 +95,14 @@
 
   (def repo here)
   (def launch-environment @{})
-  (eachp [key value] (launch/environment root "")
+  (eachp [key value] (cli/environment root "")
     (put launch-environment key value))
 
 
   (var source-generation 0)
 
-  (def graph-worker (worker/start root (fn [value] (set source-generation value))))
+  (config/initialize config-path)
+  (def project-graph (graph/start root (fn [value] (set source-generation value))))
 
   (def token (make-token))
   (var stopping false)
@@ -108,7 +111,7 @@
 
 
   (def panes @{})
-  (def documents (merge @{} (config/markdown (:call graph-worker :read))))
+  (def documents (merge @{} (config/markdown (config/read-config config-path))))
   (var pane-generation 0)
   (defn panes-changed [] (++ pane-generation))
   (defn visible-panes [] (keys panes))
@@ -119,7 +122,7 @@
 
     (def pairs (seq [id :in (sorted (keys pane-sockets))]
                  [id (get pane-sockets id)]))
-    (:call graph-worker :notes pairs))
+    (config/write-config config-path (config/remember-terminals (config/read-config config-path) pairs)))
 
   (defn pane-for [id]
     (or (get panes id)
@@ -139,7 +142,7 @@
   (defn- forget-pane [id]
     (when (has-key? documents id)
       (put documents id nil)
-      (:call graph-worker :markdown documents))
+      (config/write-config config-path (config/remember-markdown (config/read-config config-path) documents)))
     (when-let [client (get panes id)] (:disconnect client))
     (put panes id nil)
     (put pane-sockets id nil)
@@ -152,7 +155,7 @@
            (do (try (:close probe) ([_] nil)) true)
            false)))
 
-  (each [id socket] (config/terminals (:call graph-worker :read))
+  (each [id socket] (config/terminals (config/read-config config-path))
     (if (answers? socket)
       (pane-for id)
 
@@ -162,9 +165,12 @@
 
   (var terminal-theme {"foreground" 0x3a4851 "background" 0xffffff})
   (def start-empty? (empty? panes))
-  (defn pane-labels [] (config/labels (:call graph-worker :read)))
+  (defn pane-labels [] (config/labels (config/read-config config-path)))
   (defn set-pane-title [id text]
-    (:call graph-worker :label [id text])
+    (def lines (config/read-config config-path))
+    (def labels (config/labels lines))
+    (put labels id text)
+    (config/write-config config-path (config/remember-labels lines labels))
     (panes-changed))
   (defn document-language [file]
     (def lower (string/ascii-lower file))
@@ -184,7 +190,7 @@
         (unless (and file (= :file (os/stat file :mode))) (error "expected a readable document file"))
         (when (> (os/stat file :size) 4194304) (error "document exceeds 4 MiB"))
         (put documents id file)
-        (:call graph-worker :markdown documents)
+        (config/write-config config-path (config/remember-markdown (config/read-config config-path) documents))
         (panes-changed)
         {"ok" true "file" file "language" (document-language file)})
       (error "unknown document operation"))
@@ -194,7 +200,7 @@
         (error e))))
 
   (defn harness-argv []
-    (launch/argv (or (os/getenv "SHELL") "/bin/sh") (options :command)))
+    (cli/argv (or (os/getenv "SHELL") "/bin/sh") (options :command)))
 
   (defn escaped [text]
     (->> text
@@ -238,7 +244,7 @@
           (= (string "http://localhost:" serving-port) origin)))
     (and sent-token same-origin))
 
-  (defn draw [] (:call graph-worker :draw))
+  (defn draw [] (:call project-graph :draw))
 
   (defn page [title lines problems svg fill]
 
@@ -246,20 +252,18 @@
     (var out (->> template
                   (string/replace "{{TITLE}}" (escaped title))
                   (string/replace "{{FAVICON}}" favicon)
-                  (string/replace "{{CONFIG_NAME}}" config/config-title)
                   (string/replace "{{CONFIG_FILE}}" (json/encode config-path))
                   (string/replace "{{START_EMPTY}}" (json/encode start-empty?))
 
-                  (string/replace "{{HARNESS_NAME}}"
-                                  (escaped (last (string/split "/" (first (harness-argv))))))
                   (string/replace "{{CONFIG_LINES}}" (json/encode lines))
                   (string/replace "{{CONFIG_PROBLEMS}}" (json/encode problems))
 
-                  (string/replace "{{PANE_POSITIONS}}" (json/encode (config/placements (:call graph-worker :read))))
+                  (string/replace "{{PANE_POSITIONS}}" (json/encode (config/placements (config/read-config config-path))))
+                  (string/replace "{{PANE_DOCUMENTS}}" (json/encode documents))
                   (string/replace "{{PANE_LABELS}}"
                                   (json/encode
                                     (config/labels
-                                      (:call graph-worker :read))))
+                                      (config/read-config config-path))))
 
                   (string/replace "{{CONFIG_DOCS}}" (json/encode (config/docs)))
                   (string/replace "{{CONFIG_COLOURS}}" (json/encode (config/colours)))
@@ -272,7 +276,146 @@
 
     (string/replace "{{GRAPH}}" (fn [&] svg) out))
 
-  (defn config-edit [body] (:call graph-worker :edit (json/decode body)))
+  (defn config-edit [sent]
+    (def action (get sent "action"))
+    (def target (or (get sent "file") config-path))
+    (def target-root (string/join (slice (string/split "/" target) 0 -2) "/"))
+    (def lines (config-graph/update-file target sent))
+    (def [state problems] (config/run lines target-root))
+    (def [visible moved] (config/shown lines problems))
+    (def response @{"lines" visible "problems" moved "svg" "" "error" "" "generation" source-generation})
+    (when (and (truthy? (get sent "draw")) (index-of action ["run" "regenerate"]))
+      (def [_ _ ok svg generation] (:call project-graph :draw (= action "regenerate")))
+      (put response "svg" (if ok svg ""))
+      (put response "error" (if ok "" svg))
+      (put response "generation" generation))
+    (when (get sent "diagram")
+      (def [model svg] (:call project-graph :diagram [target visible]))
+      (put response "graph" model)
+      (put response "diagram" svg))
+    (json/encode response))
+
+  (defn operate-terminal [id op sent]
+    (when stopping (error "server stopping"))
+    (def client (if (= op "start") (pane-for id) (get panes id)))
+    (unless client
+      (break (json/encode {"reachable" false "absent" true "running" false "generation" 0})))
+    (def rows (math/floor (or (get sent "rows") 24)))
+    (def cols (math/floor (or (get sent "cols") 100)))
+    (case op
+      "diagnostics" (json/encode (:remote-stats client))
+      "start"
+      (json/encode (:start client
+        (if (or (get sent "command") (get sent "node"))
+          (cli/file-argv (or (os/getenv "SHELL") "/bin/sh") (get sent "command")
+                        (:call project-graph :file sent))
+          (cli/argv (or (os/getenv "SHELL") "/bin/sh") nil))
+        root rows cols (get sent "theme")
+        (merge launch-environment {"VISUALIZE_PANE_ID" id})))
+      "stop" (json/encode (:stop client))
+      "shutdown"
+      (do (:shutdown client) (forget-pane id) (json/encode {"ok" true}))
+      "input" (:raw-send client (string (get sent "text" ""))
+                           (get sent "generation"))
+      "redraw" (do (:redraw client) (json/encode {"ok" true}))
+      "resize"
+      (do (:resize client rows cols (get sent "cellWidth") (get sent "cellHeight"))
+          (json/encode {"ok" true}))
+      "screen" (:raw-screen client (get sent "at" 0) (get sent "generation" 0) 0)
+      "theme"
+      (let [theme (get sent "theme" {}) response (:theme client theme)]
+        (set terminal-theme theme)
+        response)
+      "capture" (json/encode (:capture client))
+      (error "unknown terminal operation")))
+
+  (defn terminal-stream [send]
+    (var alive true)
+    (def streams @{})
+    (def actors @{})
+    (defn reply [id raw]
+      (when alive (send (string "{\"type\":\"reply\",\"id\":" (json/encode id) ",\"body\":" raw "}"))))
+    (defn unsubscribe [id]
+      (when-let [sub (streams id)]
+        (put sub :alive false)
+        (ev/chan-close (sub :credit))
+        (put streams id nil)))
+    (defn subscribe [id at generation subscription]
+      (unsubscribe id)
+      (def sub @{:alive true :credit (ev/chan 1) :subscription subscription})
+      (put streams id sub)
+      (ev/give (sub :credit) [at generation])
+      (ev/go (fn []
+        (try
+          (let [client (or (get panes id) (error "terminal closed"))]
+            (while (and alive (sub :alive))
+              (if-let [[at generation] (ev/take (sub :credit))]
+                (let [raw (:raw-screen client at generation 1000)]
+                  (when (and alive (sub :alive))
+                    (send (string "{\"type\":\"output\",\"subscription\":" (json/encode subscription) ",\"pane\":" (json/encode id)
+                                  ",\"body\":" raw "}"))))
+                (put sub :alive false))))
+          ([e]
+            (when (and alive (sub :alive))
+              (try (send (json/encode {"type" "output" "pane" id "subscription" subscription
+                                       "body" {"reachable" false "error" (string e)}})) ([_] nil))))))))
+    (defn actor [pane]
+      (or (actors pane)
+        (do
+          (when (>= (length actors) 64) (error "too many terminal panes"))
+          (def state @{:queue (ev/chan 128) :bytes 0 :alive true})
+          (put actors pane state)
+          (ev/go (fn []
+            (while (and alive (state :alive))
+              (when-let [[id op body size] (ev/take (state :queue))]
+                (-= (state :bytes) size)
+                (def raw (try (operate-terminal pane op body)
+                              ([e] (json/encode {"error" (string e)}))))
+                (try (reply id raw) ([_] nil))
+                (when (= op "shutdown")
+                  (put state :alive false)
+                  (put actors pane nil)
+                  (unsubscribe pane)
+                  (while (pos? (ev/count (state :queue)))
+                    (def queued (ev/take (state :queue)))
+                    (try (reply (queued 0) (json/encode {"error" "terminal closed"})) ([_] nil)))
+                  (ev/chan-close (state :queue)))))))
+          state)))
+    {:message (fn [text]
+      (def message (json/decode text))
+      (def kind (get message "type"))
+      (def pane (get message "pane"))
+      (unless (pane-id? pane) (error "invalid terminal pane"))
+      (case kind
+        "subscribe"
+        (do
+          (when (>= (length streams) 64) (error "too many terminal subscriptions"))
+          (subscribe pane (math/floor (or (get message "at") 0))
+                          (math/floor (or (get message "generation") 0)) (get message "subscription")))
+        "unsubscribe" (unsubscribe pane)
+        "credit"
+        (when-let [sub (streams pane)]
+          (when (and (= (get message "subscription") (sub :subscription)) (zero? (ev/count (sub :credit))))
+            (ev/give (sub :credit) [(math/floor (or (get message "at") 0))
+                                    (math/floor (or (get message "generation") 0))])))
+        "request"
+        (let [id (get message "id")
+              op (get message "op")
+              body (or (get message "body") {})]
+          (unless (and (number? id) (>= id 0)
+                       (index-of op terminal-operations))
+            (error "invalid terminal operation"))
+          (def state (actor pane))
+          (def size (length text))
+          (if (or (>= (ev/count (state :queue)) 128) (> (+ size (state :bytes)) 262144))
+            (reply id (json/encode {"error" "terminal input queue full"}))
+            (do (+= (state :bytes) size)
+                (ev/give (state :queue) [id op body size]))))
+        (error "invalid terminal message")))
+     :close (fn []
+       (set alive false)
+       (each id (keys streams) (unsubscribe id))
+       (each state (values actors) (ev/chan-close (state :queue))))})
 
   (defn handler [request]
     (when stopping (break ["503 Service Unavailable" "text/plain" "server stopping"]))
@@ -286,20 +429,6 @@
         ["403 Forbidden" "application/json"
          (json/encode {"error" "bad or missing token"})]))
 
-    (defn poll-answer
-
-      [ask body]
-      (def sent (json/decode body))
-
-      (def raw
-        (ask (math/floor (or (get sent "at") 0))
-
-             (when-let [g (get sent "generation")] (math/floor g))
-
-             (when-let [w (get sent "wait")] (math/floor w))
-             (get sent "limit") (get sent "encoding")))
-      ["200 OK" "application/json" raw])
-
     (cond
       (and (= method "GET") (= path "/session"))
       ["200 OK" "application/json" (json/encode {"token" token})]
@@ -312,17 +441,11 @@
           {:upgrade (fn [connection carry]
             (websocket/serve connection carry request
               (fn [send]
-                (stream/open send (fn [id] (or (get panes id) (error "terminal closed")))
-                  (fn [id op body]
-                    (def [status _ raw] (handler {:method "POST"
-                      :path (string "/pane/" id "/" op "?k=" token)
-                      :body (json/encode body)}))
-                    (unless (= status "200 OK") (error "terminal operation failed"))
-                    raw)))))}))
+                (terminal-stream send))))}))
 
       (and (= method "GET") (= path "/diagnostics/graph"))
       (guarded (fn []
-        ["200 OK" "application/json" (json/encode (:call graph-worker :diagnostics))]))
+        ["200 OK" "application/json" (json/encode (:call project-graph :diagnostics))]))
 
       (and (= method "POST") (= path "/errors"))
       (guarded (fn []
@@ -403,7 +526,7 @@
               (def full (os/realpath file))
               (unless (and full (= :file (os/stat full :mode))) (error "configuration file is unavailable"))
               (put sent "file" full))
-            ["200 OK" "application/json" (config-edit (json/encode sent))])
+            ["200 OK" "application/json" (config-edit sent)])
           ([err] ["400 Bad Request" "application/json" (json/encode {"error" (string err)})]))))
 
       (and (= method "POST") (= path "/panes/placements"))
@@ -413,7 +536,7 @@
         (unless (and (dictionary? sent) (<= (length sent) 256)) (error "invalid pane placements"))
         (each id (keys sent)
           (def pos (get sent id))
-          (unless (and (stream/pane-id? id) (indexed? pos)
+          (unless (and (pane-id? id) (indexed? pos)
             (or (and (index-of (length pos) [2 4]) (index-of (pos 0) ["top" "bottom"])
                      (number? (pos 1)) (<= 0 (pos 1) 100000) (= (pos 1) (math/floor (pos 1)))
                      (or (= 2 (length pos))
@@ -425,7 +548,7 @@
                      (or (= 3 (length pos))
                          (and (> (pos 3) 0) (> (pos 4) 0))))))
             (error "invalid pane placement")))
-        (:call graph-worker :placements sent)
+        (config/write-config config-path (config/remember-placements (config/read-config config-path) sent))
         ["200 OK" "application/json" (json/encode {:ok true})]))
 
       (and (= method "POST") (= path "/label"))
@@ -439,77 +562,13 @@
             (set-pane-title id text)
             ["200 OK" "application/json" (json/encode {:ok true})]))))
 
-      (and (= method "POST") (string/has-prefix? "/pane/" path)
-           (pane-route path))
-      (guarded
-        (fn []
-          (def [id op] (pane-route path))
-          (def client (if (= op "start") (pane-for id) (get panes id)))
-          (unless client
-            (break ["200 OK" "application/json"
-              (json/encode {"reachable" false "absent" true "running" false "generation" 0})]))
-          (def sent (if (empty? (or (request :body) ""))
-                      {} (or (json/decode (request :body)) {})))
-          (defn rows [] (math/floor (or (get sent "rows") 24)))
-          (defn cols [] (math/floor (or (get sent "cols") 100)))
-          (case op
-            "diagnostics"
-            ["200 OK" "application/json" (json/encode (:remote-stats client))]
-
-            "start"
-            ["200 OK" "application/json"
-             (json/encode (:start client
-               (if (or (get sent "command") (get sent "node"))
-                 (command/argv (or (os/getenv "SHELL") "/bin/sh")
-                               (get sent "command")
-                               (:call graph-worker :file sent))
-                 (launch/argv (or (os/getenv "SHELL") "/bin/sh") nil))
-               root (rows) (cols) (get sent "theme")
-               (merge launch-environment {"VISUALIZE_PANE_ID" id})))]
-
-            "stop"
-            ["200 OK" "application/json" (json/encode (:stop client))]
-
-            "shutdown"
-            (do (:shutdown client)
-                (forget-pane id)
-                ["200 OK" "application/json" (json/encode {"ok" true})])
-
-            "input"
-
-            ["200 OK" "application/json"
-             (:raw-send client (string (get sent "text" ""))
-                        (when-let [a (get sent "at")] (math/floor a))
-                        (truthy? (get sent "quiet"))
-                        (get sent "generation"))]
-
-            "redraw"
-            (do (:redraw client)
-                ["200 OK" "application/json" (json/encode {"ok" true})])
-
-            "resize"
-            (do (:resize client (rows) (cols) (get sent "cellWidth") (get sent "cellHeight"))
-                ["200 OK" "application/json" (json/encode {"ok" true})])
-
-            "screen"
-            ["200 OK" "application/json"
-             (:raw-screen client (get sent "at" 0) (get sent "generation" 0) 0)]
-
-            "theme"
-            (let [theme (get sent "theme" {})
-                  response (:theme client theme)]
-              (set terminal-theme theme)
-              ["200 OK" "application/json" response])
-
-            "capture"
-            ["200 OK" "application/json" (json/encode (:capture client))]
-
-            "poll"
-            (poll-answer (fn [at gen wait limit encoding] (:raw-poll client at gen wait limit encoding))
-                         (request :body))
-
-            ["404 Not Found" "application/json"
-             (json/encode {"error" (string "no such pane op '" op "'")})])))
+      (and (= method "POST") (pane-route path))
+      (guarded (fn []
+        (def [id op] (pane-route path))
+        (if (index-of op terminal-operations)
+          ["200 OK" "application/json"
+           (operate-terminal id op (or (json/decode (or (request :body) "{}")) {}))]
+          ["404 Not Found" "application/json" (json/encode {"error" "unknown terminal operation"})])))
 
       ["404 Not Found" "text/plain" "not found"]))
 
@@ -517,7 +576,7 @@
     (http/serve default-port port-tries handler))
   (set serving-port bound)
   (def control-path (socket-for root (string "." bound ".control.sock")))
-  (def close-control (control/serve control-path control-call))
+  (def close-control (cli/serve control-path control-call))
   (put launch-environment "VISUALIZE_SOCKET" control-path)
   (put launch-environment "VISUALIZE_MAIN_HARNESS_COMMAND" (options :command))
   (os/setenv "VISUALIZE_SOCKET" control-path)
@@ -533,7 +592,7 @@
       (close-control)
       (print)
       (each client (values panes) (try (:shutdown client) ([_] nil)))
-      (:stop graph-worker)
+      (:stop project-graph)
       (os/exit 0)))
 
   (def keyboard?
@@ -564,7 +623,7 @@
         (set stopping true)
         (close-control)
         (print "restarting server; terminal sessions kept")
-        (:stop graph-worker)
+        (:stop project-graph)
         (os/posix-exec ["/bin/sh" "-c"
           ``for restart_fd in /dev/fd/*; do
   restart_fd=${restart_fd##*/}

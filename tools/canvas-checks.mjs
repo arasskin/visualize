@@ -88,9 +88,9 @@ try {
   await sleep(1000);
   await cdp.evaluate('window.__renderTrace.start()');
   const checks = await cdp.evaluate(`(async () => {
-    const g = await import('/graph.js');
-    const f = await import('/find.js');
-    const h = await import('/hover.js');
+    const g = (await import('/app.js')).graph;
+    const f = (await import('/app.js')).search;
+    const h = (await import('/app.js')).hover;
     const passed = [];
     const check = (ok,name) => { if(!ok) throw new Error(name); passed.push(name); };
     const settle = () => new Promise(r=>setTimeout(r,250));
@@ -194,7 +194,7 @@ try {
     host.style.cssText='position:absolute;left:0;top:0;width:1024px;height:512px';
     host.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="2048"><rect width="4096" height="2048" fill="#abc"/><rect x="350" y="50" width="1800" height="380" fill="#b32" opacity=".5"/><path d="M 0 20 L 3000 850" fill="none" stroke="#123" stroke-width="3"/><text x="400" y="200" font-family="sans-serif" font-size="24">Labels across tile boundaries</text></svg>';
     document.body.append(host);
-    const {createRenderer}=await import('/graph-canvas.js');
+    const {createRenderer}=await import('/graph/canvas.js');
     const tiled=createRenderer(host.querySelector('svg'),()=>{});
     tiled.canvas.style.cssText='position:absolute;left:0;top:0;width:1024px;height:512px';
     await settle();
@@ -230,10 +230,10 @@ try {
   await cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:600,y:450,button:'left',buttons:1,clickCount:1});
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseMoved',x:650,y:480,button:'left',buttons:1});
   await sleep(200);
-  const dragging=await cdp.evaluate('(async()=>{const g=await import("/graph.js");return g.navigating&&!!g.dragging;})()');
+  const dragging=await cdp.evaluate('(async()=>{const g=(await import("/app.js")).graph;return g.navigating&&!!g.dragging;})()');
   if(!dragging)throw new Error('Native canvas drag failed');
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:650,y:480,button:'left',buttons:0,clickCount:1});
-  const released=await cdp.evaluate('(async()=>{const g=await import("/graph.js");return !g.navigating&&!g.dragging;})()');
+  const released=await cdp.evaluate('(async()=>{const g=(await import("/app.js")).graph;return !g.navigating&&!g.dragging;})()');
   if(!released)throw new Error('Native canvas drag did not end');
   console.log('Retina rendering, theme changes, and native canvas dragging passed.');
   const trace = await cdp.evaluate('({report: window.__renderTrace.stop(), samples: window.__renderTrace.snapshot()})');
@@ -241,7 +241,7 @@ try {
     if (!trace.samples.some(sample => sample.kind === kind)) throw new Error('Missing render trace phase: ' + kind);
   }
   if (trace.samples.some(sample => !Number.isFinite(sample.ms) || sample.ms < 0)) throw new Error('Invalid render trace duration');
-  const stopped = await cdp.evaluate('(async()=>{const before=window.__renderTrace.snapshot().length;(await import("/graph.js")).repaint();return before===window.__renderTrace.snapshot().length})()');
+  const stopped = await cdp.evaluate('(async()=>{const before=window.__renderTrace.snapshot().length;(await import("/app.js")).graph.repaint();return before===window.__renderTrace.snapshot().length})()');
   if (!stopped) throw new Error('Stopped render trace kept recording');
   await writeFile(output + '.trace.json', JSON.stringify(trace, null, 2));
   console.log('Render trace phases and stop behavior passed.');

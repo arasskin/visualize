@@ -1,6 +1,6 @@
 Panels can dock to either the top or bottom tab rail. Both rails use 6px edge and inter-tab spacing, with independent horizontal scrolling. Drag a title bar near either screen edge to dock it, between tabs to reorder it, or away from the rails to float it.
 
-Top panels open downward. Bottom panels keep their title bar at the bottom and open upward; their resize grip moves to the upper-right corner. Closed tabs on either rail resize horizontally from the right edge. Alt+Enter opens a new terminal on the top rail. Cmd/Ctrl+T uses the selected panel's rail, defaulting to the top when the selected panel is floating. MCP-created terminals appear collapsed on the bottom rail.
+Top panels open downward. Bottom panels keep their title bar at the bottom and open upward; their resize grip moves to the upper-right corner. Closed tabs on either rail resize horizontally from the right edge. Alt+Enter opens a new terminal on the top rail.
 
 The Visualize panel defaults to a 26rem width, capped at 92vw, on the bottom rail. Recovered MCP terminals appear collapsed on the bottom rail; other terminal tabs default to the top rail on reload. Rail positions remain in-memory. Each terminal tab has a close button at the right that stops its session and removes the tab; the drag-to-trash target is removed.
 

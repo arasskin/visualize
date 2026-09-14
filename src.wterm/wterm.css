@@ -114,6 +114,10 @@
   overflow: hidden;
 }
 
+.term-narrow {
+  width: 1ch;
+}
+
 .term-wide {
   width: 2ch;
   overflow: hidden;

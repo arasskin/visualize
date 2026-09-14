@@ -10,3 +10,4 @@ bin/
 
 /src.vterm/libvisualize-vterm.so*
 /src.graphviz/libvisualize-graphviz.so*
+/src.server/term/libvisualize-pty.so*

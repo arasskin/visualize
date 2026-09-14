@@ -1,9 +1,9 @@
 (import ./trace)
 
-(import ./parser)
 (import ./names)
 (import ./parsers/arduino :as arduino)
 (import ./parsers/visualize-bash :as bash)
+(import ./parsers/c :as c)
 (import ./parsers/clojure :as clojure)
 (import ./parsers/css :as css)
 (import ./parsers/go :as go)
@@ -14,10 +14,81 @@
 (import ./parsers/swift :as swift)
 (import ./parsers/visualize-lang :as visualize-lang)
 
+(defn- name-imports
+
+  [spec found path]
+  (when (empty? found) (break found))
+  (case (spec :imports-are)
+    :paths   (map |(names/from-path (or path "") $) found)
+    :modules (map |(names/from-module $) found)
+    (errorf "parser spec '%s' has :imports but no :imports-are"
+            (or (spec :name) "?"))))
+
+(defn- captures
+
+  [pattern text &opt skip]
+  (if-not pattern
+    @[]
+    (distinct (or (peg/match (if skip ~(any (+ ,pattern (drop ,skip) 1))
+                                      ~(any (+ ,pattern 1))) text) @[]))))
+
+(defn blank-noise
+
+  [pattern text]
+  (if-not pattern
+    text
+    (do
+
+      (def out (buffer/new (length text)))
+      (def scan (peg/compile ~(any (+ (/ (capture ,pattern) ,|(string/repeat " " (length $)))
+                                      (capture 1)))))
+      (each piece (or (peg/match scan text) @[])
+        (buffer/push-string out piece))
+      (string out))))
+
+(defn parse
+
+  [spec text &opt path]
+  (def text (string/replace-all "\r\n" "\n" text))
+  (if-let [custom (spec :parse)]
+    (custom text path)
+    (let [
+
+          clean (blank-noise (spec :noise) text)]
+      {:declares (captures (spec :declares) clean)
+
+       :imports (name-imports spec (captures (spec :imports) text (spec :noise)) path)
+       :refs (distinct [;(captures (spec :refs) clean)
+                        ;(captures (spec :literal-refs) text (spec :noise))])})))
+
+(defn- first-line
+
+  [path]
+  (when-let [f (try (file/open path :rb) ([_] nil))]
+    (def head (try (file/read f 128) ([_] nil)))
+    (file/close f)
+    (when head
+      (def text (string head))
+      (def stop (string/find "\n" text))
+      (if stop (string/slice text 0 stop) text))))
+
+(defn claims?
+
+  [spec path &opt full]
+  (cond
+    (some |(string/has-suffix? $ path) (spec :ext)) true
+    (or (nil? full) (string/find "." path)) false
+    (do
+      (def marks (spec :shebang))
+      (def line (and marks (first-line full)))
+      (truthy? (and line
+                    (string/has-prefix? "#!" line)
+                    (some |(string/find $ line) marks))))))
+
 (def specs
 
-  [arduino/spec bash/spec clojure/spec css/spec go/spec html/spec
-   janet-lang/spec javascript/spec python/spec swift/spec
+  [arduino/spec bash/spec c/spec clojure/spec css/spec go/spec html/spec
+   janet-lang/spec javascript/spec (python/spec blank-noise) swift/spec
    visualize-lang/spec])
 
 (defn languages
@@ -66,7 +137,7 @@
         :file (unless (string/has-prefix? "." entry)
                 (array/push found
                             {:path full :rel here
-                             :spec (find |(parser/claims? $ entry full) specs)})))))
+                             :spec (find |(claims? $ entry full) specs)})))))
 
   (walk root "")
   (sorted-by |($ :rel) found)))
@@ -111,7 +182,7 @@
      {:rel (job :rel) :skipped true}
 
      true
-     (let [found (parser/run (job :spec) text (job :rel))]
+     (let [found (parse (job :spec) text (job :rel))]
        {:rel (job :rel)
         :stamp stamp
 
@@ -179,6 +250,26 @@
   (def name (string/join (string/split "/" cut) ".\n"))
   (if ext (string name "\n." ext) name))
 
+(defn- unique-index [candidates &opt deduplicate]
+  (def out @{})
+  (eachp [key values] candidates
+    (def values (if deduplicate (distinct values) values))
+    (when (= 1 (length values)) (put out key (first values))))
+  out)
+
+(defn- link-project-files [file files]
+  (if (nil? (file :dependencies))
+    file
+    (do
+      (def local (tabseq [name :in (file :headings)] name true))
+      (def kept (merge @{} local))
+      (def edges @[])
+      (each [from fallback path] (file :dependencies)
+        (def target (if (local fallback) fallback (or (files path) fallback)))
+        (when (= target fallback) (put kept fallback true))
+        (unless (= from target) (array/push edges [from target])))
+      (merge file {:nodes (filter |(kept $) (file :nodes)) :edges edges}))))
+
 (defn build
 
   [parsed]
@@ -186,29 +277,13 @@
   (def live (filter |(and $ (not ($ :skipped))) parsed))
   (def files (tabseq [file :in live :when (empty? (or (file :nodes) []))]
                     (file :rel) (node-name (file :rel))))
-  (def live
-    (map (fn [file]
-      (if (nil? (file :dependencies))
-        file
-        (do
-          (def local (tabseq [name :in (file :headings)] name true))
-          (def kept (merge @{} local))
-          (def edges @[])
-          (each [from fallback path] (file :dependencies)
-            (def target (if (local fallback) fallback (or (files path) fallback)))
-            (when (= target fallback) (put kept fallback true))
-            (unless (= from target) (array/push edges [from target])))
-          (merge file {:nodes (filter |(kept $) (file :nodes)) :edges edges}))))
-      live))
-
+  (def live (map |(link-project-files $ files) live))
 
   (def owners @{})
   (each file live
     (each name (or (file :declares) [])
       (put owners name (array/push (or (owners name) @[]) (file :rel)))))
-  (def resolved @{})
-  (eachp [name files] owners
-    (when (= 1 (length files)) (put resolved name (first files))))
+  (def resolved (unique-index owners))
 
   (defn declared [file] (or (file :nodes) []))
   (defn describes? [file] (not (empty? (declared file))))
@@ -224,9 +299,7 @@
     (def full (node-name (file :rel)))
     (def leaf (last (string/split "." (names/stem full))))
     (put by-leaf leaf (array/push (or (by-leaf leaf) @[]) full)))
-  (def from-leaf @{})
-  (eachp [leaf names] by-leaf
-    (when (= 1 (length names)) (put from-leaf leaf (first names))))
+  (def from-leaf (unique-index by-leaf))
 
   (def by-tail @{})
   (each file live
@@ -238,9 +311,7 @@
       (def tail (string/join (slice parts i) "."))
       (unless (empty? tail)
         (put by-tail tail (array/push (or (by-tail tail) @[]) full)))))
-  (def from-tail @{})
-  (eachp [tail names] by-tail
-    (when (= 1 (length (distinct names))) (put from-tail tail (first names))))
+  (def from-tail (unique-index by-tail true))
 
   (def by-package @{})
   (each file live
@@ -254,9 +325,7 @@
         (unless (empty? key)
           (put by-package key
                (array/push (or (by-package key) @[]) full))))))
-  (def from-package @{})
-  (eachp [key names] by-package
-    (when (= 1 (length (distinct names))) (put from-package key (first names))))
+  (def from-package (unique-index by-package true))
 
   (defn- own-package? [here target]
     (and (string/has-suffix? ".__init__.py" target)
@@ -274,7 +343,8 @@
            (string/slice stem 0 (- (length stem) (length ".__init__"))) full)))
 
   (def importable-by
-    {"python" {"py" true}})
+    {"python" {"py" true}
+     "janet" {"janet" true "jimage" true "so" true "dll" true}})
 
   (def pruned (pruned-dirs))
   (defn pruned? [name]
@@ -295,9 +365,7 @@
     (def full (node-name (file :rel)))
     (def key (names/stem full))
     (put by-stem key (array/push (or (by-stem key) @[]) full)))
-  (def from-stem @{})
-  (eachp [key names] by-stem
-    (when (= 1 (length names)) (put from-stem key (first names))))
+  (def from-stem (unique-index by-stem))
 
   (def sizes @{})
   (each file live
@@ -343,6 +411,91 @@
   (def pairs @{})
   (def externals @{})
 
+  (defn resolve-import [file name]
+    (def here (node-name (file :rel)))
+
+    (def name (or (get aliases name) name))
+    (when (names/external? name) (break name))
+
+    (def speculative? (string/has-suffix? "." name))
+    (def name (if speculative? (slice name 0 -2) name))
+    (def mapped (or (get aliases name) name))
+
+    (defn language-target [wanted]
+      (when (= "janet" (file :lang))
+        (find |(ours $) [(string wanted ".janet")
+                        (string wanted ".init.janet")])))
+
+    (defn beside-of [wanted]
+      (let [parts (string/split "." (names/stem (node-name (file :rel))))]
+
+        (def floor
+          (do
+            (var d (- (length parts) 1))
+            (while (and (> d 1)
+                        (from-package (string/join (slice parts 0 d) ".")))
+              (-- d))
+
+            (max 1 (- d 1))))
+        (var found nil)
+        (var depth (- (length parts) 1))
+        (while (and (nil? found) (>= depth floor) (> depth 0))
+          (def candidate (string (string/join (slice parts 0 depth) ".")
+                                 "." wanted))
+
+          (defn ok [t] (and t (importable? (file :lang) t) t))
+          (set found (or (language-target candidate)
+                         (ok (from-stem candidate))
+                         (ok (and (ours candidate) candidate))
+
+                         (and (not speculative?)
+                              (ok (from-package-exact candidate)))))
+          (-- depth))
+        found))
+    (def beside (beside-of mapped))
+
+    (defn ok [t] (and t (importable? (file :lang) t) t))
+    (def target (or (language-target mapped)
+                    (ok (from-stem mapped))
+                    (ok (and (ours mapped) mapped))
+                    beside
+
+                    (ok (if speculative?
+                          (from-package-exact mapped)
+                          (from-package mapped)))
+                    (when (not speculative?)
+                      (or
+
+                        (and (or (not (index-of (file :lang) ["python" "janet"]))
+                                 (not (string/find "." mapped)))
+                             (ok (from-tail mapped)))
+                        (and (or (not (index-of (file :lang) ["python" "janet"]))
+                                 (not (string/find "." mapped)))
+                             (ok (from-leaf (last (string/split "." mapped)))))))))
+    (cond
+      target (unless (own-package? here target) target)
+
+      speculative? nil
+
+      (pruned? mapped) nil
+
+      (or (empty? mapped)
+          (string/has-prefix? (string mapped ".") here)) nil
+
+      (let [parts (string/split "." name)
+            prefix (string/join (slice parts 0 -2) ".")]
+        (and (> (length parts) 1)
+             (not (empty? prefix))
+             (or (get externals (names/external prefix))
+                 (from-stem prefix)
+                 (and (ours prefix) prefix)
+                 (beside-of prefix)
+                 (from-tail prefix)
+                 (from-package prefix))))
+      nil
+
+      (names/external name)))
+
   (each file live
     (each [from to] (or (file :edges) [])
       (unless (= from to) (put pairs [from to] true))))
@@ -360,88 +513,9 @@
           (put pairs [here (node-name target)] true))))
 
     (each name (or (file :imports) [])
-
-      (def name (or (get aliases name) name))
-      (def declared-external (names/external? name))
-      (when declared-external
-        (put externals name true)
-        (unless (= name here) (put pairs [here name] true)))
-      (unless declared-external
-
-      (def speculative? (string/has-suffix? "." name))
-      (def name (if speculative? (slice name 0 -2) name))
-      (def mapped (or (get aliases name) name))
-
-      (defn beside-of [wanted]
-        (let [parts (string/split "." (names/stem (node-name (file :rel))))]
-
-          (def floor
-            (do
-              (var d (- (length parts) 1))
-              (while (and (> d 1)
-                          (from-package (string/join (slice parts 0 d) ".")))
-                (-- d))
-
-              (max 1 (- d 1))))
-          (var found nil)
-          (var depth (- (length parts) 1))
-          (while (and (nil? found) (>= depth floor) (> depth 0))
-            (def candidate (string (string/join (slice parts 0 depth) ".")
-                                   "." wanted))
-
-            (defn ok [t] (and t (importable? (file :lang) t) t))
-            (set found (or (ok (from-stem candidate))
-                           (ok (and (ours candidate) candidate))
-
-                           (and (not speculative?)
-                                (ok (from-package-exact candidate)))))
-            (-- depth))
-          found))
-      (def beside (beside-of mapped))
-
-      (defn ok [t] (and t (importable? (file :lang) t) t))
-      (def target (or (ok (from-stem mapped))
-                      (ok (and (ours mapped) mapped))
-                      beside
-
-                      (ok (if speculative?
-                            (from-package-exact mapped)
-                            (from-package mapped)))
-                      (when (not speculative?)
-                        (or
-
-                          (and (or (not= "python" (file :lang))
-                                   (not (string/find "." mapped)))
-                               (ok (from-tail mapped)))
-                          (and (or (not= "python" (file :lang))
-                                   (not (string/find "." mapped)))
-                               (ok (from-leaf (last (string/split "." mapped)))))))))
-      (cond
-        target (unless (or (= target here) (own-package? here target))
-                 (put pairs [here target] true))
-
-        speculative? nil
-
-        (pruned? mapped) nil
-
-        (or (empty? mapped)
-            (string/has-prefix? (string mapped ".") here)) nil
-
-        (let [parts (string/split "." name)
-              prefix (string/join (slice parts 0 -2) ".")]
-          (and (> (length parts) 1)
-               (not (empty? prefix))
-               (or (get externals (names/external prefix))
-                   (from-stem prefix)
-                   (and (ours prefix) prefix)
-                   (beside-of prefix)
-                   (from-tail prefix)
-                   (from-package prefix))))
-        nil
-
-        (do (put externals (names/external name) true)
-            (unless (= name here)
-              (put pairs [here (names/external name)] true)))))))
+      (when-let [target (resolve-import file name)]
+        (when (names/external? target) (put externals target true))
+        (unless (= here target) (put pairs [here target] true)))))
 
   (def nodes @[])
   (each file live
@@ -474,37 +548,16 @@
 
 (defn fingerprint
 
-  [root &opt yield? extra-skips]
+  [root &opt yield? extra-skips excluded]
   (trace/measure "scan-fingerprint"
   (def entries @[])
   (var since 0)
   (each job (find-files root extra-skips)
     (def stats (os/stat (job :path)))
-    (when stats
+    (when (and stats (not= excluded (job :path)))
       (array/push entries [(job :rel) (stats :modified) (stats :size)
                            (stats :changed) (stats :inode)]))
     (when yield?
       (++ since)
       (when (>= since 200) (set since 0) (ev/sleep 0))))
   (tuple ;(sorted entries))))
-
-(defn watch
-
-  [root changed &opt every skips-of]
-  (default every 0.7)
-  (var running true)
-
-  (defn skips [] (if skips-of (skips-of) []))
-  (var last (fingerprint root false (skips)))
-  (ev/go
-    (fn []
-      (while running
-        (ev/sleep every)
-        (when running
-
-          (def now (try (fingerprint root true (skips)) ([_] nil)))
-          (when (and now (not= now last))
-            (set last now)
-
-            (try (changed) ([err] (eprintf "watch: %s" (string err)))))))))
-  (fn [] (set running false)))

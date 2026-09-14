@@ -1,9 +1,10 @@
-(import ../../src.server/parser :as parser)
 (import ../../src.server/scan)
 (import ../../src.server/select)
 (import ../../src.server/parsers/swift)
 (import ../../src.server/parsers/clojure)
 (import ../../src.server/parsers/python)
+(import ../../src.server/parsers/janet :as janet-lang)
+(import ../../src.server/parsers/c :as c)
 (import ../../src.server/parsers/go)
 (import ../../src.server/parsers/arduino)
 (import ../../src.server/parsers/html :as html)
@@ -13,7 +14,31 @@
 (import ../../src.server/parsers/visualize-bash :as bash)
 (import ./harness :as t)
 
-(defn- swift [text] (parser/run swift/spec text "T.swift"))
+(def python-spec (python/spec scan/blank-noise))
+
+(t/test "the real PTY module links its Janet host and its C implementation"
+  (def parsed
+    (map (fn [[path spec]]
+           (merge (scan/parse spec (slurp path) path)
+                  {:rel path :lang (spec :name)}))
+         [["src.server/term/host.janet" janet-lang/spec]
+          ["src.server/term/pty.janet" janet-lang/spec]
+          ["src.server/term/pty.c" c/spec]]))
+  (def edges ((scan/build parsed) :edges))
+  (t/ok (index-of ["src.server.term.host.janet" "src.server.term.pty.janet"] edges))
+  (t/ok (index-of ["src.server.term.pty.janet" "src.server.term.pty.c"] edges))
+  (t/ok (not (some |(= ($ 1) "?.src.server.term.pty") edges))))
+
+(t/test "Janet prefers the module file over its init file and other source languages"
+  (def imports (scan/parse janet-lang/spec "(import ./pty.janet)\n" "host.janet"))
+  (def g (scan/build [(merge imports {:rel "host.janet" :lang "janet"})
+                     {:rel "pty/init.janet" :lang "janet"}
+                     {:rel "pty.janet" :lang "janet"}
+                     {:rel "pty.c" :lang "c"}
+                     {:rel "pty.py" :lang "python"}]))
+  (t/is= [["host.janet" "pty.janet"]] (g :edges)))
+
+(defn- swift [text] (scan/parse swift/spec text "T.swift"))
 
 (t/test "swift finds the declarations another file can name"
   (def got (swift ``
@@ -58,12 +83,12 @@ let real = RetailerConfig()
 (t/test "blanking noise preserves every byte offset"
 
   (def text `Foo"bar"Baz`)
-  (def clean (parser/blank-noise (swift/spec :noise) text))
+  (def clean (scan/blank-noise (swift/spec :noise) text))
   (t/is= (length text) (length clean))
   (t/ok (not (string/find "FooBaz" clean)) "tokens stay apart"))
 
 (t/test "python reads its imports"
-  (def got (parser/run python/spec ``
+  (def got (scan/parse python-spec ``
 import os
 import os.path
 from otto.store import Cart
@@ -76,7 +101,7 @@ from . import sibling
 
 (t/test "a parenthesised import list spans lines"
 
-  (def got (parser/run python/spec ``
+  (def got (scan/parse python-spec ``
 from otto import (
     store_cart,
     store_order,
@@ -88,13 +113,13 @@ from otto import (
   (t/ok (index-of "otto.store_retailer" (got :imports)) "and the last"))
 
 (t/test "an alias names no file"
-  (def got (parser/run python/spec "from otto import store_cart as sc\n" "t.py"))
+  (def got (scan/parse python-spec "from otto import store_cart as sc\n" "t.py"))
   (t/ok (index-of "otto.store_cart" (got :imports)) "the thing renamed")
   (t/ok (not (index-of "otto.sc" (got :imports))) "not the local name"))
 
 (t/test "an import that IS a string literal survives the noise pass"
 
-  (def got (parser/run go/spec ``
+  (def got (scan/parse go/spec ``
 import "fmt"
 
 import (
@@ -106,9 +131,11 @@ import (
 // import "commented-out"
 `` "a.go"))
   (t/is= ["fmt" "github.com.lib.pq" "math" "os"] (sorted (got :imports)))
+  (t/ok (not (index-of "commented-out" (got :imports)))
+        "a commented import is still not an import"))
 
 (t/test "arduino reads every include and no commented or quoted one"
-  (def got (parser/run arduino/spec ``
+  (def got (scan/parse arduino/spec ``
 #include <Servo.h>
 #  include "pins.h"
 // #include <Commented.h>
@@ -119,7 +146,7 @@ const char *note = "#include <InAString.h>";
 
 (t/test "arduino declares the names another tab can call"
 
-  (def got (parser/run arduino/spec ``
+  (def got (scan/parse arduino/spec ``
 struct Reading { int raw; };
 class Motor { public: void spin(); };
 enum Mode { IDLE, RUN };
@@ -137,7 +164,7 @@ String label() { return "x"; }
 
 (t/test "arduino declares neither setup, loop, nor a control-flow keyword"
 
-  (def got (parser/run arduino/spec ``
+  (def got (scan/parse arduino/spec ``
 void setup() { }
 void loop() { }
 if (ready) { }
@@ -149,16 +176,13 @@ digitalWrite(LED, HIGH);
 
 (t/test "arduino claims sketches and leaves C and C++ alone"
 
-  (t/ok (parser/claims? arduino/spec "blink/blink.ino"))
-  (t/ok (parser/claims? arduino/spec "old/sketch.pde"))
-  (t/ok (not (parser/claims? arduino/spec "external-src/janet/janet.c")))
-  (t/ok (not (parser/claims? arduino/spec "lib/thing.h")))
-  (t/ok (not (parser/claims? arduino/spec "lib/thing.cpp"))))
-  (t/ok (not (index-of "commented-out" (got :imports)))
-        "a commented import is still not an import"))
-
+  (t/ok (scan/claims? arduino/spec "blink/blink.ino"))
+  (t/ok (scan/claims? arduino/spec "old/sketch.pde"))
+  (t/ok (not (scan/claims? arduino/spec "external-src/janet/janet.c")))
+  (t/ok (not (scan/claims? arduino/spec "lib/thing.h")))
+  (t/ok (not (scan/claims? arduino/spec "lib/thing.cpp"))))
 (t/test "javascript takes every import shape, each as the node it names"
-  (def got (parser/run js/spec ``
+  (def got (scan/parse js/spec ``
 import React from 'react'
 import { a, b } from "./store"
 import type { T } from '../lib/api'
@@ -203,15 +227,15 @@ const fs = require('fs')
          "an extension on the specifier is dropped, as node names carry none"))
 
 (t/test "a spec claims files by extension"
-  (t/ok (parser/claims? swift/spec "a/b/C.swift"))
-  (t/ok (not (parser/claims? swift/spec "a/b/C.py")))
-  (t/ok (parser/claims? python/spec "a/b/C.py")))
+  (t/ok (scan/claims? swift/spec "a/b/C.swift"))
+  (t/ok (not (scan/claims? swift/spec "a/b/C.py")))
+  (t/ok (scan/claims? python-spec "a/b/C.py")))
 
 (t/test "a :parse function overrides the PEGs entirely"
   (def fake {:name "fake" :ext [".x"]
              :parse (fn [text path] {:declares ["D"] :imports ["I"] :refs ["R"]})})
   (t/is= {:declares ["D"] :imports ["I"] :refs ["R"]}
-         (parser/run fake "anything at all" "a.x")))
+         (scan/parse fake "anything at all" "a.x")))
 
 (t/test "html reads what a page pulls in"
 
@@ -243,7 +267,7 @@ const fs = require('fs')
 
 (t/test "html assets preserve extensions and resolve static roots without guessing ambiguous files"
   (def path "src/web/index.html")
-  (def parsed (parser/run html/spec ``
+  (def parsed (scan/parse html/spec ``
 <link href="/wterm.css?v=2#theme">
 <script src="./app.js"></script>
 <link href="/style.css">
@@ -275,7 +299,7 @@ const fs = require('fs')
 
 (t/test "the visualize html entrypoint resolves the vendored terminal stylesheet"
   (def path "src/web/index.html")
-  (def parsed (parser/run html/spec (slurp path) path))
+  (def parsed (scan/parse html/spec (slurp path) path))
   (def g (scan/build [(merge parsed {:rel path :lang "html"})
                      {:rel "src.wterm/wterm.css"}
                      {:rel "src.wterm/wterm-dom.js"}
@@ -642,7 +666,7 @@ source "$scripts/helper.sh"
 source "${more}/worker.sh"
 ``)
   (t/is= ["project.scripts.helper" "project.scripts.more.worker"]
-         ((parser/run bash/spec text "project/run.sh") :imports)))
+         ((scan/parse bash/spec text "project/run.sh") :imports)))
 
 (t/test "shell directory aliases resolve relative to the script that defines them"
   (def text ``
@@ -652,7 +676,7 @@ source "${tools}/helper.sh"
 "$local_root/child.task.sh"
 ``)
   (t/is= ["tools.helper" "nested.child.task"]
-         ((parser/run bash/spec text "nested/build") :imports)))
+         ((scan/parse bash/spec text "nested/build") :imports)))
 
 (t/test "continued compiler arguments are not executable dependencies"
   (def text ``
@@ -665,7 +689,7 @@ source "$here/setup.sh"
 "$here/verify.sh"
 ``)
   (t/is= ["native.setup" "native.verify"]
-         ((parser/run bash/spec text "native/build") :imports)))
+         ((scan/parse bash/spec text "native/build") :imports)))
 
 (t/test "the native Graphviz build does not invent executable paths from C inputs"
   (def root (string "/tmp/vz-native-build-scan-" (os/getpid)))
@@ -745,7 +769,7 @@ source "$here/setup.sh"
          "and the module it named is the edge"))
 
 (t/test "clojure reads the ns form, and only the live parts of it"
-  (def got (parser/run clojure/spec `
+  (def got (scan/parse clojure/spec `
 (ns icare.ui
   (:require ["package:flutter/material.dart" :as m]
             ;; [icare.benchmarks :refer [dart-time]]
@@ -766,7 +790,7 @@ source "$here/setup.sh"
   (t/ok (index-of "icare.ui.shared" found)))
 
 (t/test "clojuredart reads macro requires"
-  (def got (parser/run clojure/spec
+  (def got (scan/parse clojure/spec
     "(ns icare.ui (:require-macros [icare.macros :as m]))\n" "ui.cljd"))
   (t/ok (index-of "icare.macros" (got :imports))))
 

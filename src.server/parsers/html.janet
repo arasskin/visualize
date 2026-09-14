@@ -45,13 +45,16 @@
 
 (defn- parse [text path]
 
+  (def text (peg/replace-all ~(* "<!--" (any (if-not "-->" 1)) (opt "-->")) " " text))
   (def found @[])
   (def tags (peg/match ~(any (+ (<- (* "<" (some (if-not ">" 1)) ">")) 1)) text))
   (each tag (or tags [])
     (def name (first (or (peg/match ~(* "<" (? "/") (<- (some (range "az" "AZ")))) tag) [])))
 
     (when (and name (not= (string/ascii-lower name) "a"))
-      (each hit (or (peg/match ~(any (+ (* (+ ,;(map |(string $ "=") ["src" "href" "poster" "data"]))
+      (each hit (or (peg/match ~(any (+ (* (some (set " \t\r\n"))
+                                           (+ "src" "href" "poster" "data")
+                                           (any (set " \t\r\n")) "=" (any (set " \t\r\n"))
                                            ,quoted)
                                         1))
                                tag) [])

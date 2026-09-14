@@ -7,23 +7,35 @@
   (t/is= "style.css" (http/static-file "/style.css"))
   (t/is= "index.html" (http/static-file "/index.html")))
 
-(t/test "a name may not describe a path"
+(t/test "nested static assets are served relative to the static roots"
+  (t/is= "terminal/term.js" (http/static-file "/terminal/term.js"))
+  (t/is= "graph/camera.js" (http/static-file "/graph/camera.js"))
+  (t/is= "fonts/Parkinsans-Regular.ttf" (http/static-file "/fonts/Parkinsans-Regular.ttf")))
+
+(t/test "static paths cannot traverse directories or contain empty segments"
 
   (t/is= nil (http/static-file "/../visualize_config"))
   (t/is= nil (http/static-file "/../../etc/passwd"))
-  (t/is= nil (http/static-file "/src/pty.janet"))
-  (t/is= nil (http/static-file "/web/term.js"))
-  (t/is= nil (http/static-file "/a/b"))
+  (t/is= nil (http/static-file "/terminal/../../src.server/core.janet"))
+  (t/is= nil (http/static-file "/terminal/../app.js"))
+  (t/is= nil (http/static-file "/terminal/./term.js"))
+  (t/is= nil (http/static-file "/terminal//term.js"))
+  (t/is= nil (http/static-file "/terminal/"))
+  (t/is= nil (http/static-file "terminal/term.js"))
   (t/is= nil (http/static-file "/..\\windows"))
   (t/is= nil (http/static-file "/")))
 
 (t/test "a dotfile is not servable"
   (t/is= nil (http/static-file "/.gitignore"))
-  (t/is= nil (http/static-file "/.env")))
+  (t/is= nil (http/static-file "/.env"))
+  (t/is= nil (http/static-file "/terminal/.env"))
+  (t/is= nil (http/static-file "/.git/config")))
 
 (t/test "odd characters are refused rather than interpreted"
 
   (t/is= nil (http/static-file "/term%2Ejs"))
+  (t/is= nil (http/static-file "/terminal/%2e%2e/app.js"))
+  (t/is= nil (http/static-file "/terminal%2fterm.js"))
   (t/is= nil (http/static-file "/term.js?k=1"))
   (t/is= nil (http/static-file "/term js"))
   (t/is= nil (http/static-file "/term;js"))

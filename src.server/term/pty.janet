@@ -23,6 +23,9 @@
   (ffi/write :uint16 cols out 2)
   out)
 
+(def- library-path (string (os/realpath (string (dyn :current-file) "/..")) "/libvisualize-pty.so"))
+(var- resize-binding nil)
+
 (defn open
 
   [argv &opt rows cols env directory]
@@ -73,13 +76,15 @@
 (defn resize
 
   [session rows cols]
-  (if (empty? (or (session :device) ""))
-    false
-    (zero? (try
-             (os/execute ["stty" "-f" (session :device)
-                          "rows" (string rows) "columns" (string cols)]
-                         :p)
-             ([_] 1)))))
+  (unless resize-binding
+    (set resize-binding [(ffi/lookup (ffi/native library-path) "visualize_pty_resize")
+                         (ffi/signature :default :int :int :int :int)]))
+  (def code (call resize-binding (session :fd) rows cols))
+  (unless (zero? code)
+    (def [describe signature] (bound "strerror" :string :int))
+    (errorf "PTY resize to %dx%d failed: %s (errno %d)"
+            rows cols (ffi/call describe signature code) code))
+  true)
 
 (defn alive?
 

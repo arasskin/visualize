@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { WTerm } from '../src.wterm/wterm-dom-wterm.js';
-import { ScreenCore } from '../src/web/screen-core.js';
+import { ScreenCore } from '../src/web/terminal/screen-core.js';
 
 const code = `(import ./src.server/term/vterm)
 (import ./src.server/json)
+(import ./src.server/term/host)
 (def terminal (vterm/create 4 20))
-(defn emit [at] (print (json/encode (:snapshot terminal at))))
+(defn emit [at] (print (json/encode (host/screen-message (:snapshot terminal at)))))
 (:write terminal "界é\\e[38;2;12;34;56mX\\e[0m")
 (emit 0)
 (def baseline (:revision terminal))

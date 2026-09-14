@@ -1,6 +1,6 @@
 (import ../../src.server/config)
 (import ../../src.server/config-graph :as diagram)
-(import ../../src.server/worker)
+(import ../../src.server/graph)
 (import ../../src.server/json)
 (import ./harness :as t)
 
@@ -22,11 +22,11 @@
 (t/test "prefix actions affect descendants but not similarly named siblings or metadata"
   (def lines ["box b" "#fold b.a" "box b.a blue" "fold bee" "lines"
               "@visualize terminal 1 socket /tmp/one.sock"])
-  (def base (diagram/visible lines))
+  (def base (config/visible lines))
   (def disabled (diagram/change lines {"action" "subtree-comment" "node" "p:b" "base" base}))
   (t/is= ["#box b" "#fold b.a" "#box b.a blue" "fold bee" "lines"
           "@visualize terminal 1 socket /tmp/one.sock"] disabled)
-  (def enabled (diagram/change disabled {"action" "subtree-comment" "node" "p:b" "base" (diagram/visible disabled)}))
+  (def enabled (diagram/change disabled {"action" "subtree-comment" "node" "p:b" "base" (config/visible disabled)}))
   (t/is= ["box b" "fold b.a" "box b.a blue" "fold bee" "lines"
           "@visualize terminal 1 socket /tmp/one.sock"] enabled)
   (t/is= ["box b" "fold bee" "lines" "@visualize terminal 1 socket /tmp/one.sock"]
@@ -106,7 +106,7 @@
   (def lines ["box src" "  # fold src.server.parsers  # keep src" "box src.server red"
               "hide src.serverless" "only src/web" "@visualize markdown 1 /src/file"])
   (defn renamed [prefix label]
-    (diagram/change lines {"action" "rename-prefix" "node" (string "p:" prefix) "label" label "base" (diagram/visible lines)}))
+    (diagram/change lines {"action" "rename-prefix" "node" (string "p:" prefix) "label" label "base" (config/visible lines)}))
   (t/is= ["box source" "  # fold source.server.parsers  # keep src" "box source.server red"
           "hide source.serverless" "only source.web" "@visualize markdown 1 /src/file"] (renamed "src" "source"))
   (t/is= ["box src" "  # fold src.backend.parsers  # keep src" "box src.backend red"
@@ -155,10 +155,13 @@
   (def root (string "/tmp/vz-config-graph-" (os/getpid)))
   (os/mkdir root)
   (def file (string root "/visualize_config"))
-  (spit file "box b\nbox b.a\nbox  \"b\"\n")
-  (def w (worker/start root (fn [_] nil)))
+  (spit file "box b\nbox b.a\n")
+  (def w (graph/start root (fn [_] nil)))
   (defer (do (:stop w) (os/rm file) (os/rmdir root))
-    (defn edit [sent] (json/decode (:call w :edit (merge sent {"file" file "diagram" true}))))
+    (defn edit [sent]
+      (def lines (config/visible (diagram/update-file file sent)))
+      (def [model svg] (:call w :diagram [file lines]))
+      {"lines" lines "graph" model "diagram" svg})
     (def first (edit {"action" "reload"}))
     (t/is= ["box b" "box b.a"] (first "lines"))
     (def duplicate (edit {"action" "append" "command" "box b"}))
@@ -166,8 +169,8 @@
     (t/is= (first "diagram") (duplicate "diagram"))
     (t/is= "box b\nbox b.a\n" (string (slurp file)))
     (t/is= (first "diagram") ((edit {"action" "reload"}) "diagram"))
-    (:call w :notes [["1" "/tmp/test.sock"]])
-    (:call w :markdown {"1" file})
+    (config/write-config file (config/remember-terminals (config/read-config file) [["1" "/tmp/test.sock"]]))
+    (config/write-config file (config/remember-markdown (config/read-config file) {"1" file}))
     (edit {"action" "append" "command" "fold b"})
     (edit {"action" "append" "command" "lines"})
     (def current (edit {"action" "reload"}))

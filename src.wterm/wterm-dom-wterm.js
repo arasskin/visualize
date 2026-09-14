@@ -26,13 +26,21 @@ export class WTerm {
         this.onData = options.onData || null;
         this.onTitle = options.onTitle || null;
         this.onResize = options.onResize || null;
+        this.onRender = options.onRender || null;
+        this.onRenderError = options.onRenderError || null;
         this._container = document.createElement("div");
         this._container.className = "term-grid";
         this.element.appendChild(this._container);
         this.element.classList.add("wterm");
         if (options.cursorBlink)
             this.element.classList.add("cursor-blink");
+        this._onPointerDown = event => {
+            this._pointerDown = event.button === 0 ? {x: event.clientX, y: event.clientY} : null;
+        };
+        this.element.addEventListener("pointerdown", this._onPointerDown);
         this._onClickFocus = (event) => {
+            const press = this._pointerDown;
+            this._pointerDown = null;
             const target = event.target;
             if (target instanceof Element && target.closest(".term-link")) {
                 if (!window.getSelection()?.isCollapsed) event.preventDefault();
@@ -41,9 +49,14 @@ export class WTerm {
             const sel = window.getSelection();
             const selectionInside = sel && !sel.isCollapsed &&
                 this.element.contains(sel.anchorNode) && this.element.contains(sel.focusNode);
-            if (!selectionInside)
+            const selecting = selectionInside && (!press || event.detail > 1 || event.shiftKey ||
+                Math.hypot(event.clientX - press.x, event.clientY - press.y) > 4);
+            if (!selecting) {
+                if (selectionInside) sel.removeAllRanges();
                 this.input?.focus();
+            }
         };
+        this.element.addEventListener("mouseup", this._onClickFocus);
         this.element.addEventListener("click", this._onClickFocus);
         this._onModifierChange = (event) => {
             this.element.classList.toggle("link-modifier-active", isLinkActivationModifier(event, this.element.ownerDocument.defaultView?.navigator ?? navigator));
@@ -169,7 +182,28 @@ export class WTerm {
     _initialRender() {
         this._doRender();
     }
+    get core() { return this.bridge; }
+    measure() { return this._measureCharSize(); }
+    refreshScreen({follow = true, historyChanged = false} = {}) {
+        if (this._destroyed || !this.bridge) return;
+        const rows = this.bridge.getRows(), cols = this.bridge.getCols();
+        if (rows !== this.rows || cols !== this.cols) this.resize(cols, rows);
+        if (historyChanged) this.renderer.invalidateScrollback();
+        this._shouldScrollToBottom = follow;
+        if (follow) this._pendingResizeScrollTop = null;
+        this._scheduleRender();
+    }
     _doRender() {
+        const start = performance.now();
+        try {
+            this._renderScreen();
+            this.onRender?.(performance.now() - start);
+        } catch (error) {
+            this.onRenderError?.(error);
+            throw error;
+        }
+    }
+    _renderScreen() {
         if (!this.bridge || !this.renderer)
             return;
         const rowHeight = this._rowHeight || 17;
@@ -299,6 +333,8 @@ export class WTerm {
         this.renderer?.destroy();
         this.renderer = null;
         this.element.removeEventListener("click", this._onClickFocus);
+        this.element.removeEventListener("mouseup", this._onClickFocus);
+        this.element.removeEventListener("pointerdown", this._onPointerDown);
         this.element.removeEventListener("scroll", this._onScroll);
         this.element.ownerDocument.removeEventListener("keydown", this._onModifierChange);
         this.element.ownerDocument.removeEventListener("keyup", this._onModifierChange);

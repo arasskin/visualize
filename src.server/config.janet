@@ -1,6 +1,131 @@
-(import ./color)
 (import ./names)
 (import ./json)
+
+(def palette
+  ["#ff4d6d"
+   "#3bceac"
+   "#ffa62b"
+   "#8367c7"
+   "#22a6f2"
+   "#f5c518"
+   "#ee6c4d"
+   "#06d6a0"
+   "#c04cfd"
+   "#8ac926"
+   "#ff70a6"
+   "#118ab2"])
+
+(def ungrouped "#7ea8c4")
+
+(def named
+  {"red" "#ff4d6d"
+   "green" "#3bceac"
+   "orange" "#ffa62b"
+   "purple" "#8367c7"
+   "blue" "#22a6f2"
+   "yellow" "#f5c518"
+   "orange-red" "#ee6c4d"
+   "teal" "#06d6a0"
+   "magenta" "#c04cfd"
+   "yellow-green" "#8ac926"
+   "pink" "#ff70a6"
+   "dark-blue" "#118ab2"
+   "grey" "#8d99ae"
+   "gray" "#8d99ae"})
+
+(def- hex-color (peg/compile ~(* (6 :h) -1)))
+
+(defn as-hex
+
+  [color]
+  (def text (string/ascii-lower (string/trim (string color))))
+
+  (if-let [hit (named text)]
+    hit
+    (when (peg/match hex-color text)
+      (string "#" text))))
+
+(defn- channels
+
+  [color]
+  (map |(scan-number (string "0x" (string/slice color $ (+ $ 2)))) [1 3 5]))
+
+(defn- to-hex
+
+  [parts]
+  (string "#" (string/join (map |(string/format "%02x"
+                                                (math/round (max 0 (min 255 $))))
+                                parts))))
+
+(defn tint
+
+  [color weight]
+
+  (def strength (+ 0.62 (* 0.38 (max 0 (min 1 weight)))))
+  (to-hex (map |(- 255 (* (- 255 $) strength)) (channels color))))
+
+(defn luminance
+
+  [color]
+  (def linear
+    (map (fn [c]
+           (def v (/ c 255))
+           (if (<= v 0.04045)
+             (/ v 12.92)
+             (math/pow (/ (+ v 0.055) 1.055) 2.4)))
+         (channels color)))
+  (+ (* 0.2126 (linear 0)) (* 0.7152 (linear 1)) (* 0.0722 (linear 2))))
+
+(defn contrast
+
+  [one two]
+  (def a (luminance one))
+  (def b (luminance two))
+  (def light (max a b))
+  (def dark (min a b))
+  (/ (+ light 0.05) (+ dark 0.05)))
+
+(def- depths [0.34 0.26 0.20 0.15 0.10 0.05 0])
+
+(defn ink
+
+  [fill]
+  (if (< (luminance fill) 0.18)
+    "#f7f7f7"
+    (do
+      (def parts (channels fill))
+      (or (some (fn [depth]
+                  (def candidate (to-hex (map |(* $ depth) parts)))
+                  (when (>= (contrast candidate fill) 4.5) candidate))
+                depths)
+          "#000000"))))
+
+(defn ink-on-page
+
+  [hue]
+  (def parts (channels hue))
+  (or (some (fn [depth]
+              (def candidate (to-hex (map |(* $ depth) parts)))
+              (when (>= (contrast candidate "#ffffff") 4.5) candidate))
+            [0.55 0.45 0.34 0.26 0.20 0.15 0.10])
+      "#000000"))
+
+(defn ramp
+
+  [counts]
+  (def tiers (sorted (distinct (values counts))))
+  (def last (- (length tiers) 1))
+  (if (< last 1)
+    (table ;(mapcat |[$ 1] (keys counts)))
+    (do
+
+      (def rank-of (table ;(mapcat |[(tiers $) (/ $ last)] (range (length tiers)))))
+      (table ;(mapcat |[$ (rank-of (counts $))] (keys counts))))))
+
+(def for-drawing
+  {:ungrouped ungrouped
+   :ink ink-on-page
+   :tint |(tint $ 0.3)})
 
 (defn new-state
 
@@ -20,17 +145,17 @@
 
     :animated false
 
-    :palette color/for-drawing})
+    :palette for-drawing})
 
 (defn- reflow
 
   [state]
 
-  (def spoken @{color/ungrouped true})
+  (def spoken @{ungrouped true})
   (each g (state :groups)
     (when ((state :chosen) (g :prefix)) (put spoken (g :color) true)))
-  (def free (filter |(not (spoken $)) color/palette))
-  (def spare (filter |(not= $ color/ungrouped) color/palette))
+  (def free (filter |(not (spoken $)) palette))
+  (def spare (filter |(not= $ ungrouped) palette))
   (var taken 0)
   (put state :groups
        (map (fn [g]
@@ -126,7 +251,7 @@
 (defn colours
 
   []
-  (sorted (keys color/named)))
+  (sorted (keys named)))
 
 (defn- normalise
 
@@ -192,13 +317,13 @@
       (var hue "")
       (var wrong nil)
       (if wanted
-        (let [resolved (color/as-hex wanted)]
+        (let [resolved (as-hex wanted)]
           (cond
             (not resolved)
             (set wrong (string "'" wanted "' is not a colour -- "
                                "use rrggbb or a name like blue"))
-            (= resolved color/ungrouped)
-            (set wrong (string color/ungrouped " is what ungrouped nodes "
+            (= resolved ungrouped)
+            (set wrong (string ungrouped " is what ungrouped nodes "
                                "already wear -- the group would be invisible; "
                                "pick another colour"))
             (do (put (state :chosen) text true)
@@ -262,6 +387,20 @@
 
   [line]
   (string/has-prefix? marker (string/trim (or line ""))))
+
+(defn visible [lines]
+  (filter |(not (note? $)) lines))
+
+(defn shown [lines problems]
+  (var index 0)
+  (def visible @[])
+  (def moved @{})
+  (eachp [i line] lines
+    (unless (note? line)
+      (array/push visible line)
+      (when-let [why (get problems i)] (put moved index why))
+      (++ index)))
+  [visible moved])
 
 (defn eval-line [line state]
   (def text (string/trim (code-of line)))
@@ -384,8 +523,6 @@
     (when-let [wrong (eval-line line state)]
       (put problems i wrong)))
   [state problems])
-
-(def config-title "visualize")
 
 (def starter
   "lines\n")
@@ -521,38 +658,23 @@
   (def next (if (empty? lines) "" (string (string/join lines "\n") "\n")))
   (def now (try (string (slurp path)) ([_] nil)))
   (unless (= next now)
-    (spit path next)))
+    (def target (try (os/realpath path) ([_] path)))
+    (def directory (string/join (slice (string/split "/" target) 0 -2) "/"))
+    (def temporary (string (if (empty? directory) "." directory) "/.visualize-"
+                          (string/join (map |(string/format "%02x" $) (os/cryptorand 12)) "")))
+    (defer (when (os/stat temporary) (os/rm temporary))
+      (spit temporary next)
+      (when-let [permissions (os/stat target :permissions)] (os/chmod temporary permissions))
+      (os/rename temporary target))))
 
-(defn read-config
-
-  [path]
+(defn initialize [path]
   (unless (os/stat path :mode)
-    (spit path (string (string/trimr starter "\n") "\n")))
-  (def text (try (slurp path) ([_] "")))
+    (write-config path (string/split "\n" (string/trimr starter "\n")))))
 
+(defn read-config [path]
+  (def text (string (slurp path)))
   (def split (string/split "\n" text))
-  (def lines (if (and (> (length split) 0) (= "" (last split)))
-    (slice split 0 -2)
-    split))
-  (def unique (tidy-lines lines))
-  (unless (= (tuple ;unique) (tuple ;lines)) (write-config path unique))
-  unique)
-
-(def draws {"run" true "delete" true "reorder" true "regenerate" true})
-
-(defn edit
-
-  [lines action index]
-  (def out (array ;lines))
-  (cond
-    (or (= action "run") (= action "reorder") (= action "regenerate")
-        (= action "check")) out
-    (= action "insert-above") (array/insert out (max 0 index) "")
-    (= action "insert-below") (array/insert out (min (length out) (+ index 1)) "")
-    (= action "delete") (if (and (>= index 0) (< index (length out)))
-                          (array/remove out index)
-                          out)
-    (errorf "unknown action '%s'" action)))
+  (if (= "" (last split)) (slice split 0 -2) split))
 
 (defn placements [lines]
   (def out @{})

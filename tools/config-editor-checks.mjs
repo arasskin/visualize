@@ -5,15 +5,28 @@ import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import assert from 'node:assert/strict';
-import { configCompletions } from '../src/web/config-completion.js';
-import { matchConfigNodes, configSearchCompletions } from '../src/web/config-search.js';
+import { configCompletions } from '../src/web/config/completion.js';
+import { matchConfigNodes, configSearchCompletions } from '../src/web/config/search.js';
 
 const options = {docs: [{name: 'box', args: ['name', 'color?']}, {name: 'fold', args: ['name']}],
-  colours: ['blue', 'red'], prefixes: ['src.web.app']};
+  colours: ['blue', 'red'], prefixes: ['src.web.app'], lines: ['fold src.web', 'box src red']};
 assert.deepEqual(configCompletions('fo', 2, options).items, ['fold', 'unfold']);
-assert.deepEqual(configCompletions('unf', 3, options).items, ['unfold']);
-assert(configCompletions('unfold src.', 11, options).items.includes('src.web.app'));
-assert.deepEqual(configCompletions('unbox src re', 12, options).items, ['red']);
+assert.deepEqual(configCompletions('unf', 3, options).items, ['unfold src.web']);
+assert.deepEqual(configCompletions('unfold src.', 11, options).items, ['unfold src.web']);
+assert.deepEqual(configCompletions('unbox src re', 12, options).items, ['unbox src red']);
+assert.deepEqual(configCompletions('unbox src blue', 14, options).items, []);
+assert.deepEqual(configCompletions('unfold src.web.app', 18, options).items, []);
+assert.deepEqual(configCompletions('un', 2, {...options, lines: []}).items, []);
+const undoOptions = {...options, docs: [...options.docs, {name: 'lines', args: []}], lines: [
+  '#fold disabled', '  #box disabled red', '@visualize terminal 1 socket /tmp/a',
+  'fold "outside graph" # note', 'fold   "outside graph"', 'box "src#name" blue',
+  'lines', 'fold', 'fold too many', 'unknown src', 'box "unfinished',
+]};
+assert.deepEqual(configCompletions('un', 2, undoOptions).items,
+  ['unlines', 'unbox "src#name" blue', 'unfold "outside graph"']);
+assert.deepEqual(configCompletions('unfold "out', 11, undoOptions),
+  {start: 0, end: 11, items: ['unfold "outside graph"'], wholeLine: true});
+assert.equal(configCompletions('unfold old tail', 8, undoOptions).end, 15);
 assert(configCompletions('fold src.', 9, options).items.includes('src.web.app'));
 assert.deepEqual(configCompletions('box src red', 11, options).items, ['red']);
 assert(!configCompletions('box src red extra', 17, options).items.length);
@@ -102,7 +115,7 @@ try {
   await cdp.send('Emulation.setDeviceMetricsOverride', {width: 1280, height: 900, deviceScaleFactor: 1, mobile: false});
   await cdp.send('Page.navigate', {url});
   await waitFor(() => cdp.evaluate('!!document.querySelector("#config .config-command input")'));
-  await cdp.evaluate('(async()=>{const {configPanel}=await import("/panes.js"); configPanel.open();configPanel.root.style.width="780px";configPanel.root.style.height="620px";})()');
+  await cdp.evaluate('(async()=>{const {workspace}=await import("/app.js"); const configPanel=workspace.get("config"); configPanel.open();configPanel.root.style.width="780px";configPanel.root.style.height="620px";})()');
   await waitFor(() => cdp.evaluate('document.querySelectorAll("#config .config-diagram .node").length===6'));
   assert(await cdp.evaluate('document.activeElement===document.querySelector("#config .config-command input") && document.querySelector("#config .config-completions").hidden'));
   assert(await cdp.evaluate(`(()=>{
@@ -135,8 +148,9 @@ try {
   })()`));
   assert.equal(await cdp.evaluate('document.querySelectorAll("#config .config-node-action").length'), 12);
   const camera = () => cdp.evaluate(`(()=>{const m=document.querySelector('#config .graph-camera').transform.baseVal.consolidate().matrix;return {scale:m.a,x:m.e,y:m.f}})()`);
+  await waitFor(() => cdp.evaluate(`!!document.querySelector('#config .graph-camera')?.transform.baseVal.consolidate()`));
   const initialCamera = await camera();
-  const mainCamera = await cdp.evaluate('(async()=>({...((await import("/graph.js")).view())}))()');
+  const mainCamera = await cdp.evaluate('(async()=>({...((await import("/app.js")).graph.view())}))()');
   const graphBox = await cdp.evaluate('document.querySelector("#config .config-diagram").getBoundingClientRect().toJSON()');
   const inputBox = await cdp.evaluate('document.querySelector("#config .config-command").getBoundingClientRect().toJSON()');
   async function drag(dx, dy) {
@@ -161,12 +175,12 @@ try {
   await cdp.send('Input.dispatchMouseEvent', {type: 'mouseWheel', ...pointer, deltaX: 0, deltaY: -10, modifiers: 2});
   await waitFor(async () => (await camera()).scale > zoomed.scale);
   assert(Math.abs((await camera()).scale / zoomed.scale - Math.exp(.1)) < .001);
-  assert.deepEqual(await cdp.evaluate('(async()=>({...((await import("/graph.js")).view())}))()'), mainCamera);
+  assert.deepEqual(await cdp.evaluate('(async()=>({...((await import("/app.js")).graph.view())}))()'), mainCamera);
   assert.deepEqual(await cdp.evaluate('document.querySelector("#config .config-command").getBoundingClientRect().toJSON()'), inputBox);
   await cdp.send('Input.dispatchKeyEvent', {type: 'keyDown', key: '0', code: 'Digit0', windowsVirtualKeyCode: 48, modifiers: 2});
   await cdp.send('Input.dispatchKeyEvent', {type: 'keyUp', key: '0', code: 'Digit0', windowsVirtualKeyCode: 48});
   await waitFor(async () => Math.abs((await camera()).scale - initialCamera.scale) < .001);
-  assert.deepEqual(await cdp.evaluate('(async()=>({...((await import("/graph.js")).view())}))()'), mainCamera);
+  assert.deepEqual(await cdp.evaluate('(async()=>({...((await import("/app.js")).graph.view())}))()'), mainCamera);
   await drag(-20, -10);
   const keptCamera = await camera();
   await cdp.evaluate('window.firstGraph=document.querySelector("#config .config-diagram svg");document.querySelector("#config .config-command input").focus()');
@@ -180,7 +194,7 @@ try {
   await waitFor(() => cdp.evaluate('document.querySelectorAll("#config .config-diagram .node").length===7'));
   await cdp.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
   assert.deepEqual(await camera(), keptCamera);
-  await cdp.evaluate(`(async()=>{const {configReader}=await import('/config-editor.js');const body=document.createElement('div');body.id='second-reader';document.body.append(body);window.secondReader=configReader({body,shut:false},'second',${JSON.stringify(file)});})()`);
+  await cdp.evaluate(`(async()=>{const {configReader}=await import('/config/editor.js');const body=document.createElement('div');body.id='second-reader';document.body.append(body);window.secondReader=configReader({body,shut:false},'second',${JSON.stringify(file)});})()`);
   await waitFor(() => cdp.evaluate('document.querySelectorAll("#second-reader .node").length===7'));
   await cdp.evaluate('window.secondReader.focus()');
   assert(await cdp.evaluate('document.activeElement===document.querySelector("#second-reader .config-command input") && document.querySelector("#second-reader .config-completions").hidden'));
@@ -240,7 +254,8 @@ try {
   const selectedNode = () => cdp.evaluate(`document.querySelector('#config .node.search-hit')?.dataset.node`);
   const suggestions = () => cdp.evaluate(`Array.from(document.querySelectorAll('#config .config-search-completions li'), item=>item.textContent)`);
   async function key(key, modifiers = 0) {
-    await cdp.send('Input.dispatchKeyEvent', {type: 'keyDown', key, modifiers});
+    await cdp.send('Input.dispatchKeyEvent', {type: 'keyDown', key, modifiers,
+      ...(key === 'Enter' ? {code: 'Enter', windowsVirtualKeyCode: 13, text: '\r'} : {})});
     await cdp.send('Input.dispatchKeyEvent', {type: 'keyUp', key, modifiers});
   }
   await search('fo');
@@ -318,7 +333,7 @@ try {
   const metadata = (await readFile(file, 'utf8')).split('\n').filter(line => line.startsWith('@visualize '));
   await writeFile(file, ['box b', 'fold b.a', '#hide b.a.deep', 'box c', 'fold c.a', 'hide bee', ...metadata, ''].join('\n'));
   await waitFor(() => cdp.evaluate(`!!document.querySelector('#config [data-node="p:b.a.deep"]')`));
-  await cdp.evaluate(`(async()=>{const {configReader}=await import('/config-editor.js');const body=document.createElement('div');body.id='rename-peer';document.body.append(body);window.renamePeer=configReader({body,shut:false},'rename-peer',${JSON.stringify(file)});})()`);
+  await cdp.evaluate(`(async()=>{const {configReader}=await import('/config/editor.js');const body=document.createElement('div');body.id='rename-peer';document.body.append(body);window.renamePeer=configReader({body,shut:false},'rename-peer',${JSON.stringify(file)});})()`);
   await waitFor(() => cdp.evaluate(`!!document.querySelector('#rename-peer [data-node="p:b.a.deep"]')`));
   async function beginRename(prefix) {
     await search(prefix);
@@ -381,6 +396,42 @@ try {
   await submitConfig('unfold c.folder.child');
   assert.equal(await readFile(file, 'utf8'), disabled);
   await submitConfig('fold c.folder.child');
+  async function commandSuggestions(selector, text) {
+    await cdp.evaluate(`(()=>{const input=document.querySelector(${JSON.stringify(selector)});input.focus();input.value=${JSON.stringify(text)};input.dispatchEvent(new Event('input'));})()`);
+  }
+  const undoItems = selector => cdp.evaluate(`[...document.querySelectorAll(${JSON.stringify(selector)})].map(item=>item.textContent)`);
+  await waitFor(() => cdp.evaluate(`!!document.querySelector('#config [data-node="p:c.folder.child"]')`));
+  await commandSuggestions('#config .config-command input', 'unfold c.folder');
+  await waitFor(async () => (await undoItems('#config .config-completions li')).includes('unfold c.folder.child'));
+  await key('Tab');
+  assert.equal(await cdp.evaluate(`document.querySelector('#config .config-command input').value`), 'unfold c.folder.child');
+  await key('Enter');
+  await waitFor(async () => (await readFile(file, 'utf8')).includes('#fold c.folder.child'));
+  await waitFor(() => cdp.evaluate(`!document.querySelector('#config .config-document.saving')`));
+  await commandSuggestions('#config .config-command input', 'unfold c.folder');
+  assert.deepEqual(await undoItems('#config .config-completions li'), []);
+  await cdp.evaluate(`document.querySelector('#compose').classList.remove('shut')`);
+  await commandSuggestions('#compose-input', 'unfold c.folder');
+  await waitFor(async () => !(await undoItems('#compose-list li')).includes('unfold c.folder.child'));
+  await submitConfig('fold c.folder.child');
+  await commandSuggestions('#compose-input', 'unfold c.folder');
+  await waitFor(async () => (await undoItems('#compose-list li')).includes('unfold c.folder.child'));
+  await key('Tab');
+  assert.equal(await cdp.evaluate(`document.querySelector('#compose-input').value`), 'unfold c.folder.child');
+  await key('Escape');
+  await key('Escape');
+  const nested = join(root, 'project', 'nested'); await mkdir(nested);
+  const nestedFile = join(nested, 'visualize_config'); await writeFile(nestedFile, 'fold "only here" # note\n#fold disabled\n');
+  await cdp.evaluate(`(async()=>{const {configReader}=await import('/config/editor.js');const body=document.createElement('div');body.id='undo-reader';document.body.append(body);window.undoReader=configReader({body,shut:false},'undo',${JSON.stringify(nestedFile)},{docs:window.CONFIG_DOCS});})()`);
+  await waitFor(() => cdp.evaluate(`!!document.querySelector('#undo-reader .config-diagram svg')`));
+  await commandSuggestions('#undo-reader .config-command input', 'un');
+  assert.deepEqual(await undoItems('#undo-reader .config-completions li'), ['unfold "only here"']);
+  await key('Tab');
+  assert.equal(await cdp.evaluate(`document.querySelector('#undo-reader .config-command input').value`), 'unfold "only here"');
+  await key('Enter');
+  await waitFor(async () => (await readFile(nestedFile, 'utf8')).startsWith('#fold "only here"'));
+  await cdp.evaluate('window.undoReader.stop()');
+  await commandSuggestions('#config .config-command input', '');
   await search('fold c.folder.child');
   const shot = await cdp.send('Page.captureScreenshot', {format: 'png'}); await writeFile(output, Buffer.from(shot.data, 'base64'));
   assert.deepEqual(failures, []);

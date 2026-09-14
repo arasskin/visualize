@@ -1,6 +1,14 @@
 (import ../../src.server/json)
 (import ./harness :as t)
 
+(t/test "base64 encodes empty, padded and binary payloads"
+  (each [plain encoded] [["" ""] ["f" "Zg=="] ["fo" "Zm8="]
+                         ["foo" "Zm9v"] ["foob" "Zm9vYg=="]
+                         ["fooba" "Zm9vYmE="] ["foobar" "Zm9vYmFy"]
+                         ["\x00\xff" "AP8="]]
+    (t/is= encoded (json/base64 plain))
+    (t/is= encoded (json/base64 (buffer plain)))))
+
 (t/test "scalars encode as JSON, not as Janet"
   (t/is= "null" (json/encode nil))
   (t/is= "true" (json/encode true))

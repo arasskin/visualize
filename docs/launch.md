@@ -11,7 +11,7 @@ For one launch, override it with `./visualize /path/to/project --command 'exec y
 
 `vz` without arguments executes the same configured invocation in the current terminal. `vz path/to/file` opens that file as a document in its current pane. Supported views include Markdown, highlighted source, and the `visualize_config` editor.
 
-The local document connection uses a private Unix socket, exposed through `VISUALIZE_SOCKET`; `VISUALIZE_PANE_ID` identifies the calling pane. `VISUALIZE_PROJECT` gives the project directory and `VISUALIZE_MAIN_HARNESS_COMMAND` carries the invocation. The socket accepts document opening only, with no agent operations. The CLI and transport live in `src.server/cli.janet` and `src.server/control.janet`.
+The local document connection uses a private Unix socket, exposed through `VISUALIZE_SOCKET`; `VISUALIZE_PANE_ID` identifies the calling pane. `VISUALIZE_PROJECT` gives the project directory and `VISUALIZE_MAIN_HARNESS_COMMAND` carries the invocation. The socket accepts document opening only, with no agent operations. Argument parsing, shell invocation, and both ends of the local document connection live together in `src.server/cli.janet`.
 
 `VISUALIZE_STARTUP_PROMPT` carries the prompt text and `VISUALIZE_STARTUP_PROMPT_JSON` carries its quoted form for Codex. New sessions receive the current prompt even when their supervisor survived a restart. Running sessions keep their existing instructions.
 

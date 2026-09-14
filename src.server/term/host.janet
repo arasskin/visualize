@@ -1,9 +1,17 @@
 (import ./pty)
 (import ./vterm)
 (import ../json)
-(import ../websocket)
 (import ../trace)
 (import ../errors)
+
+(defn screen-message [snapshot]
+  (defn encode-lines [lines]
+    (map (fn [[row bytes]] [row (json/base64 bytes)]) lines))
+  (merge snapshot
+    {"version" 1
+     "lines" (encode-lines (snapshot "lines"))
+     "history" (merge (snapshot "history")
+                 {"lines" (encode-lines (get-in snapshot ["history" "lines"]))})}))
 
 (def- born-stamp
   (let [root (os/realpath (string (dyn :current-file) "/../.."))]
@@ -23,9 +31,6 @@
                    (d :year) (inc (d :month)) (inc (d :month-day))
                    (d :hours) (d :minutes) (d :seconds))))
 
-(def- backlog-limit
-  (or (scan-number (or (os/getenv "VISUALIZE_BACKLOG") "")) 4000))
-
 (var- session nil)
 (var- emulator nil)
 (var- emulator-fault nil)
@@ -40,10 +45,7 @@
   (eprintf "supervisor emulator: %s" emulator-fault))
 (var- unsent @"")
 (var- output nil)
-(var- backlog @[])
-(var- backlog-bytes 0)
-
-(var- base 0)
+(var- output-chunks 0)
 (var- generation 0)
 (var- session-root nil)
 
@@ -72,8 +74,7 @@
         (def value (ev/take output))
         (if (= value :eof)
           (do (set exited true) (when emulator (:release-output emulator)))
-          (do (array/push backlog value)
-              (+= backlog-bytes (length value))
+          (do (++ output-chunks)
               (+= drained (length value))
               (when (and emulator (nil? emulator-fault))
                 (try
@@ -82,11 +83,7 @@
                       (when (> (+ (length unsent) (length replies)) 1048576)
                         (error "terminal response queue full"))
                       (buffer/push-string unsent replies))
-                  ([e] (emulator-error e))))
-              (while (or (> (length backlog) backlog-limit) (> backlog-bytes 8388608))
-                (-= backlog-bytes (length (backlog 0)))
-                (array/remove backlog 0)
-                (++ base))))))))
+                  ([e] (emulator-error e))))))))))
 
 (defn- flush-unsent
 
@@ -168,9 +165,8 @@
    "argv" (if session (session :argv) [])
 
    "program" (if want-program (or (foreground) "") "")
-   "chunks" (+ base (length backlog))
+   "chunks" output-chunks
    "rows" pty-rows
-   "trimmed" (pos? base)
 
    "unsent" (length unsent)
 
@@ -193,9 +189,7 @@
   (when output (ev/chan-close output))
   (set session nil)
   (set output nil)
-  (set backlog @[])
-  (set backlog-bytes 0)
-  (set base 0)
+  (set output-chunks 0)
   (set exited false)
   (buffer/clear unsent)
   (set pty-rows rows)
@@ -275,33 +269,27 @@
 (defn- session-resize
 
   [rows cols]
+  (unless (and (<= 1 rows 1000) (<= 1 cols 1000))
+    (error "terminal dimensions must be between 1 and 1000"))
   (drain)
-  (when emulator (:resize emulator rows cols))
+  (when session (pty/resize session rows cols))
+  (try
+    (when emulator (:resize emulator rows cols))
+    ([e]
+      (when session
+        (try (pty/resize session pty-rows pty-cols)
+          ([rollback]
+            (def problem (string "resize failed: " e "; restoring PTY dimensions also failed: " rollback))
+            (emulator-error problem)
+            (error problem))))
+      (error e)))
   (set pty-rows rows)
   (set pty-cols cols)
-  (when session
-    (try (pty/resize session rows cols) ([_] nil)))
   nil)
 
 (defn- session-redraw []
   (when emulator (:resize emulator pty-rows pty-cols))
   nil)
-
-(defn- session-since [at &opt limit]
-  (drain)
-  (def total (+ base (length backlog)))
-  (def from (max base (min at total)))
-  (if (and limit (pos? limit))
-    (let [chunks @[]]
-      (var bytes 0)
-      (var next from)
-      (while (and (< next total) (< bytes limit))
-        (def chunk (backlog (- next base)))
-        (array/push chunks chunk)
-        (+= bytes (length chunk))
-        (++ next))
-      [(string/join chunks "") next from])
-    [(string/join (slice backlog (- from base)) "") total from]))
 
 (def- op-stats @{})
 (def- born-clock (os/clock :monotonic))
@@ -345,34 +333,8 @@
     [{"error" "terminal input buffer full"} false]
 
     (= op "input")
-    (let [at (number-at "at" -1)
-          before (+ base (length backlog))]
-      (trace/measure "pty-send"
-        (session-send (string input-text)))
-
-      (def wait-start (os/clock :monotonic))
-      (unless (truthy? (get message "quiet"))
-        (while (and (= (+ base (length backlog)) before)
-                    (< (- (os/clock :monotonic) wait-start) 0.048))
-          (drain)
-          (when (= (+ base (length backlog)) before)
-            (ev/sleep (if (< (- (os/clock :monotonic) wait-start) 0.004)
-                        0.0002
-                        0.002)))))
-      (trace/record "echo-wait" (* 1000 (- (os/clock :monotonic) wait-start)))
-      (if (neg? at)
-
-        [{"ok" true} false]
-
-        (let [[text next from] (session-since at)
-              now (session-state false)]
-          [{"ok" true
-            "text" text
-            "at" next
-            "from" from
-            "running" (now "running")
-            "generation" (now "generation")}
-           false])))
+    (do (trace/measure "pty-send" (session-send (string input-text)))
+        [{"ok" true} false])
 
     (= op "redraw")
     (do (session-redraw) [{"ok" true} false])
@@ -384,50 +346,6 @@
     (do (when emulator (:geometry emulator (number-at "cellWidth" 8) (number-at "cellHeight" 17)))
         (session-resize (number-at "rows" 24) (number-at "cols" 100))
         [{"ok" true} false])
-
-    (= op "since")
-
-    (let [asked (number-at "generation" -1)
-          wait (min 25000 (number-at "wait" 0))]
-      (when (pos? wait)
-
-        (def entry (session-state false))
-        (def from (number-at "at" 0))
-        (def deadline (+ (os/clock :monotonic) (/ wait 1000)))
-        (var parked true)
-        (while parked
-          (drain)
-          (def now (session-state false))
-          (def total (+ base (length backlog)))
-          (cond
-
-            (and (>= asked 0) (not= asked (now "generation"))) (set parked false)
-
-            (> total (max base (min from total))) (set parked false)
-
-            (not= (now "running") (entry "running")) (set parked false)
-            (>= (os/clock :monotonic) deadline) (set parked false)
-
-            (ev/sleep 0.001))))
-      (let [now (session-state)
-            stale (and (>= asked 0) (not= asked (now "generation")))
-            [text next from] (session-since (if stale 0 (number-at "at" 0)) (number-at "limit" 0))]
-        [{"text" (if (= (get message "encoding") "base64") (websocket/base64 text) text)
-          "encoding" (get message "encoding" "utf8")
-          "at" next
-          "from" from
-          "running" (now "running")
-          "generation" (now "generation")
-          "rows" (now "rows")
-          "cols" (now "cols")
-          "trimmed" (now "trimmed")
-          "stamp" (now "stamp")
-
-          "program" (now "program")
-          "waited" (pos? wait)
-
-          "reachable" true}
-         false]))
 
     (= op "screen")
     (let [asked (number-at "generation" -1)
@@ -443,7 +361,7 @@
       (when (and emulator (:synchronized? emulator))
         (while (:synchronized? emulator) (ev/sleep 0.001) (drain) (flush-unsent)))
       (def now (session-state true true))
-      (def screen (when emulator (:snapshot emulator (if (= asked generation) at 0))))
+      (def screen (when emulator (screen-message (:snapshot emulator (if (= asked generation) at 0)))))
       [(merge now {"screen" screen "at" (if screen (screen "revision") 0)
                    "reachable" true "waited" (pos? (number-at "wait" 0))}) false])
 
@@ -465,13 +383,13 @@
     [{"latency" (when trace/enabled (trace/snapshot))
       "ops" op-stats
       "unsent" (length unsent)
-      "chunks" (+ base (length backlog))
+      "chunks" output-chunks
       "stamp" born-stamp
       "uptime" (- (os/clock :monotonic) born-clock)}
      false]
 
     [{"error" (string "unknown op '" op "'")} false]))
-  (note-op (if (and (= op "since") (pos? (number-at "wait" 0))) "since+wait" op)
+  (note-op op
            (- (os/clock :monotonic) started))
   out)
 

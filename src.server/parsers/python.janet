@@ -1,4 +1,4 @@
-(import ../parser)
+(import ../names)
 
 (def- line-start '(+ (> -1 "\n") (! (> -1 1))))
 (def- ident '(some (+ (range "AZ") (range "az") (range "09") "_")))
@@ -14,7 +14,7 @@
 
 (def- import-line
   ~(* ,line-start (any (set " \t"))
-      (+ (* "from" ,space (<- ,dotted) ,space "import" ,space
+      (+ (* "from" ,space (<- (+ (* (some ".") (opt ,dotted)) ,dotted)) ,space "import" ,space
             (+ (* "(" (<- (any (if-not ")" 1))) ")")
                (<- (any (if-not "\n" 1)))))
          (* "import" ,space (<- (any (if-not "\n" 1)))))))
@@ -29,14 +29,20 @@
         :when (and word (not (empty? word)) (not= word "*"))]
     word))
 
-(defn- parse [text path]
-  (def clean (parser/blank-noise noise text))
+(defn- parse [text path blank-noise]
+  (def clean (blank-noise noise text))
 
   (def out @[])
   (each hit (peg/match all-imports clean)
     (if (= 2 (length hit))
 
       (let [[module names] hit]
+        (def module (if (string/has-prefix? "." module)
+          (let [tail (string/triml module ".")
+                levels (- (length module) (length tail))]
+            (names/from-path path (string "./" (string/repeat "../" (- levels 1))
+                                          (string/replace-all "." "/" tail))))
+          module))
         (array/push out module)
         (each name (listed names)
           (array/push out (string module "." name))))
@@ -52,7 +58,7 @@
       (array/push whole (string (string/join (slice parts 0 i) ".") "."))))
   {:imports (distinct whole)})
 
-(def spec
+(defn spec [blank-noise]
   {:name "python"
    :ext [".py"]
 
@@ -62,4 +68,4 @@
    :noise noise
 
    :imports-are :modules
-   :parse parse})
+   :parse (fn [text path] (parse text path blank-noise))})

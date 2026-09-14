@@ -51,7 +51,7 @@ export async function check({ cdp, url, root, waitFor, restart }) {
     await new Promise((resolve, reject) => { wire.once('connect', resolve); wire.once('error', reject); });
     wire.write(`GET /terminal?k=${token} HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nOrigin: ${url}\r\n\r\n`);
     await waitFor(() => upgraded);
-    const command = JSON.stringify({type:'request',pane:'harness',id:7,op:'poll',body:{at:0,generation:0}});
+    const command = JSON.stringify({type:'request',pane:'harness',id:7,op:'screen',body:{at:0,generation:0}});
     wire.write(Buffer.concat([masked(1, command.slice(0,40), false), masked(9,'ping'), masked(0,command.slice(40))]));
     await waitFor(() => frames.some(f => f.opcode === 2));
     assert(frames.some(f => f.opcode === 10 && f.body.toString() === 'ping')); checks++;
@@ -86,21 +86,21 @@ export async function check({ cdp, url, root, waitFor, restart }) {
     assert.equal(after.generation, before.generation); checks++;
     assert.equal(await cdp.evaluate('(document.querySelector("#harness .screen").textContent.match(/x/g)||[]).length'), count); checks++;
     assert.equal(await cdp.evaluate('(document.querySelector("#harness .screen").textContent.match(/z/g)||[]).length'), 1); checks++;
-    const stream = await ask({op:'since',at:0,generation:before.generation,limit:4,encoding:'base64'});
-    assert.equal(stream.encoding,'base64'); assert(stream.at <= after.chunks); checks++;
+    const stream = await ask({op:'screen',at:0,generation:before.generation});
+    assert.equal(stream.screen.version,1); assert.equal(stream.screen.lines.length,stream.rows); checks++;
     const old = await ask({op:'input',text:'BAD',quiet:true,generation:before.generation+1});
     assert.equal(old.error,'terminal session changed'); checks++;
     await cdp.evaluate('document.querySelector("#harness textarea").focus()');
     await cdp.send('Input.dispatchKeyEvent',{type:'keyDown',key:'y',code:'KeyY',text:'y'});
     await cdp.send('Input.dispatchKeyEvent',{type:'keyUp',key:'y',code:'KeyY'});
     await waitFor(() => cdp.evaluate('document.querySelector("#harness .screen").textContent.includes("y")')); checks++;
-    const result = await ask({op:'since',at:0});
+    const result = await ask({op:'capture'});
     assert(!result.text.includes('BAD')); checks++;
     await ask({op:'start',argv:[fileURLToPath(new URL('../external-src/janet/janet', import.meta.url)),'-e',
       String.raw`(file/write stdout "\xe2") (file/flush stdout) (ev/sleep 0.04) (file/write stdout "\x82\xac") (file/flush stdout) (ev/sleep 2)`],root:join(root,'project'),rows:24,cols:80});
     try { await waitFor(() => cdp.evaluate('document.querySelector("#harness .screen").textContent.includes("€")'), 5000); }
     catch (error) {
-      console.log('Unicode probe:', JSON.stringify(await ask({op:'since',at:0})), await cdp.evaluate('document.querySelector("#harness").textContent'));
+      console.log('Unicode probe:', JSON.stringify(await ask({op:'capture'})), await cdp.evaluate('document.querySelector("#harness").textContent'));
       throw error;
     }
     assert(!await cdp.evaluate('document.querySelector("#harness .screen").textContent.includes("�")')); checks++;

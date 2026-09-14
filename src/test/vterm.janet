@@ -1,6 +1,20 @@
 (import ./harness :as check)
 (import ../../src.server/term/vterm)
 
+(check/test "native snapshots return independent raw cell rows"
+  (def terminal (vterm/create 4 20))
+  (defer (:close terminal)
+    (:write terminal "é")
+    (def snapshot (:snapshot terminal 0))
+    (def row (get-in snapshot ["lines" 0 1]))
+    (check/is= 40 (length row))
+    (check/is= "\xe9\x00\x00\x00" (string/slice row 0 4))
+    (check/is= nil (snapshot "version"))
+    (:write terminal "\rX")
+    (def next (:snapshot terminal 0))
+    (check/is= "X\x00\x00\x00" (string/slice (get-in next ["lines" 0 1]) 0 4))
+    (check/is= "\xe9\x00\x00\x00" (string/slice row 0 4))))
+
 (check/test "native libvterm shares UTF-8 decoder state across chunks"
   (each split [1 2 3]
     (def terminal (vterm/create 4 20))

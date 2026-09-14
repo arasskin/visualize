@@ -3,10 +3,13 @@
 (import ../../src.server/scan)
 (import ./harness :as t)
 
+(var- previous nil)
+
 (defn- drawn [tree path]
   (def lines (config/read-config path))
   (def [state problems] (config/run lines))
-  (def [ok result] (graph/render-svg tree state))
+  (def [ok result] (graph/render-svg tree state previous))
+  (set previous (tree :stamps))
   [lines problems ok result])
 
 (t/test "animate flashes what moved since the last drawing"
@@ -18,7 +21,7 @@
   (t/is= 0 (length (string/find-all "node fresh" (string (first-draw 3))))
          "the first drawing flashes nothing")
 
-  (os/touch "src.server/color.janet")
+  (os/touch "src.server/config.janet")
   (def second-draw (drawn (scan/scan ".") conf))
   (t/is= 1 (length (string/find-all `class="node fresh"` (string (second-draw 3))))
          "one file moved, one node flashes")
@@ -26,7 +29,7 @@
   (spit conf "lines\n")
   (os/touch "src.server/select.janet")
   (def unasked (drawn (scan/scan ".") conf))
-  (t/is= 0 (length (string/find-all "fresh" (string (unasked 3))))
+  (t/is= 0 (length (string/find-all `class="node fresh"` (string (unasked 3))))
          "the flash is the verb's, not the watcher's")
   (os/rm conf))
 

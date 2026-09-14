@@ -89,7 +89,7 @@ try {
   const denied=await fetch(url+'/errors?k=invalid',{method:'POST',body:'{}'});
   if(denied.status!==403)throw new Error('error endpoint accepted unauthenticated report');
   await cdp.evaluate(`(async()=>{
-    const {reportError}=await import('/errors.js');
+    const {reportError}=await import('/shared/errors.js');
     const send=window.fetch;
     window.logOffline=true;
     window.fetch=(url,options)=>logOffline && String(url).startsWith('/errors?')?Promise.reject(new Error('offline')):send(url,options);

@@ -1,4 +1,5 @@
 (import ../../src.server/websocket :as ws)
+(import ../../src.server/json)
 (import ./harness :as t)
 
 (defn- masked [payload &opt opcode final]
@@ -17,7 +18,7 @@
 
 (t/test "websocket handshake uses the RFC accept key"
   (t/is= "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" (ws/accept-key "dGhlIHNhbXBsZSBub25jZQ=="))
-  (t/is= "qZk+NkcGgWq6PiVxeFDCbJzQ2J0=" (ws/base64 (ws/sha1 "abc")))
+  (t/is= "qZk+NkcGgWq6PiVxeFDCbJzQ2J0=" (json/base64 (ws/sha1 "abc")))
   (t/ok (ws/upgrade? {:method "GET" :headers {"upgrade" "WebSocket" "connection" "keep-alive, Upgrade"
                        "sec-websocket-version" "13" "sec-websocket-key" "dGhlIHNhbXBsZSBub25jZQ=="}}))
   (t/ok (not (ws/upgrade? {:method "GET" :headers {}}))))
