@@ -235,7 +235,7 @@ button:disabled { opacity: .5; cursor: progress; }
 #floor-mark i { left: 0; right: 0; bottom: 0; height: 0;
                 border-top: 1.5px dashed var(--rail); }
 
-.panel:not(.picked) { opacity: .6; }
+.panel:not(.picked):not(.unfaded) { opacity: .6; }
 
 .panel.picked { z-index: 12; opacity: 1; }
 
@@ -593,14 +593,18 @@ button:disabled { opacity: .5; cursor: progress; }
   top: auto; bottom: 0; height: var(--rail-tab-height, 32px);
 }
 
-.bar .tab-close {
-  flex: none; margin-left: auto; margin-right: 6px;
+.bar .tab-close, .bar .tab-fade {
+  flex: none;
   width: 1.3rem; height: 18px; padding: 0;
   border: 0; background: none; color: inherit;
   font: 18px/1 ui-sans-serif, system-ui, sans-serif;
   opacity: .5; cursor: pointer;
 }
-.bar .tab-close:hover, .bar .tab-close:focus-visible { opacity: 1; background: var(--wash-strong); }
+.bar .tab-fade { margin-left: auto; font-size: 14px; }
+.bar .tab-close { margin-right: 6px; }
+.bar .tab-close:hover, .bar .tab-close:focus-visible,
+.bar .tab-fade:hover, .bar .tab-fade:focus-visible,
+.bar .tab-fade[aria-pressed=true] { opacity: 1; background: var(--wash-strong); }
 
 #file-command {
   position: fixed; z-index: 30; width: min(24rem, calc(100vw - 12px));

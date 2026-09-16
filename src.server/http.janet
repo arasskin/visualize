@@ -1,5 +1,16 @@
 (import ./trace)
 
+(def max-header 16384)
+(def max-body 1048576)
+
+(defn- reject [status message]
+  (error {:http-status status :message message}))
+
+(defn local-host? [host port]
+  (and (string? host)
+       (index-of (string/ascii-lower host)
+                 [(string "127.0.0.1:" port) (string "localhost:" port)])))
+
 (defn- header-end
 
   [buf]
@@ -14,33 +25,53 @@
   (def headers @{})
   (each line (string/split "\n" text)
     (def clean (string/trim line))
-    (when-let [colon (string/find ":" clean)]
-      (put headers
-           (string/ascii-lower (string/trim (string/slice clean 0 colon)))
-           (string/trim (string/slice clean (+ colon 1))))))
+    (unless (empty? clean)
+      (def colon (string/find ":" clean))
+      (unless (and colon (pos? colon)) (reject "400 Bad Request" "invalid header"))
+      (def name (string/ascii-lower (string/slice clean 0 colon)))
+      (when (or (not= name (string/trim name))
+                (and (index-of name ["host" "content-length" "transfer-encoding"])
+                     (get headers name)))
+        (reject "400 Bad Request" "ambiguous header"))
+      (put headers name (string/trim (string/slice clean (+ colon 1))))))
   headers)
 
 (defn read-request
 
-  [conn carry]
+  [conn carry &opt port body-limit]
   (var split (header-end carry))
 
   (while (not split)
+    (when (>= (length carry) max-header)
+      (reject "431 Request Header Fields Too Large" "headers too large"))
     (def chunk (:read conn 4096 nil 75))
     (if-not chunk (break))
     (buffer/push-string carry chunk)
     (set split (header-end carry)))
   (when split
+    (when (> split max-header)
+      (reject "431 Request Header Fields Too Large" "headers too large"))
     (def head (string/slice carry 0 split))
     (def lines (string/split "\n" head))
     (def request (string/split " " (string/trim (or (first lines) ""))))
     (when (>= (length request) 2)
       (def headers (parse-headers (string/join (drop 1 lines) "\n")))
-      (def wanted (scan-number (or (headers "content-length") "0")))
+      (when (and port (not (local-host? (headers "host") port)))
+        (reject "403 Forbidden" "unexpected host"))
+      (when (headers "transfer-encoding")
+        (reject "400 Bad Request" "transfer encoding is unsupported"))
+      (def size (or (headers "content-length") "0"))
+      (unless (peg/match ~(* (some (range "09")) -1) size)
+        (reject "400 Bad Request" "invalid content length"))
+      (def wanted (scan-number size))
+      (def limit (if (index-of (request 0) ["GET" "HEAD"])
+                  0 (if body-limit (body-limit (request 1)) max-body)))
+      (when (or (not wanted) (> wanted limit))
+        (reject "413 Content Too Large" "request body too large"))
 
       (while (< (- (length carry) split) wanted)
         (def chunk (:read conn 4096 nil 75))
-        (if-not chunk (break))
+        (if-not chunk (reject "400 Bad Request" "incomplete request body"))
         (buffer/push-string carry chunk))
       (def have (min wanted (- (length carry) split)))
       (def body (string/slice carry split (+ split have)))
@@ -82,7 +113,7 @@
 
 (defn serve
 
-  [port tries handler]
+  [port tries handler &opt body-limit]
   (var server nil)
   (var bound nil)
   (for candidate port (+ port tries)
@@ -106,7 +137,7 @@
                (while serving
 
                  (setdyn :serving nil)
-                 (def request (read-request conn carry))
+                 (def request (read-request conn carry bound body-limit))
                  (if-not request
                    (set serving false)
                    (do
@@ -128,9 +159,11 @@
                      (trace/measure "http-write"
                        (respond conn status content-type body (not (request :close)) timing))
                      (when (request :close) (set serving false)))))))
-               ([err fib
-
-                 (if (or (= (string err) "Bad file descriptor")
+               ([err fib]
+                 (cond
+                   (and (dictionary? err) (err :http-status))
+                   (try (respond conn (err :http-status) "text/plain" (err :message)) ([_] nil))
+                   (or (= (string err) "Bad file descriptor")
 
                          (and (= (string err) "timeout") (nil? (dyn :serving))))
 
@@ -145,7 +178,7 @@
                      (try
                        (respond conn "500 Internal Server Error" "text/plain"
                                 (string err))
-                       ([_] nil))))]))))))])
+                       ([_] nil))))))))))])
 
 (defn static-file
 

@@ -474,6 +474,19 @@
     "@visualize placement b bottom -1" "@visualize placement c floating 20"
     "@visualize placement d top 1.5" "@visualize placement e nowhere 2"])))
 
+(t/test "pane opacity round trips with rail and floating placements"
+  (def positions {"a" ["bottom" 0 640 480 true] "b" ["floating" 20 30 500 400 true]})
+  (def lines ["box src" "@visualize terminal a label !note document /tmp/a.md"])
+  (def saved (config/remember-placements lines positions))
+  (t/is= positions (config/placements saved))
+  (t/is= saved (config/remember-placements saved positions))
+  (t/ok (some |(string/find "unfaded true" $) saved))
+  (def cleared (config/remember-placements saved {"a" ["bottom" 0 640 480]}))
+  (t/is= {"a" ["bottom" 0 640 480]} (config/placements cleared))
+  (t/ok (not (some |(string/find "unfaded" $) cleared)))
+  (t/is= "!note" (get (config/labels cleared) "a"))
+  (t/is= "/tmp/a.md" (get (config/markdown cleared) "a")))
+
 (t/test "a label is what a pane has been called by hand"
 
   (def lines ["lines"

@@ -121,6 +121,17 @@ export function createPaneFrame(root, options = {}) {
     event.stopPropagation();
     options.onClose?.(panel);
   });
+  const fadeButton = bar.querySelector('.tab-fade');
+  panel.setUnfaded = (enabled) => {
+    root.classList.toggle('unfaded', enabled);
+    fadeButton?.setAttribute('aria-pressed', String(enabled));
+  };
+  listen(fadeButton, 'pointerdown', event => event.stopPropagation());
+  listen(fadeButton, 'click', event => {
+    event.stopPropagation();
+    panel.setUnfaded(!root.classList.contains('unfaded'));
+    options.onChange?.();
+  });
 
   const label = bar.querySelector('.label');
   if (label) {

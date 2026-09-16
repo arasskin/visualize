@@ -49,7 +49,7 @@ export async function check({ cdp, url, root, waitFor, restart }) {
   });
   try {
     await new Promise((resolve, reject) => { wire.once('connect', resolve); wire.once('error', reject); });
-    wire.write(`GET /terminal?k=${token} HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nOrigin: ${url}\r\n\r\n`);
+    wire.write(`GET /terminal?k=${token} HTTP/1.1\r\nHost: ${new URL(url).host}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nOrigin: ${url}\r\n\r\n`);
     await waitFor(() => upgraded);
     const command = JSON.stringify({type:'request',pane:'harness',id:7,op:'screen',body:{at:0,generation:0}});
     wire.write(Buffer.concat([masked(1, command.slice(0,40), false), masked(9,'ping'), masked(0,command.slice(40))]));

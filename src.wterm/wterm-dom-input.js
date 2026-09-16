@@ -1,3 +1,4 @@
+/*! Modified for Visualize from WTerm 0.5.0. Apache-2.0; see LICENSE and README.md. */
 import { isLinkActivationModifier } from "./wterm-dom-hyperlink.js";
 import { encodeKittyKey, KITTY_REPORT_ALL, KITTY_REPORT_EVENTS, } from "./wterm-dom-kitty-keys.js";
 const NORMAL_KEYS = {

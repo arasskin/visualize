@@ -8,6 +8,8 @@ Terminal paint notifications run after WTerm updates the DOM. During a resize, s
 
 Run `./src/test/run` for backend tests. Unexpected stderr fails the run, including errors from background fibers. The HTTP tests supervise listener and connection tasks to verify clean shutdown and incomplete-request handling.
 
+The `!` button beside a pane's close button toggles whether it stays at full opacity when unselected. Its pressed state is saved with the pane placement as `unfaded true` in the config. Subtitles do not control opacity.
+
 Run browser checks with Node 22 or later:
 
 ```sh

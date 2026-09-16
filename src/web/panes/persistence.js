@@ -12,9 +12,11 @@ export function createPanePersistence(getPanels, layout) {
       .filter(p => p.root.isConnected)
       .map(p => {
         const size = p.size.map(Math.round);
-        return [p.id, onRail(p)
+        const position = onRail(p)
           ? [railSide(p), railPanels(railSide(p)).indexOf(p), ...size]
-          : ['floating', p.root.offsetLeft, p.root.offsetTop, ...size]];
+          : ['floating', p.root.offsetLeft, p.root.offsetTop, ...size];
+        if (p.root.classList.contains('unfaded')) position.push(true);
+        return [p.id, position];
       }));
   }
 
@@ -50,6 +52,7 @@ export function createPanePersistence(getPanels, layout) {
       if (!panel.root.isConnected) continue;
       const position = saved[panel.id];
       if (!position) continue;
+      panel.setUnfaded(position.at(-1) === true);
       const sizeAt = position[0] === 'floating' ? 3 : 2;
       if (position.length >= sizeAt + 2 && position[sizeAt] > 0 && position[sizeAt + 1] > 0) {
         panel.root.style.width = position[sizeAt] + 'px';

@@ -536,6 +536,7 @@
         (unless (and (dictionary? sent) (<= (length sent) 256)) (error "invalid pane placements"))
         (each id (keys sent)
           (def pos (get sent id))
+          (def pos (if (and (indexed? pos) (= (last pos) true)) (slice pos 0 -2) pos))
           (unless (and (pane-id? id) (indexed? pos)
             (or (and (index-of (length pos) [2 4]) (index-of (pos 0) ["top" "bottom"])
                      (number? (pos 1)) (<= 0 (pos 1) 100000) (= (pos 1) (math/floor (pos 1)))
@@ -573,7 +574,12 @@
       ["404 Not Found" "text/plain" "not found"]))
 
   (def [server bound accept-loop]
-    (http/serve default-port port-tries handler))
+    (http/serve default-port port-tries handler
+      (fn [path]
+        (case (without-query path)
+          "/errors" 16384
+          "/panes/placements" 65536
+          http/max-body))))
   (set serving-port bound)
   (def control-path (socket-for root (string "." bound ".control.sock")))
   (def close-control (cli/serve control-path control-call))

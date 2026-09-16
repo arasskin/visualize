@@ -1,0 +1,11 @@
+The wcwidth implementation in src/unicode.c includes this upstream notice:
+
+Markus Kuhn -- 2007-05-26 (Unicode 5.0)
+
+Permission to use, copy, modify, and distribute this software
+for any purpose and without fee is hereby granted. The author
+disclaims all warranties with regard to this software.
+
+Latest version: http://www.cl.cam.ac.uk/~mgk25/ucs/wcwidth.c
+
+Other libvterm source is covered by the MIT license in LICENSE. Local patches and upstream references are documented in README.md.

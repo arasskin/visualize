@@ -562,7 +562,7 @@
                     (++ i)
                     (while (and (< i (length tokens)) (scan-number (tokens i))) (++ i))
                     (put fields key (slice tokens start i)))
-                  (if (and (index-of key [:socket :label :document]) (< i (length tokens)))
+                  (if (and (index-of key [:socket :label :document :unfaded]) (< i (length tokens)))
                     (do (put fields key (tokens i)) (++ i))
                     (error "invalid terminal field"))))))
           [[id fields]])))
@@ -587,7 +587,7 @@
     (unless (or (written id) (empty? fields))
       (put written id true)
       (def words @[marker "terminal" (note-token id)])
-      (each key [:socket :placement :label :document]
+      (each key [:socket :placement :label :document :unfaded]
         (when-let [value (fields key)]
           (array/push words (string key))
           (if (= key :placement)
@@ -690,10 +690,19 @@
           (put out id (if (and w h (> w 0) (> h 0)) [side x w h] [side x]))
           (and (= side "floating") y (<= -100000 y 100000))
           (put out id (if (and w h (> w 0) (> h 0)) [side x y w h] [side x y])))))
+  (eachp [id value] (field-values lines :unfaded)
+    (when (and (= value "true") (out id))
+      (put out id [;(out id) true])))
   out)
 
 (defn remember-placements [lines positions]
-  (remember-field lines :placement positions))
+  (def unfaded @{})
+  (def locations @{})
+  (eachp [id position] positions
+    (def enabled (= (last position) true))
+    (when enabled (put unfaded id "true"))
+    (put locations id (if enabled (slice position 0 -2) position)))
+  (remember-field (remember-field lines :placement locations) :unfaded unfaded))
 
 (defn markdown [lines]
   (field-values lines :document))

@@ -1,3 +1,4 @@
+/*! Modified for Visualize from WTerm 0.5.0. Apache-2.0; see LICENSE and README.md. */
 /**
  * Keep browser-owned image backing stores bounded independently of the core's
  * decoded image budget. This is deliberately a fixed layer limit: placement

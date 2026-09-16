@@ -1,3 +1,4 @@
+/*! Modified for Visualize from WTerm 0.5.0. Apache-2.0; see LICENSE and README.md. */
 export const KITTY_REPORT_EVENTS = 1 << 1;
 export const KITTY_REPORT_ALTERNATES = 1 << 2;
 export const KITTY_REPORT_ALL = 1 << 3;

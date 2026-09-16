@@ -1,5 +1,91 @@
 (import ../../src.server/http)
+(import ../../src.server/websocket :as ws)
 (import ./harness :as t)
+
+(defn- request-head [method path headers]
+  (string method " " path " HTTP/1.1\r\n" headers "\r\n"))
+
+(defn- rejected [head &opt limit]
+  (var reads 0)
+  (def status
+    (try
+      (do (http/read-request {:read (fn [&] (++ reads) nil)} (buffer head) 8770 limit) nil)
+      ([err] (if (dictionary? err) (err :http-status) (error err)))))
+  (t/is= 0 reads "invalid headers must be rejected before reading any body")
+  status)
+
+(t/test "only the bound localhost authorities are accepted"
+  (each host ["127.0.0.1:8770" "localhost:8770" "LOCALHOST:8770"]
+    (t/ok (http/local-host? host 8770)))
+  (each host [nil "" "attacker.example:8770" "127.0.0.1" "localhost:8771"
+              "localhost:8770.attacker.example" "user@localhost:8770" "127.0.0.2:8770"]
+    (t/ok (not (http/local-host? host 8770))))
+  (each path ["/" "/session" "/terminal?k=token"]
+    (t/is= "403 Forbidden"
+      (rejected (request-head "GET" path "Host: attacker.example:8770\r\n")))))
+
+(t/test "HTTP headers are bounded with and without a terminator"
+  (t/is= "431 Request Header Fields Too Large"
+    (rejected (string "GET / HTTP/1.1\r\nX: " (string/repeat "x" http/max-header))))
+  (t/is= "431 Request Header Fields Too Large"
+    (rejected (request-head "GET" "/" (string "X: " (string/repeat "x" http/max-header) "\r\n")))))
+
+(t/test "invalid and ambiguous body lengths are rejected before buffering"
+  (each value ["-1" "+1" "1.5" "1e6" "0x10" "NaN" "" "1, 1"]
+    (t/is= "400 Bad Request"
+      (rejected (request-head "POST" "/config"
+        (string "Host: localhost:8770\r\nContent-Length: " value "\r\n")))))
+  (each headers ["Content-Length: 1\r\nContent-Length: 1\r\n"
+                 "Content-Length: 0\r\nTransfer-Encoding: chunked\r\n"
+                 "Transfer-Encoding: chunked\r\n"
+                 "Host: attacker.example:8770\r\n"]
+    (t/is= "400 Bad Request"
+      (rejected (request-head "POST" "/config" (string "Host: localhost:8770\r\n" headers)))))
+  (t/is= "403 Forbidden" (rejected (request-head "GET" "/session" "")))
+  (t/is= "413 Content Too Large"
+    (rejected (request-head "POST" "/config" "Host: localhost:8770\r\nContent-Length: 1048577\r\n")))
+  (t/is= "413 Content Too Large"
+    (rejected (request-head "POST" "/config" "Host: localhost:8770\r\nContent-Length: 999999999999999999999999999999999999\r\n")))
+  (t/is= "413 Content Too Large"
+    (rejected (request-head "GET" "/terminal" "Host: localhost:8770\r\nContent-Length: 1\r\n")))
+  (t/is= "413 Content Too Large"
+    (rejected (request-head "POST" "/errors?k=token" "Host: localhost:8770\r\nContent-Length: 16385\r\n")
+      (fn [path] (t/is= "/errors?k=token" path) 16384))))
+
+(t/test "an HTTP body at the limit is preserved along with the next request"
+  (def body (string/repeat "x" http/max-body))
+  (def next (request-head "GET" "/session" "Host: localhost:8770\r\n"))
+  (def carry (buffer (request-head "POST" "/config"
+    (string "Host: localhost:8770\r\nContent-Length: " (length body) "\r\n")) body next))
+  (def request (http/read-request nil carry 8770))
+  (t/is= body (request :body))
+  (t/is= next (string carry))
+  (t/is= "/session" ((http/read-request nil carry 8770) :path))
+  (t/is= "" (string carry)))
+
+(t/test "EOF cannot turn a partial body into a valid request"
+  (def carry (buffer (request-head "POST" "/config" "Host: localhost:8770\r\nContent-Length: 5\r\n") "ab"))
+  (t/is= "400 Bad Request"
+    (try (do (http/read-request {:read (fn [&] nil)} carry 8770) nil)
+      ([err] (err :http-status)))))
+
+(t/test "coalesced WebSocket data does not count toward the HTTP header limit"
+  (def handshake (request-head "GET" "/terminal?k=token"
+    (string "Host: localhost:8770\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+            "Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n")))
+  (def packet (buffer (ws/frame 1 (string/repeat "x" 65536))))
+  (put packet 1 (bor (packet 1) 128))
+  (def frame (string (string/slice packet 0 10) "\0\0\0\0" (string/slice packet 10)))
+  (each initial [true false]
+    (var reads 0)
+    (def carry (if initial (buffer handshake frame) @""))
+    (def request (http/read-request
+      {:read (fn [&] (++ reads) (string handshake frame))} carry 8770))
+    (t/is= (if initial 0 1) reads)
+    (t/ok (ws/upgrade? request))
+    (t/is= "" (request :body))
+    (t/is= frame (string carry))
+    (t/is= (string/repeat "x" 65536) (get (ws/decode-frame carry) 3))))
 
 (t/test "a plain filename in web/ is served"
   (t/is= "term.js" (http/static-file "/term.js"))
@@ -85,7 +171,7 @@
   (ev/go accept-loop)
   (def conn (net/connect "127.0.0.1" (string port)))
   (defn ask [path & extra]
-    (:write conn (string "GET " path " HTTP/1.1\r\nHost: x\r\n"
+    (:write conn (string "GET " path " HTTP/1.1\r\nHost: 127.0.0.1:" port "\r\n"
                          (string/join extra "") "\r\n"))
     (var reply @"")
     (var tries 0)
@@ -115,6 +201,35 @@
   (t/is= (inc port-one) port-two "it lands on the very next port")
   (:close one)
   (:close two))
+
+(t/test "HTTP rejections close the connection without dispatching a queued request"
+  (var calls 0)
+  (def [server port accept-loop]
+    (http/serve 8941 5
+      (fn [_] (++ calls) ["200 OK" "text/plain" "accepted"])
+      (fn [_] 16)))
+  (ev/go accept-loop)
+  (defer (:close server)
+    (def host (string "Host: localhost:" port "\r\n"))
+    (def queued (request-head "GET" "/session" host))
+    (each [status head]
+      [["403 Forbidden" (request-head "GET" "/session" "Host: attacker.example\r\n")]
+       ["413 Content Too Large" (request-head "POST" "/errors" (string host "Content-Length: 17\r\n"))]
+       ["400 Bad Request" (request-head "POST" "/config" (string host "Content-Length: -1\r\n"))]
+       ["431 Request Header Fields Too Large" (request-head "GET" "/" (string host "X: " (string/repeat "x" http/max-header) "\r\n"))]]
+      (def conn (net/connect "127.0.0.1" (string port)))
+      (defer (:close conn)
+        (:write conn (string head queued))
+        (def reply @"")
+        (forever
+          (def chunk (try (:read conn 4096 nil 2)
+            ([err] (if (= (string err) "Connection reset by peer") nil (error err)))))
+          (unless chunk (break))
+          (buffer/push-string reply chunk))
+        (t/ok (string/has-prefix? (string "HTTP/1.1 " status) reply) (string "expected " status ", received " (string/format "%q" reply)))
+        (t/ok (string/find "Connection: close" reply) (string "expected close for " status))
+        (t/is= nil (string/find "accepted" reply))))
+    (t/is= 0 calls)))
 
 (t/test "closing a listener ends its accept task without a failed or phantom connection"
   (for iteration 0 6

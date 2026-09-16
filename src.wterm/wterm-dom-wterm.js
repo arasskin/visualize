@@ -1,3 +1,4 @@
+/*! Modified for Visualize from WTerm 0.5.0. Apache-2.0; see LICENSE and README.md. */
 import { Renderer } from "./wterm-dom-renderer.js";
 import { InputHandler } from "./wterm-dom-input.js";
 import { isLinkActivationModifier } from "./wterm-dom-hyperlink.js";

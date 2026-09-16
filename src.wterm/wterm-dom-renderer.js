@@ -1,3 +1,4 @@
+/*! Modified for Visualize from WTerm 0.5.0. Apache-2.0; see LICENSE and README.md. */
 import { GraphicsLayer } from "./wterm-dom-graphics-layer.js";
 import { textLinks } from "./wterm-dom-hyperlink.js";
 const DEFAULT_COLOR = 256;

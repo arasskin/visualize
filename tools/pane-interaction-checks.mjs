@@ -48,6 +48,20 @@ try {
   };
   const settle = () => page.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
 
+  await page.evaluate(`window.fadePane=panes.get('config');panes.selectPane(panes.get('harness').root);fadePane.setLabel('!note');window.wasShut=fadePane.shut`);
+  await check(`getComputedStyle(fadePane.root).opacity==='0.6'`, 'subtitle punctuation does not control opacity');
+  const togglePoint = await page.evaluate(`(()=>{const r=fadePane.bar.querySelector('.tab-fade').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+  await page.drag(togglePoint.x,togglePoint.y);
+  await page.evaluate(`panes.selectPane(panes.get('harness').root)`);
+  await check(`getComputedStyle(fadePane.root).opacity==='1' && fadePane.shut===wasShut && fadePane.bar.querySelector('.tab-fade').getAttribute('aria-pressed')==='true'`, 'opacity toggle keeps an unfocused pane opaque without opening or closing it');
+  await waitFor(async () => (await readFile(join(project,'visualize_config'),'utf8')).includes('unfaded true'));
+  await page.navigate(url);await ready();
+  await page.evaluate(`window.fadePane=panes.get('config');panes.selectPane(panes.get('harness').root)`);
+  await check(`getComputedStyle(fadePane.root).opacity==='1' && fadePane.bar.querySelector('.tab-fade').getAttribute('aria-pressed')==='true'`, 'opacity toggle is restored after reloading');
+  await page.evaluate(`fadePane.bar.querySelector('.tab-fade').click()`);
+  await check(`getComputedStyle(fadePane.root).opacity==='0.6' && fadePane.bar.querySelector('.tab-fade').getAttribute('aria-pressed')==='false'`, 'disabling the toggle restores fading');
+  await waitFor(async () => !(await readFile(join(project,'visualize_config'),'utf8')).includes('unfaded true'));
+
   for (const id of ['compose', 'find']) {
     await page.evaluate(`document.getElementById('${id}').classList.remove('shut');document.activeElement.blur()`);
     const point = await page.evaluate(`(()=>{const box=document.getElementById('${id}-box').getBoundingClientRect();return {x:box.left+3,y:box.top+3}})()`);
