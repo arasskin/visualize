@@ -26,6 +26,8 @@ You will need a C compiler on your path to build the bundled Janet interpreter, 
 
 Usage/license/contributing:
 
-The only thing I'd like visualize to be is useful.
+Visualize currently only works on macos.
 
 Visualize's original code is licensed under the [MIT License](LICENSE). Vendored code, local modifications to third-party components, and bundled fonts retain the licenses listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Everybody seems to have their own workflow for vibe coding. I'm very interested to know how visualize works or doesn't work with your system.

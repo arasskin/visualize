@@ -33,6 +33,8 @@
   (def clean (blank-noise noise text))
 
   (def out @[])
+  (def modules @[])
+  (def members @[])
   (each hit (peg/match all-imports clean)
     (if (= 2 (length hit))
 
@@ -44,11 +46,15 @@
                                           (string/replace-all "." "/" tail))))
           module))
         (array/push out module)
+        (array/push modules module)
         (each name (listed names)
-          (array/push out (string module "." name))))
+          (def member (string module "." name))
+          (array/push out member)
+          (array/push members member)))
 
       (each name (listed (first hit))
-        (array/push out name))))
+        (array/push out name)
+        (array/push modules name))))
 
   (def whole @[])
   (each name out
@@ -56,7 +62,8 @@
     (def parts (string/split "." name))
     (for i 1 (length parts)
       (array/push whole (string (string/join (slice parts 0 i) ".") "."))))
-  {:imports (distinct whole)})
+  {:imports (distinct whole)
+   :import-members (distinct (filter |(not (index-of $ modules)) members))})
 
 (defn spec [blank-noise]
   {:name "python"

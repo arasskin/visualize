@@ -202,6 +202,42 @@
   (:close one)
   (:close two))
 
+(t/test "abandoned replies close normally and other clients remain usable"
+  (def entered (ev/chan 1))
+  (def release (ev/chan 1))
+  (def events (ev/chan 8))
+  (def [server port accept-loop]
+    (http/serve 8941 5
+      (fn [request]
+        (if (= (request :path) "/abandon")
+          (do (ev/give entered true) (ev/take release)
+              ["200 OK" "text/plain" (string/repeat "x" (* 4 1024 1024))])
+          ["200 OK" "text/plain" "still serving"]))))
+  (def accepting (ev/go accept-loop nil events))
+  (defer (do (:close server) (ev/take events))
+    (defn connect [path]
+      (def conn (net/connect "127.0.0.1" (string port)))
+      (:write conn (request-head "GET" path
+        (string "Host: localhost:" port "\r\nConnection: close\r\n")))
+      conn)
+    (def abandoned (connect "/abandon"))
+    (ev/take entered)
+    (:close abandoned)
+    (ev/give release true)
+    (def [signal completed] (ev/take events))
+    (t/is= :ok signal)
+    (t/ok (not= accepting completed))
+    (def conn (connect "/"))
+    (defer (:close conn)
+      (def reply @"")
+      (forever
+        (def chunk (:read conn 4096 nil 2))
+        (unless chunk (break))
+        (buffer/push-string reply chunk))
+      (t/ok (string/has-prefix? "HTTP/1.1 200 OK" reply))
+      (t/ok (string/find "still serving" reply)))
+    (t/is= :ok (first (ev/take events)))))
+
 (t/test "HTTP rejections close the connection without dispatching a queued request"
   (var calls 0)
   (def [server port accept-loop]

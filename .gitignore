@@ -8,6 +8,7 @@ bin/
 
 /.logs/
 
+/external-src/janet/janet
 /src.vterm/libvisualize-vterm.so*
 /src.graphviz/libvisualize-graphviz.so*
 /src.server/term/libvisualize-pty.so*

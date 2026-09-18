@@ -211,8 +211,8 @@ button:disabled { opacity: .5; cursor: progress; }
 
   transition: opacity .16s ease-in-out;
 }
-.rail-marks.top { top: 6px; }
-.rail-marks.bottom { bottom: 6px; }
+.rail-marks.top { top: 0; }
+.rail-marks.bottom { bottom: 0; }
 .rail-marks.near { opacity: 1; }
 .rail-marks i {
   position: absolute; left: 0; right: 0; height: 0;
@@ -234,6 +234,9 @@ button:disabled { opacity: .5; cursor: progress; }
 #floor-mark { left: 0; right: 0; bottom: 0; height: 0; }
 #floor-mark i { left: 0; right: 0; bottom: 0; height: 0;
                 border-top: 1.5px dashed var(--rail); }
+#ceiling-mark { left: 0; right: 0; top: 0; height: 0; }
+#ceiling-mark i { left: 0; right: 0; top: 0; height: 0;
+                  border-top: 1.5px dashed var(--rail); }
 
 .panel:not(.picked):not(.unfaded) { opacity: .6; }
 

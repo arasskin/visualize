@@ -103,7 +103,8 @@ try {
   await cdp.evaluate(`(async()=>{
     window.panes=(await import('/app.js')).workspace;
     window.config=panes.get("config");
-    if(config.root.dataset.rail!=='bottom'||config.root.offsetWidth>416)throw new Error('Visualize default placement or width');
+    if(config.root.dataset.rail!=='top'||config.root.offsetWidth>416)throw new Error('Visualize default placement or width');
+    if(panes.get('harness').root.dataset.rail!=='bottom')throw new Error('Harness default placement');
     panes.addToRail(config,0,'top');
     config.root.style.width='400px';
     document.querySelector('#harness').style.width='400px';
@@ -115,23 +116,23 @@ try {
   await cdp.evaluate('document.querySelector("#find").classList.add("shut");document.querySelector("#compose").classList.add("shut")');
   await drag(25,20,0,960);
   await check('config.root.dataset.rail==="bottom"','native drag docks at bottom');
-  await check('Math.abs(config.root.getBoundingClientRect().bottom-994)<1','closed tab has 6px bottom inset');
+  await check('Math.abs(config.root.getBoundingClientRect().bottom-1000)<1','closed tab is flush with the bottom edge');
   await cdp.evaluate('config.bar.dragged=false;config.open();panes.packRailNow()');
   await check('!config.shut && config.body.getBoundingClientRect().bottom<=config.bar.getBoundingClientRect().top+1','bottom panel opens upward');
-  await check('Math.abs(config.root.getBoundingClientRect().bottom-994)<1','opening preserves bottom inset');
+  await check('Math.abs(config.root.getBoundingClientRect().bottom-1000)<1','opening preserves bottom alignment');
   const before=await cdp.evaluate('({width:config.root.offsetWidth,height:config.root.offsetHeight,grip:config.grip.getBoundingClientRect().toJSON()})');
   await drag(before.grip.x+6,before.grip.y+6,50,-70);
   await check(`config.root.offsetHeight===${before.height+70} && config.root.offsetWidth===${before.width+50}`,'bottom grip grows upward and right');
-  await check('Math.abs(config.root.getBoundingClientRect().bottom-994)<1','resize preserves bottom inset');
+  await check('Math.abs(config.root.getBoundingClientRect().bottom-1000)<1','resize preserves bottom alignment');
   await cdp.evaluate('config.toggle();panes.packRailNow()');
   const grip=await cdp.evaluate('config.grip.getBoundingClientRect().toJSON()');
   await drag(grip.x+4,grip.y+8,40,0);
   await check(`config.shut && config.root.offsetWidth===${before.width+90}`,'closed bottom tab resizes horizontally');
   await cdp.evaluate(`panes.addToRail(panes.rail.find(p=>p.root.id==='harness'),undefined,'bottom');panes.packRailNow()`);
-  await check('Math.abs(document.querySelector("#harness").getBoundingClientRect().left-config.root.getBoundingClientRect().right-6)<1','bottom tab gap matches edge inset');
+  await check('Math.abs(document.querySelector("#harness").getBoundingClientRect().left-config.root.getBoundingClientRect().right-6)<1','bottom tabs retain a 6px gap');
   await cdp.send('Emulation.setDeviceMetricsOverride',{width:1000,height:700,deviceScaleFactor:1,mobile:false});
   await sleep(300);
-  await check('Math.abs(config.root.getBoundingClientRect().bottom-694)<1','bottom tabs follow viewport resize');
+  await check('Math.abs(config.root.getBoundingClientRect().bottom-700)<1','bottom tabs follow viewport resize');
   await drag(25,680,0,-660);
   await check('config.root.dataset.rail==="top" && !config.root.classList.contains("bottom-docked")','native drag moves bottom tab to top');
   await cdp.evaluate('config.bar.dragged=false;config.open();panes.packRailNow()');
@@ -139,8 +140,8 @@ try {
   await cdp.evaluate('config.toggle();panes.packRailNow()');
   await drag(25,20,250,260);
   await check('!panes.onRail(config)','tab can undock between rails');
-  await cdp.evaluate(`panes.addToRail(config);panes.packRailNow();panes.selectPane(document.querySelector('#harness'));window.extra=panes.openTerminal();extra.root.style.width='750px';panes.packRailNow()`);
-  await check('extra.root.dataset.rail==="bottom"','new terminal uses selected bottom rail');
+  await cdp.evaluate(`panes.addToRail(config,undefined,'top');panes.packRailNow();panes.selectPane(config.root);window.extra=panes.openTerminal();extra.root.style.width='750px';panes.packRailNow()`);
+  await check('extra.root.dataset.rail==="bottom"','new terminal defaults to bottom even with a top pane selected');
   const topLeft=await cdp.evaluate('config.root.getBoundingClientRect().left');
   const bottomLeft=await cdp.evaluate('document.querySelector("#harness").getBoundingClientRect().left');
   await cdp.send('Input.dispatchMouseEvent',{type:'mouseWheel',x:300,y:685,deltaX:-200,deltaY:0});
@@ -177,8 +178,8 @@ try {
   }
   await cdp.evaluate("panes.selectPane(document.getElementById('harness'))");
   await altKey('Enter', 'Enter');
-  await check("panes.pickedPanel().root.dataset.rail === 'top' && !panes.pickedPanel().shut", 'Alt Enter opens a top terminal from a selected bottom pane');
-  await cdp.evaluate("window.created = panes.pickedPanel(); window.bottomExtra = panes.openTerminal('bottom'); panes.selectPane(config.root)");
+  await check("panes.pickedPanel().root.dataset.rail === 'bottom' && !panes.pickedPanel().shut", 'Alt Enter opens a bottom terminal');
+  await cdp.evaluate("window.created = panes.pickedPanel(); panes.addToRail(created,undefined,'top'); window.bottomExtra = panes.openTerminal('bottom'); panes.selectPane(config.root)");
   await altKey('KeyH', 'h');
   await check('panes.pickedPanel() === bottomExtra', 'left from top left continues at bottom right');
   await altKey('KeyL', 'l');

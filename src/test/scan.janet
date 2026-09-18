@@ -11,7 +11,7 @@
 (import ../../src.server/parsers/css :as css)
 (import ../../src.server/parsers/javascript :as js)
 (import ../../src.server/parsers/visualize-lang :as vz)
-(import ../../src.server/parsers/visualize-bash :as bash)
+(import ../../src.server/parsers/shell)
 (import ./harness :as t)
 
 (def python-spec (python/spec scan/blank-noise))
@@ -666,7 +666,7 @@ source "$scripts/helper.sh"
 source "${more}/worker.sh"
 ``)
   (t/is= ["project.scripts.helper" "project.scripts.more.worker"]
-         ((scan/parse bash/spec text "project/run.sh") :imports)))
+         ((scan/parse shell/spec text "project/run.sh") :imports)))
 
 (t/test "shell directory aliases resolve relative to the script that defines them"
   (def text ``
@@ -676,7 +676,7 @@ source "${tools}/helper.sh"
 "$local_root/child.task.sh"
 ``)
   (t/is= ["tools.helper" "nested.child.task"]
-         ((scan/parse bash/spec text "nested/build") :imports)))
+         ((scan/parse shell/spec text "nested/build") :imports)))
 
 (t/test "continued compiler arguments are not executable dependencies"
   (def text ``
@@ -689,7 +689,7 @@ source "$here/setup.sh"
 "$here/verify.sh"
 ``)
   (t/is= ["native.setup" "native.verify"]
-         ((scan/parse bash/spec text "native/build") :imports)))
+         ((scan/parse shell/spec text "native/build") :imports)))
 
 (t/test "the native Graphviz build does not invent executable paths from C inputs"
   (def root (string "/tmp/vz-native-build-scan-" (os/getpid)))

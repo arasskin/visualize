@@ -690,15 +690,23 @@ static Agnode_t *treeupdate(Agnode_t *v, Agnode_t *w, int cutvalue, bool dir) {
 
 static void rerank(Agnode_t * v, int delta)
 {
-    edge_t *e;
-
-    ND_rank(v) -= delta;
-    for (int i = 0; (e = ND_tree_out(v).list[i]); i++)
-	if (e != ND_par(v))
-	    rerank(aghead(e), delta);
-    for (int i = 0; (e = ND_tree_in(v).list[i]); i++)
-	if (e != ND_par(v))
-	    rerank(agtail(e), delta);
+    LIST(Agnode_t *) todo = {0};
+    LIST_PUSH_BACK(&todo, v);
+    while (!LIST_IS_EMPTY(&todo)) {
+        v = LIST_POP_BACK(&todo);
+        ND_rank(v) -= delta;
+        for (size_t i = ND_tree_in(v).size; i > 0; --i) {
+            edge_t *e = ND_tree_in(v).list[i - 1];
+            if (e != ND_par(v))
+                LIST_PUSH_BACK(&todo, agtail(e));
+        }
+        for (size_t i = ND_tree_out(v).size; i > 0; --i) {
+            edge_t *e = ND_tree_out(v).list[i - 1];
+            if (e != ND_par(v))
+                LIST_PUSH_BACK(&todo, aghead(e));
+        }
+    }
+    LIST_FREE(&todo);
 }
 
 /* e is the tree edge that is leaving and f is the nontree edge that

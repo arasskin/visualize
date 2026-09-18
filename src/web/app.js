@@ -27,7 +27,7 @@ search = createFind(graph, {moduleNames, help: help.root, shutHelp: help.close,
   prefixCandidates: () => configCompletions('fold ', 5, {docs, prefixes: getPrefixes()}).items});
 const initial = [];
 const savedConfig = !!window.PANE_POSITIONS?.config;
-if (window.START_EMPTY || savedConfig) initial.push({id: 'config', file: window.CONFIG_FILE, remote: false, rail: 'bottom', open: savedConfig});
+if (window.START_EMPTY || savedConfig) initial.push({id: 'config', file: window.CONFIG_FILE, remote: false, rail: 'top', open: savedConfig});
 if (window.HARNESS_PRESENT) initial.push({id: 'harness', file: window.PANE_DOCUMENTS?.harness, launch: {recover: true}});
 for (const id of window.OPEN_TERMINALS || []) initial.push({id, file: window.PANE_DOCUMENTS?.[id], launch: {recover: true}});
 workspace = createWorkspace({template: document.getElementById('panel-template'), initial,

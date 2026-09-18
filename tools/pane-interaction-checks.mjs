@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
-import {mkdtemp, mkdir, readFile, writeFile, rm} from 'node:fs/promises';
+import {mkdtemp, mkdir, readFile, writeFile, rm, cp} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve, join} from 'node:path';
 import {browser, waitFor, stopProcess} from './browser.mjs';
@@ -192,6 +192,13 @@ try {
   await page.evaluate('WebSocket.prototype.send=originalSend;console.error=originalConsoleError');
   console.log(`Passed ${checks.length} ${engine} pane interaction checks.`);
 } catch (error) {
+  if (process.env.VZ_TEST_ARTIFACTS) {
+    const artifacts = join(process.env.VZ_TEST_ARTIFACTS, engine);
+    await mkdir(artifacts, {recursive: true});
+    await writeFile(join(artifacts, 'failure.json'), JSON.stringify({error: error.stack, checks, logs, browserErrors: page?.errors}, null, 2));
+    await cp(join(root, 'errors'), join(artifacts, 'terminal-errors'), {recursive: true}).catch(() => {});
+    if (page) await page.screenshot().then(bytes => writeFile(join(artifacts, 'failure.png'), bytes)).catch(() => {});
+  }
   if(page) console.error(await page.evaluate('({focus:document.activeElement?.tagName,picked:panes?.pickedPanel()?.id,panels:panes.all.map(p=>({id:p.id,box:p.root.getBoundingClientRect().toJSON(),state:p.root.querySelector(".state").textContent}))})').catch(()=>null));
   console.error(logs.join('').slice(-3000));
   throw error;

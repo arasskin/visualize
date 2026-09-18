@@ -641,13 +641,12 @@ done
 exec "$@"``
           "visualize-restart" (string here "/external-src/janet/janet") ;launch-args]))))
 
-  (defn align-word
-    [word to]
-    (string ;(map (fn [_] " ") (range (- (length to) (length word)))) word))
-
-  (print "visualize: " root " on " url)
-  (print (align-word "config: " "visualize: ") config-path)
-  (print (align-word "parsers: " "visualize: ") (string/join (scan/languages) ", "))
+  (print "\n" (cli/banner project) "\n")
+  (print "project: " root)
+  (print "browser: " url)
+  (print "config: " config-path)
+  (print "parsers: " (string/join (scan/languages) ", "))
+  (print)
   (print "ctrl-c stops the server and terminal sessions.")
   (print "ctrl-d restarts the server, keeping terminal sessions.")
 

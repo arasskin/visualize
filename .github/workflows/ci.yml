@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 5 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  VZ_TEST_ARTIFACTS: ${{ github.workspace }}/.logs/ci
+  SHELL: /bin/bash
+
+jobs:
+  backend:
+    name: Build, backend and launcher
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Build from source with system tools
+        run: |
+          mkdir -p "$VZ_TEST_ARTIFACTS"
+          for binary in external-src/janet/janet src.vterm/libvisualize-vterm.so src.graphviz/libvisualize-graphviz.so src.server/term/libvisualize-pty.so; do
+            test ! -e "$binary"
+          done
+          env PATH=/usr/bin:/bin:/usr/sbin:/sbin ./build 2>&1 | tee "$VZ_TEST_ARTIFACTS/build.log"
+      - name: Backend tests
+        run: ./src/test/run 2>&1 | tee "$VZ_TEST_ARTIFACTS/backend.log"
+      - name: Frontend checks
+        run: node tools/frontend-checks.mjs 2>&1 | tee "$VZ_TEST_ARTIFACTS/frontend.log"
+      - name: Startup and recovery
+        run: node tools/launch-checks.mjs 2>&1 | tee "$VZ_TEST_ARTIFACTS/launch.log"
+      - name: Large WebSocket output and reconnects
+        run: node tools/websocket-output-checks.mjs 2>&1 | tee "$VZ_TEST_ARTIFACTS/websocket.log"
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: backend-failure
+          path: .logs/ci
+          include-hidden-files: true
+          retention-days: 7
+
+  browser:
+    name: Browser (${{ matrix.browser }})
+    runs-on: macos-15
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chrome, firefox]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Build from source
+        run: |
+          mkdir -p "$VZ_TEST_ARTIFACTS"
+          env PATH=/usr/bin:/bin:/usr/sbin:/sbin ./build 2>&1 | tee "$VZ_TEST_ARTIFACTS/build.log"
+      - name: Pane interactions
+        env:
+          BROWSER: ${{ matrix.browser }}
+        run: node tools/pane-interaction-checks.mjs "$BROWSER" 2>&1 | tee "$VZ_TEST_ARTIFACTS/browser.log"
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ matrix.browser }}-failure
+          path: .logs/ci
+          include-hidden-files: true
+          retention-days: 7
+
+  extended:
+    name: Config editor, resize matrix and sanitizers
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Build from source
+        run: |
+          mkdir -p "$VZ_TEST_ARTIFACTS"
+          env PATH=/usr/bin:/bin:/usr/sbin:/sbin ./build 2>&1 | tee "$VZ_TEST_ARTIFACTS/build.log"
+      - name: Config editor
+        run: node tools/config-editor-checks.mjs "$VZ_TEST_ARTIFACTS/config-editor.png" 2>&1 | tee "$VZ_TEST_ARTIFACTS/config-editor.log"
+      - name: Resize matrix
+        env:
+          PANE_RESIZE_CASE: matrix
+        run: node tools/pane-resize-checks.mjs "$VZ_TEST_ARTIFACTS/resize" 2>&1 | tee "$VZ_TEST_ARTIFACTS/resize.log"
+      - name: Graphviz undefined behavior sanitizer
+        run: ./src.graphviz/build --check 2>&1 | tee "$VZ_TEST_ARTIFACTS/graphviz-sanitizer.log"
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: extended-failure
+          path: .logs/ci
+          include-hidden-files: true
+          retention-days: 7

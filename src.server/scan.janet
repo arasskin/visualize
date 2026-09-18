@@ -2,7 +2,7 @@
 
 (import ./names)
 (import ./parsers/arduino :as arduino)
-(import ./parsers/visualize-bash :as bash)
+(import ./parsers/shell)
 (import ./parsers/c :as c)
 (import ./parsers/clojure :as clojure)
 (import ./parsers/css :as css)
@@ -87,7 +87,7 @@
 
 (def specs
 
-  [arduino/spec bash/spec c/spec clojure/spec css/spec go/spec html/spec
+  [arduino/spec shell/spec c/spec clojure/spec css/spec go/spec html/spec
    janet-lang/spec javascript/spec (python/spec blank-noise) swift/spec
    visualize-lang/spec])
 
@@ -191,6 +191,7 @@
         :lines (text-lines text)
         :declares (found :declares)
         :imports (found :imports)
+        :import-members (found :import-members)
         :refs (found :refs)
 
         :nodes (found :nodes)
@@ -257,6 +258,22 @@
     (when (= 1 (length values)) (put out key (first values))))
   out)
 
+(defn- nearby-owner [path candidates]
+  (when (empty? candidates) (break nil))
+  (def parts (string/split "/" path))
+  (var level (dec (length parts)))
+  (var target nil)
+  (while (>= level 0)
+    (def prefix (if (zero? level) "" (string (string/join (slice parts 0 level) "/") "/")))
+    (def local (filter |(string/has-prefix? prefix $) candidates))
+    (def direct (filter |(not (string/find "/" (string/slice $ (length prefix)))) local))
+    (def local (if (empty? direct) local direct))
+    (unless (empty? local)
+      (when (= 1 (length local)) (set target (first local)))
+      (break))
+    (-- level))
+  target)
+
 (defn- link-project-files [file files]
   (if (nil? (file :dependencies))
     file
@@ -280,9 +297,12 @@
   (def live (map |(link-project-files $ files) live))
 
   (def owners @{})
+  (def swift-owners @{})
   (each file live
     (each name (or (file :declares) [])
-      (put owners name (array/push (or (owners name) @[]) (file :rel)))))
+      (put owners name (array/push (or (owners name) @[]) (file :rel)))
+      (when (= "swift" (file :lang))
+        (put swift-owners name (array/push (or (swift-owners name) @[]) (file :rel))))))
   (def resolved (unique-index owners))
 
   (defn declared [file] (or (file :nodes) []))
@@ -297,14 +317,14 @@
   (def by-leaf @{})
   (each file live
     (def full (node-name (file :rel)))
-    (def leaf (last (string/split "." (names/stem full))))
+    (def leaf (last (string/split "." (node-name (names/stem (file :rel))))))
     (put by-leaf leaf (array/push (or (by-leaf leaf) @[]) full)))
   (def from-leaf (unique-index by-leaf))
 
   (def by-tail @{})
   (each file live
     (def full (node-name (file :rel)))
-    (def stem (names/stem full))
+    (def stem (node-name (names/stem (file :rel))))
     (def parts (string/split "." stem))
 
     (for i 1 (length parts)
@@ -316,7 +336,7 @@
   (def by-package @{})
   (each file live
     (def full (node-name (file :rel)))
-    (def stem (names/stem full))
+    (def stem (node-name (names/stem (file :rel))))
     (when (string/has-suffix? ".__init__" stem)
       (def pkg (string/slice stem 0 (- (length stem) (length ".__init__"))))
       (def parts (string/split "." pkg))
@@ -337,7 +357,7 @@
   (def from-package-exact @{})
   (each file live
     (def full (node-name (file :rel)))
-    (def stem (names/stem full))
+    (def stem (node-name (names/stem (file :rel))))
     (when (string/has-suffix? ".__init__" stem)
       (put from-package-exact
            (string/slice stem 0 (- (length stem) (length ".__init__"))) full)))
@@ -363,7 +383,7 @@
   (def by-stem @{})
   (each file live
     (def full (node-name (file :rel)))
-    (def key (names/stem full))
+    (def key (node-name (names/stem (file :rel))))
     (put by-stem key (array/push (or (by-stem key) @[]) full)))
   (def from-stem (unique-index by-stem))
 
@@ -420,6 +440,10 @@
     (def speculative? (string/has-suffix? "." name))
     (def name (if speculative? (slice name 0 -2) name))
     (def mapped (or (get aliases name) name))
+    (def python? (= "python" (file :lang)))
+
+    (defn package-target [wanted]
+      (if python? (from-package-exact wanted) (from-package wanted)))
 
     (defn language-target [wanted]
       (when (= "janet" (file :lang))
@@ -427,9 +451,9 @@
                         (string wanted ".init.janet")])))
 
     (defn beside-of [wanted]
-      (let [parts (string/split "." (names/stem (node-name (file :rel))))]
+      (let [parts (string/split "." (node-name (names/stem (file :rel))))]
 
-        (def floor
+        (var floor
           (do
             (var d (- (length parts) 1))
             (while (and (> d 1)
@@ -439,6 +463,12 @@
             (max 1 (- d 1))))
         (var found nil)
         (var depth (- (length parts) 1))
+        (when python?
+          (for i 1 (inc depth)
+            (when (string/has-suffix? ".__init__.py"
+                    (or (from-package-exact (string/join (slice parts 0 i) ".")) ""))
+              (set depth (min depth (dec i)))))
+          (set floor (min floor depth)))
         (while (and (nil? found) (>= depth floor) (> depth 0))
           (def candidate (string (string/join (slice parts 0 depth) ".")
                                  "." wanted))
@@ -448,7 +478,7 @@
                          (ok (from-stem candidate))
                          (ok (and (ours candidate) candidate))
 
-                         (and (not speculative?)
+                         (and (or python? (not speculative?))
                               (ok (from-package-exact candidate)))))
           (-- depth))
         found))
@@ -462,8 +492,8 @@
 
                     (ok (if speculative?
                           (from-package-exact mapped)
-                          (from-package mapped)))
-                    (when (not speculative?)
+                          (package-target mapped)))
+                    (when (and (not speculative?) (not python?))
                       (or
 
                         (and (or (not (index-of (file :lang) ["python" "janet"]))
@@ -484,14 +514,15 @@
 
       (let [parts (string/split "." name)
             prefix (string/join (slice parts 0 -2) ".")]
-        (and (> (length parts) 1)
+        (and (or (not python?) (index-of name (file :import-members)))
+             (> (length parts) 1)
              (not (empty? prefix))
              (or (get externals (names/external prefix))
                  (from-stem prefix)
                  (and (ours prefix) prefix)
                  (beside-of prefix)
-                 (from-tail prefix)
-                 (from-package prefix))))
+                 (and (not python?) (from-tail prefix))
+                 (package-target prefix))))
       nil
 
       (names/external name)))
@@ -508,7 +539,9 @@
         (when (names/external? target) (put externals target true))
         (unless (= here target) (put pairs [here target] true))))
     (each name (or (file :refs) [])
-      (when-let [target (resolved name)]
+      (when-let [target (if (= "swift" (file :lang))
+                         (nearby-owner (file :rel) (or (swift-owners name) []))
+                         (resolved name))]
         (unless (= target (file :rel))
           (put pairs [here (node-name target)] true))))
 

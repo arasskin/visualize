@@ -132,15 +132,18 @@
            (defer (:close conn)
              (def carry @"")
              (var serving true)
+             (var phase :read)
              (try
 
                (while serving
 
                  (setdyn :serving nil)
+                 (set phase :read)
                  (def request (read-request conn carry bound body-limit))
                  (if-not request
                    (set serving false)
                    (do
+                     (set phase :handler)
                      (when trace/enabled (setdyn :latency @{}))
                      (def response (trace/measure "handler" (handler request)))
                      (if (and (dictionary? response) (response :upgrade))
@@ -156,11 +159,14 @@
                              (map (fn [key] (string key ";dur=" ((dyn :latency) key)))
                                   (keys (dyn :latency))) ", ") "\r\n")))
                      (setdyn :serving (request :path))
+                     (set phase :write)
                      (trace/measure "http-write"
                        (respond conn status content-type body (not (request :close)) timing))
                      (when (request :close) (set serving false)))))))
                ([err fib]
                  (cond
+                   (and (index-of phase [:read :write])
+                        (index-of (string err) ["Broken pipe" "Connection reset by peer" "stream hup"])) nil
                    (and (dictionary? err) (err :http-status))
                    (try (respond conn (err :http-status) "text/plain" (err :message)) ([_] nil))
                    (or (= (string err) "Bad file descriptor")

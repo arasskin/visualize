@@ -1,5 +1,6 @@
 export function createPaneLayout({getPanels, getSelected, onChange}) {
   const TAB_GAP = 6;
+  const LEFT_MARGIN = 7;
   const RAIL_GRAB = 56;
 
   const rail = [];
@@ -22,23 +23,23 @@ export function createPaneLayout({getPanels, getSelected, onChange}) {
     for (const side of ['top', 'bottom']) {
       const state = railStates[side], panels = railPanels(side);
       const widths = panels.map(p => p.root.getBoundingClientRect().width);
-      const total = widths.reduce((sum, width) => sum + width + TAB_GAP, TAB_GAP);
+      const total = widths.reduce((sum, width) => sum + width + TAB_GAP, LEFT_MARGIN);
       const most = Math.min(0, innerWidth - total);
       state.scroll = Math.max(most, Math.min(0, state.scroll));
       const index = panels.indexOf(reveal);
       if (index >= 0 && most < 0) {
-        const left = TAB_GAP + state.scroll + widths.slice(0, index).reduce((sum, width) => sum + width + TAB_GAP, 0);
-        const visible = Math.min(widths[index], innerWidth - 2 * TAB_GAP);
+        const left = LEFT_MARGIN + state.scroll + widths.slice(0, index).reduce((sum, width) => sum + width + TAB_GAP, 0);
+        const visible = Math.min(widths[index], innerWidth - LEFT_MARGIN - TAB_GAP);
         if (left > innerWidth - TAB_GAP - visible) state.scroll -= left - (innerWidth - TAB_GAP - visible);
-        else if (left + widths[index] < TAB_GAP + visible) state.scroll += TAB_GAP + visible - left - widths[index];
+        else if (left + widths[index] < LEFT_MARGIN + visible) state.scroll += LEFT_MARGIN + visible - left - widths[index];
         state.scroll = Math.max(most, Math.min(0, state.scroll));
       }
-      let x = TAB_GAP + state.scroll;
+      let x = LEFT_MARGIN + state.scroll;
       panels.forEach((panel, index) => {
         panel.root.style.setProperty('--rail-tab-height', panel.bar.offsetHeight + 'px');
         if (panel !== draggingPanel) {
           panel.root.classList.toggle('bottom-docked', side === 'bottom');
-          panel.place(x, side === 'bottom' ? innerHeight - TAB_GAP - panel.root.offsetHeight : TAB_GAP, true);
+          panel.place(x, side === 'bottom' ? innerHeight - panel.root.getBoundingClientRect().height : 0, true);
         }
         x += widths[index] + TAB_GAP;
       });
@@ -58,11 +59,11 @@ export function createPaneLayout({getPanels, getSelected, onChange}) {
   }
 
   window.addEventListener('wheel', e => {
-    const side = e.clientY <= TAB_GAP + railHeight('top') ? 'top'
-      : e.clientY >= innerHeight - TAB_GAP - railHeight('bottom') ? 'bottom' : null;
+    const side = e.clientY <= railHeight('top') ? 'top'
+      : e.clientY >= innerHeight - railHeight('bottom') ? 'bottom' : null;
     if (!side) return;
     const state = railStates[side];
-    const total = railPanels(side).reduce((sum, panel) => sum + panel.root.offsetWidth + TAB_GAP, TAB_GAP);
+    const total = railPanels(side).reduce((sum, panel) => sum + panel.root.offsetWidth + TAB_GAP, LEFT_MARGIN);
     const by = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? -e.deltaX : -e.deltaY;
     const next = Math.max(Math.min(0, innerWidth - total), Math.min(0, state.scroll + by));
     if (next === state.scroll) return;
@@ -73,7 +74,7 @@ export function createPaneLayout({getPanels, getSelected, onChange}) {
 
   window.addEventListener('resize', () => { resnap(); packRail(); });
 
-  function addToRail(panel, at, side = 'top') {
+  function addToRail(panel, at, side = 'bottom') {
     const old = rail.indexOf(panel);
     if (old >= 0) rail.splice(old, 1);
     const others = railPanels(side);
@@ -102,6 +103,10 @@ export function createPaneLayout({getPanels, getSelected, onChange}) {
   const EDGE_GRAB = 48;
 
   const EDGES = {
+    ceiling: {
+      near: (box) => box.top <= EDGE_GRAB,
+      fill: (box) => ({ top: 0, height: Math.min(box.bottom, innerHeight) }),
+    },
     floor: {
       near: (box) => box.bottom >= innerHeight - EDGE_GRAB,
 
@@ -133,9 +138,9 @@ export function createPaneLayout({getPanels, getSelected, onChange}) {
       const want = Object.assign({}, ...names.map((name) => EDGES[name] && EDGES[name].fill(box)));
       if (want.height === undefined) continue;
 
-      const h = Math.max(120, want.height);
+      const h = Math.max(panel?.minHeight || 120, want.height);
 
-      const top = h > innerHeight - box.top ? Math.max(0, innerHeight - h) : box.top;
+      const top = want.top ?? Math.min(box.top, Math.max(0, innerHeight - h));
       const wantsHeight = Math.abs(box.height - h) > 0.5;
       const wantsTop = Math.abs(box.top - top) > 0.5;
       if (!wantsHeight && !wantsTop) continue;
@@ -151,7 +156,8 @@ export function createPaneLayout({getPanels, getSelected, onChange}) {
 
   function nearEdges(root) {
     const box = root.getBoundingClientRect();
-    return Object.keys(EDGES).filter((name) => EDGES[name].near(box));
+    const edge = root.classList.contains('bottom-docked') ? 'ceiling' : 'floor';
+    return EDGES[edge].near(box) ? [edge] : [];
   }
 
   function showEdges(names) {
@@ -186,8 +192,8 @@ export function createPaneLayout({getPanels, getSelected, onChange}) {
 
   function overRail(panel) {
     const bar = panel.bar.getBoundingClientRect();
-    const top = Math.abs(bar.top - TAB_GAP);
-    const bottom = Math.abs(bar.bottom - (innerHeight - TAB_GAP));
+    const top = Math.abs(bar.top);
+    const bottom = Math.abs(bar.bottom - innerHeight);
     if (Math.min(top, bottom) > RAIL_GRAB) return null;
     return top <= bottom ? 'top' : 'bottom';
   }
@@ -220,13 +226,18 @@ export function createPaneLayout({getPanels, getSelected, onChange}) {
     onChange();
   }
 
-  function resizeMove(panel) { showEdges(panel.root.classList.contains('bottom-docked') ? [] : nearEdges(panel.root)); }
+  function resizeMove(panel) { showEdges(nearEdges(panel.root)); }
   function resizeEnd(panel) {
     const root = panel.root;
     const landing = nearEdges(root);
     if (landing.length) {
-      const want = Object.assign({}, ...landing.map(name => EDGES[name].fill(root.getBoundingClientRect())));
-      if (want.height !== undefined) root.style.height = Math.max(panel.minHeight, want.height) + 'px';
+      const box = root.getBoundingClientRect();
+      const want = Object.assign({}, ...landing.map(name => EDGES[name].fill(box)));
+      if (want.height !== undefined) {
+        const height = Math.max(panel.minHeight, want.height);
+        root.style.height = height + 'px';
+        root.style.top = (want.top ?? Math.min(box.top, Math.max(0, innerHeight - height))) + 'px';
+      }
       if (!onRail(panel)) root.dataset.snapped = landing.join(' ');
       panel.resized();
     } else delete root.dataset.snapped;

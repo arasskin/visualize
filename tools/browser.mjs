@@ -38,9 +38,9 @@ export async function browser(engine, root) {
   let socket;
   try {
     let address;
-    if (firefox) address = await waitFor(() => logs.join('').match(/WebDriver BiDi listening on (ws:\/\/[^\s]+)/)?.[1]);
+    if (firefox) address = await waitFor(() => logs.join('').match(/WebDriver BiDi listening on (ws:\/\/[^\s]+)/)?.[1], 60000);
     else {
-      const port = (await waitFor(() => readFile(join(profile, 'DevToolsActivePort'), 'utf8'))).split('\n')[0];
+      const port = (await waitFor(() => readFile(join(profile, 'DevToolsActivePort'), 'utf8'), 60000)).split('\n')[0];
       const pages = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
       address = pages.find(page => page.type === 'page').webSocketDebuggerUrl;
     }
@@ -92,6 +92,11 @@ export async function browser(engine, root) {
       async viewport(width, height) {
         await send(firefox ? 'browsingContext.setViewport' : 'Emulation.setDeviceMetricsOverride', firefox
           ? {context, viewport: {width, height}, devicePixelRatio: 1} : {width, height, deviceScaleFactor: 1, mobile: false});
+      },
+      async screenshot() {
+        const result = await send(firefox ? 'browsingContext.captureScreenshot' : 'Page.captureScreenshot',
+          firefox ? {context} : {format: 'png'});
+        return Buffer.from(result.data, 'base64');
       },
       async drag(x, y, dx = 0, dy = 0) {
         x = Math.round(x); y = Math.round(y); dx = Math.round(dx); dy = Math.round(dy);

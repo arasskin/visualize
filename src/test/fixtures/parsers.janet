@@ -23,6 +23,47 @@ import imaginary
             ["app.pkg.jobs.main.py" "app.pkg.jobs.local.py"]
             ["app.pkg.jobs.main.py" "?.mcp"]
             ["app.pkg.jobs.parent.py" "app.pkg.common.py"]]}
+   {:name "python bare libraries do not resolve to files inside packages"
+    :files {"shop/otto/__init__.py" ""
+            "shop/otto/retailers/__init__.py" ""
+            "shop/otto/retailers/html.py" "import html\nfrom html.parser import HTMLParser\n"
+            "shop/otto/retailers/json.py" ""
+            "shop/otto/retailers/thirdparty/__init__.py" ""
+            "shop/otto/retailers/main.py" "import html\nimport json\nimport thirdparty\nfrom html import escape\nfrom . import html as local_html\n"
+            "shop/otto/namespace/main.py" "import html\nfrom otto.retailers.html import cards\n"
+            "shop/otto/core.py" "import html\nfrom html.parser import HTMLParser\n"
+            "shop/otto/members.py" "from html import parser\nimport html.parser\n"
+            "shop/tests/check.py" "from otto.retailers.html import cards\n"
+            "shop/main.py" "import html\nimport thirdparty\n"}
+    :edges [["shop.otto.retailers.html.py" "?.html"]
+            ["shop.otto.retailers.html.py" "?.html.parser"]
+            ["shop.otto.retailers.main.py" "?.html"]
+            ["shop.otto.retailers.main.py" "?.json"]
+            ["shop.otto.retailers.main.py" "?.thirdparty"]
+            ["shop.otto.retailers.main.py" "shop.otto.retailers.html.py"]
+            ["shop.otto.namespace.main.py" "?.html"]
+            ["shop.otto.namespace.main.py" "shop.otto.retailers.html.py"]
+            ["shop.otto.namespace.main.py" "shop.otto.retailers.__init__.py"]
+            ["shop.otto.core.py" "?.html"]
+            ["shop.otto.core.py" "?.html.parser"]
+            ["shop.otto.members.py" "?.html"]
+            ["shop.otto.members.py" "?.html.parser"]
+            ["shop.tests.check.py" "shop.otto.__init__.py"]
+            ["shop.tests.check.py" "shop.otto.retailers.__init__.py"]
+            ["shop.tests.check.py" "shop.otto.retailers.html.py"]
+            ["shop.main.py" "?.html"]
+            ["shop.main.py" "?.thirdparty"]]}
+   {:name "python root modules and standalone script siblings can shadow libraries"
+    :files {"html.py" ""
+            "main.py" "import html\n"
+            "scripts/json.py" ""
+            "scripts/main.py" "import json\n"
+            "shop/logging.py" ""
+            "shop/app/__init__.py" ""
+            "shop/app/main.py" "import logging\n"}
+    :edges [["main.py" "html.py"]
+            ["scripts.main.py" "scripts.json.py"]
+            ["shop.app.main.py" "shop.logging.py"]]}
    {:name "typescript multiline imports, reexports and dynamic imports"
     :files {"src/main.tsx" ``
 import type {
@@ -176,6 +217,38 @@ private extension Worker { var ready: Bool { true } }
             "App/Second.swift" "struct Shared {}\n"
             "App/Ghost.swift" "struct Ghost {}\n"}
     :edges [["App.Main.swift" "App.Worker.swift"] ["App.Main.swift" "?.Foundation"]]}
+   {:name "swift references stay local when sibling worktrees repeat declarations"
+    :files {"otto-ios/OttoClip/ClipState.swift" "final class ClipState { let recipe = Recipe(); let client = APIClient(); let ambiguous = Shared(); let foreign = ForeignType() }\n"
+            "otto-ios/OttoClip/Models.swift" "struct Recipe {}\n"
+            "otto-ios/OttoClip/APIClient.swift" "final class APIClient {}\n"
+            "otto-ios/OttoClip/First.swift" "struct Shared {}\n"
+            "otto-ios/OttoClip/Second.swift" "struct Shared {}\n"
+            "otto-ios/OttoClip/UI/ClipView.swift" "struct ClipView { let state = ClipState(); let recipe = Recipe() }\n"
+            "otto-ios/OttoClip/UI/Models.swift" "struct Recipe {}\n"
+            "otto-ios/OttoTests/Checks.swift" "let state = ClipState()\nlet ambiguous = Recipe()\n"
+            "otto-ios-reporting/OttoClip/ClipState.swift" "final class ClipState { let recipe = Recipe() }\n"
+            "otto-ios-reporting/OttoClip/Models.swift" "struct Recipe {}\nstruct Shared {}\n"
+            "otto-ios-reporting/OttoClip/UI/ClipView.swift" "struct ClipView { let state = ClipState(); let recipe = Recipe() }\n"
+            "unrelated/Outside.swift" "let ambiguous = ClipState()\n"
+            "robot/sketch.ino" "struct ForeignType {};\nstruct APIClient {};\n"}
+    :edges [["otto-ios.OttoClip.ClipState.swift" "otto-ios.OttoClip.APIClient.swift"]
+            ["otto-ios.OttoClip.ClipState.swift" "otto-ios.OttoClip.Models.swift"]
+            ["otto-ios.OttoClip.UI.ClipView.swift" "otto-ios.OttoClip.ClipState.swift"]
+            ["otto-ios.OttoClip.UI.ClipView.swift" "otto-ios.OttoClip.UI.Models.swift"]
+            ["otto-ios.OttoTests.Checks.swift" "otto-ios.OttoClip.ClipState.swift"]
+            ["otto-ios-reporting.OttoClip.ClipState.swift" "otto-ios-reporting.OttoClip.Models.swift"]
+            ["otto-ios-reporting.OttoClip.UI.ClipView.swift" "otto-ios-reporting.OttoClip.ClipState.swift"]
+            ["otto-ios-reporting.OttoClip.UI.ClipView.swift" "otto-ios-reporting.OttoClip.Models.swift"]]}
+   {:name "swift direct free-function calls exclude member calls and private helpers"
+    :files {"app/State.swift" "struct State { func run() { debugLog(\"Ghost()\"); secret(); hidden(); memberOnly() } }\n"
+            "app/DebugLog.swift" "func debugLog(_ message: String) {}\nprivate func secret() {}\nfileprivate func hidden() {}\n"
+            "app/Member.swift" "let a = logger.debugLog(\"a\")\nlet b = logger . debugLog (\"b\")\n"
+            "app/Logger.swift" "struct Logger {\n    func memberOnly() {}\n}\n"
+            "app/Ghost.swift" "func Ghost() {}\n"
+            "app-copy/State.swift" "struct State { func run() { debugLog(\"hello\") } }\n"
+            "app-copy/DebugLog.swift" "public func debugLog(_ message: String) {}\n"}
+    :edges [["app.State.swift" "app.DebugLog.swift"]
+            ["app-copy.State.swift" "app-copy.DebugLog.swift"]]}
    {:name "arduino includes, calls across tabs and unparsed headers"
     :files {"robot/main.ino" ``
 #include "pins.h"
@@ -224,6 +297,30 @@ const char *example = "readGhost(); #include <Phantom.h>";
     :edges [["web.styles.main.css" "web.styles.base.css"]
             ["web.styles.main.css" "fonts.body.woff2"]
             ["web.styles.main.css" "web.images.hero.svg"]]}
+   {:name "shell hidden paths do not become dependencies on a directory config"
+    :files {"shop/otto.sh" ``#!/bin/sh
+[ -f .env ] && . ./.env
+source ./.env.local
+source ../.secrets/setup.sh
+source ./env.sh
+exec .venv/bin/python -m otto.mcp.core
+``
+            "shop/.env" "SECRET=example\n"
+            "shop/.env.local" "SECRET=example\n"
+            ".secrets/setup.sh" "export SECRET=example\n"
+            "shop/env.sh" "export MODE=development\n"
+            "shop/visualize_config" "box otto\n"}
+    :ignored ["shop/.env" "shop/.env.local" ".secrets/setup.sh"]
+    :imports {"shop/otto.sh" ["shop.env"]}
+    :edges [["shop.otto.sh" "shop.env.sh"]]}
+   {:name "shell extensionless files keep their filename during resolution"
+    :files {"launch.sh" "#!/bin/sh\n./missing\n./bin/worker\n"
+            "missing/visualize_config" "lines\n"
+            "bin/worker" "#!/bin/sh\nsource ./setup.sh\n"
+            "bin/setup.sh" "export READY=yes\n"}
+    :edges [["launch.sh" "?.missing"]
+            ["launch.sh" "bin.worker"]
+            ["bin.worker" "bin.setup.sh"]]}
    {:name "shell extensionless launchers and compiler continuations"
     :files {"launch" ``#!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd)

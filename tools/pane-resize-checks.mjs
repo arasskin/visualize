@@ -191,6 +191,7 @@ try {
     assert(await cdp.evaluate(side === 'floating' ? '!panes.onRail(subject)' : `subject.root.dataset.rail===${JSON.stringify(side)}`), 'wrong docking');
   }
   await healthy('initial output');
+  assert(await cdp.evaluate('panes.get("config").root.dataset.rail==="top" && panes.get("harness").root.dataset.rail==="bottom" && subject.root.dataset.rail==="bottom"'), 'incorrect default rails');
   if (caseName === 'hyperlinks') {
     await cdp.evaluate('subject.type("nl")');
     await waitFor(() => cdp.evaluate('!!subject.root.querySelector(".term-link")'));
@@ -228,7 +229,8 @@ try {
         await healthy(`${mode}/${side}: ${name}`);
         assert(Math.abs(lastSnapshot.box.width - before.box.width - dx) < 2, 'drag width differs');
         assert(Math.abs(lastSnapshot.box.height - before.box.height - dy) < 2, 'drag height differs');
-        if (side === 'bottom') assert(Math.abs(lastSnapshot.box.bottom - 994) < 2, 'bottom anchor moved');
+        if (side === 'bottom') assert(Math.abs(lastSnapshot.box.bottom - 1000) < 2, 'bottom anchor moved');
+        if (side === 'top') assert(Math.abs(lastSnapshot.box.top) < 1, 'top rail is not flush with the viewport');
       }
       await drag('subject.grip', -200, -160 * sign, 20, 0);
       await healthy(`${mode}/${side}: rapid shrink`);
@@ -257,8 +259,36 @@ try {
   await cdp.evaluate('subject.root.style.height="900px";subject.resized()');
   await healthy('tall terminal before floor snap');
   await drag('subject.grip', 0, 60);
-  await healthy('resize snaps to viewport floor');
-  assert(Math.abs(lastSnapshot.box.bottom - 1000) < 2, 'floor snap failed');
+  await healthy('resize snaps to bottom rail baseline');
+  assert(Math.abs(lastSnapshot.box.bottom - 1000) < 2, 'floor snap missed the bottom rail baseline');
+  assert(await cdp.evaluate(`Math.abs(document.querySelector('#floor-mark').getBoundingClientRect().bottom
+    - document.querySelector('.rail-marks.bottom').getBoundingClientRect().bottom) < 1`), 'snap guide is not aligned with the bottom rail');
+  await position('bottom');
+  await cdp.evaluate('subject.root.style.height="900px";panes.packRailNow();subject.resized()');
+  await healthy('tall bottom terminal before ceiling snap');
+  await drag('subject.grip', 0, -60);
+  await healthy('bottom terminal snaps to top edge');
+  assert(Math.abs(lastSnapshot.box.top) < 1 && Math.abs(lastSnapshot.box.bottom - 1000) < 1, 'ceiling snap lost a viewport edge');
+  assert(await cdp.evaluate(`Math.abs(document.querySelector('#ceiling-mark').getBoundingClientRect().top
+    - document.querySelector('.rail-marks.top').getBoundingClientRect().top) < 1`), 'snap guide is not aligned with the top rail');
+  await drag('subject.grip', 0, 100);
+  await healthy('bottom terminal shrinks away from ceiling');
+  assert(Math.abs(lastSnapshot.box.top - 100) < 1 && Math.abs(lastSnapshot.box.bottom - 1000) < 1, 'bottom terminal cannot leave ceiling snap');
+  await position('floating');
+  await cdp.evaluate('subject.root.style.height=(innerHeight-subject.root.getBoundingClientRect().top-70)+"px";subject.resized()');
+  await healthy('floating terminal before floor snap');
+  await drag('subject.grip', 0, 40);
+  await healthy('floating terminal snaps to bottom rail baseline');
+  assert(Math.abs(lastSnapshot.box.bottom - 1000) < 2, 'floating floor snap missed the bottom rail baseline');
+  assert(await cdp.evaluate('subject.root.dataset.snapped==="floor"'), 'floating snap was not retained');
+  await cdp.send('Emulation.setDeviceMetricsOverride', {width:1440,height:700,deviceScaleFactor:1,mobile:false});
+  await waitFor(() => cdp.evaluate('innerHeight===700 && Math.abs(subject.root.getBoundingClientRect().bottom-700)<2'));
+  await healthy('floating floor snap follows viewport resize');
+  assert(Math.abs(lastSnapshot.box.bottom - 700) < 2, 'resnap lost the bottom rail baseline');
+  await cdp.send('Emulation.setDeviceMetricsOverride', {width:1440,height:1000,deviceScaleFactor:1,mobile:false});
+  await waitFor(() => cdp.evaluate('innerHeight===1000 && Math.abs(subject.root.getBoundingClientRect().bottom-1000)<2'));
+  await healthy('floating floor snap follows viewport restore');
+  assert(Math.abs(lastSnapshot.box.bottom - 1000) < 2, 'restored viewport lost the bottom rail baseline');
   await position('top');
   for (const [width,height,dpr] of [[900,650,1],[1440,1000,2],[1100,800,2],[1440,1000,1]]) {
     await cdp.send('Emulation.setDeviceMetricsOverride', {width,height,deviceScaleFactor:dpr,mobile:false});
@@ -272,7 +302,7 @@ try {
   assert((await snapshot()).remote.join()===hidden.remote.join(),'viewport resize changed a collapsed PTY');
   await cdp.evaluate('subject.open()');
   await healthy('collapsed pane survives viewport resize');
-  assert(Math.abs(lastSnapshot.box.bottom-694)<2,'bottom tab lost its viewport anchor');
+  assert(Math.abs(lastSnapshot.box.bottom-700)<2,'bottom tab lost its viewport anchor');
   await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
   await position('top');
   await cdp.evaluate('subject.type("nqs")');

@@ -88,7 +88,9 @@
   (defn collect [rule]
     (each hit (or (peg/match ~(any (+ ,rule 1)) text) [])
       (when-let [rel (as-relative hit known)]
-        (array/push found rel))))
+        (def resolved (names/resolve-relative path rel true))
+        (unless (some |(string/has-prefix? "." $) (string/split "/" resolved))
+          (array/push found rel)))))
 
   (collect ~(* (+ ,line-start (set ";&|"))
                (any (set " \t"))
@@ -116,7 +118,7 @@
   {:imports (map |(names/from-path path $) (distinct found))})
 
 (def spec
-  {:name "bash"
+  {:name "shell"
    :ext [".sh" ".bash"]
 
    :shebang ["sh" "bash" "zsh" "dash" "ksh"]

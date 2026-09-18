@@ -1,6 +1,6 @@
 Visualize opens your chosen harness on a fresh start. Harnesses manage their own agents using their native tools and settings. Visualize does not inject orchestration instructions or install an MCP server.
 
-The `startup_prompt` variable in `./visualize` explains dependency graphs, asks for plans as `.visualize` files, and includes a project-relative file-reference example. The launcher passes it through Codex's [developer instructions setting](https://learn.chatgpt.com/docs/config-file/config-reference). Set the `invocation` variable to choose the command:
+The `startup_prompt` variable in `./visualize` describes dependency graphs, the `.visualize` format, and project-relative file references, with an example. It does not prescribe when to use the format. The launcher passes it through Codex's [developer instructions setting](https://learn.chatgpt.com/docs/config-file/config-reference). Set the `invocation` variable to choose the command:
 
 ```sh
 invocation='exec codex -c "developer_instructions=$VISUALIZE_STARTUP_PROMPT_JSON"'

@@ -22,7 +22,7 @@ export function paneShortcuts({rail, pickedPanel, selectPane, revealTab, openTer
     const newTab = e.code === 'Enter' || e.code === 'NumpadEnter';
     if (!walkLeft && !walkRight && !newTab) return false;
     e.preventDefault();
-    if (newTab) openTerminal('top');
+    if (newTab) openTerminal();
     else altWalk(walkRight ? 1 : -1);
     return true;
   }

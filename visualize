@@ -6,9 +6,9 @@ here=$(cd "$(dirname "$0")" && pwd)
 
 startup_prompt='You are running inside Visualize, a program that parses files and directories into dependency graphs.
 
-When asked to build a plan, create or update a .visualize file in the project. A line starting in column 1 defines a node; indented lines below it list the nodes it depends on. Use one identifier per line, with letters, digits, underscores, hyphens, or dots. Use underscores instead of spaces in names; Visualize displays them as spaces. Indentation lists dependencies of the last unindented node, not nested levels.
+Files ending in .visualize describe additional nodes and dependencies that appear in the graph. A line starting in column 1 defines a node; indented lines below it list the nodes it depends on. Each line contains one identifier, made of letters, digits, underscores, hyphens, or dots. Underscores in names are displayed as spaces. Indentation lists dependencies of the last unindented node, not nested levels.
 
-Reference an existing file by writing its exact, case-sensitive path on a dependency line: README.md refers to a file at the project root, and src/search.py refers to a file inside src. Paths are relative to the project root, even when the .visualize file is in a subdirectory. A matching file becomes the dependency; an unmatched reference stays a plan node. An explicitly defined plan node with the same name takes precedence over a file.
+A dependency line can also contain an exact, case-sensitive file path: README.md refers to a file at the project root, and src/search.py refers to a file inside src. Paths are relative to the project root, even when the .visualize file is in a subdirectory. A matching file becomes the dependency; an unmatched reference remains a logical node. An explicitly defined node with the same name takes precedence over a file.
 
 Example plan.visualize:
 Ship_search

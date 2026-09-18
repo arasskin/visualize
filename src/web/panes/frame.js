@@ -68,13 +68,14 @@ export function createPaneFrame(root, options = {}) {
           return;
         }
          root.style.height = h + 'px';
+         if (bottom) root.style.top = Math.max(0, from.top + from.h - h) + 'px';
          options.onChange?.();
          if (options.onResize) options.onResize(w, h);
 
          options.onResizeMove?.(panel);
        },
        () => {
-         if (panel.shut || panel.root.classList.contains('bottom-docked')) return;
+         if (panel.shut) return;
 
          options.onResizeEnd?.(panel);
        });

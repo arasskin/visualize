@@ -151,6 +151,9 @@ setInterval(() => {}, 1000);
   check(JSON.stringify(custom.args) === JSON.stringify(updated.args), 'vz executes custom Bash scripts like cold startup');
   await stop('SIGINT');
   console.log(JSON.stringify({passed: count}));
+} catch (error) {
+  console.error(logs);
+  throw error;
 } finally {
   await stop('SIGINT');
   await rm(root, {recursive: true, force: true});

@@ -112,8 +112,7 @@ export function createWorkspace({template, initial = [], positions = {}, labels 
     }
     remote = wanted;
   }
-  function openTerminal(side) {
-    side ??= selected && layout.onRail(selected) ? layout.railSide(selected) : 'top';
+  function openTerminal(side = 'bottom') {
     const panel = createPane(); selectPane(panel.root); layout.addToRail(panel, undefined, side);
     panel.boot(); panel.open(); return panel;
   }
@@ -133,7 +132,7 @@ export function createWorkspace({template, initial = [], positions = {}, labels 
   });
   for (const description of initial) {
     const panel = createPane(description);
-    layout.addToRail(panel, undefined, description.rail || 'top');
+    layout.addToRail(panel, undefined, description.rail || 'bottom');
     if (description.open) panel.open();
     panel.boot();
   }
