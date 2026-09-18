@@ -15,6 +15,6 @@ The local document connection uses a private Unix socket, exposed through `VISUA
 
 `VISUALIZE_STARTUP_PROMPT` carries the prompt text and `VISUALIZE_STARTUP_PROMPT_JSON` carries its quoted form for Codex. New sessions receive the current prompt even when their supervisor survived a restart. Running sessions keep their existing instructions.
 
-On restart, surviving terminals are recovered without rerunning the invocation. Previously created worker tabs recover as ordinary terminals. Ctrl-D restarts the server while preserving sessions; Ctrl-C stops the server and its terminals. Running harnesses retain their existing settings until restarted.
+On restart, surviving terminals are recovered without rerunning the invocation. Previously created worker tabs recover as ordinary terminals. Ctrl-D replaces the server process without waiting for an in-progress graph operation, while preserving terminal sessions; Ctrl-C stops the server and its terminals. Running harnesses retain their existing settings until restarted.
 
 Run `node tools/launch-checks.mjs` to check the real launcher with a fake harness, custom Bash commands, document opening, and recovery. Run `./src/test/run` for server and terminal tests.

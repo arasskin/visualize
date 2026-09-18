@@ -5,8 +5,9 @@ export function createPaneLayout({getPanels, getSelected, onChange}) {
 
   const rail = [];
   const railStates = Object.fromEntries(['top', 'bottom'].map(side => [side, {
-    scroll: 0,
+    scroll: 0, most: 0,
   }]));
+  let linkedRails = false;
   let draggingPanel = null;
   let reveal = null;
 
@@ -17,32 +18,78 @@ export function createPaneLayout({getPanels, getSelected, onChange}) {
   let frame = null;
   function packRail() { if (frame === null) frame = requestAnimationFrame(() => { frame = null; packRailNow(); }); }
 
+  function arrangeRails() {
+    const rows = ['top', 'bottom'].map(side => ({side, at: 0, x: LEFT_MARGIN,
+      entries: railPanels(side).map(panel => {
+        const box = panel.root.getBoundingClientRect();
+        return {panel, width: box.width, height: box.height,
+          spans: panel !== draggingPanel && !panel.shut && box.height >= innerHeight - .5};
+      }),
+    }));
+    const placeNext = row => {
+      const entry = row.entries[row.at++];
+      entry.left = row.x;
+      row.x += entry.width + TAB_GAP;
+    };
+    while (true) {
+      const candidates = rows.flatMap(row => {
+        let left = row.x;
+        for (let index = row.at; index < row.entries.length; index++) {
+          const entry = row.entries[index];
+          if (entry.spans) return [{row, left}];
+          left += entry.width + TAB_GAP;
+        }
+        return [];
+      }).sort((a, b) => a.left - b.left);
+      if (!candidates.length) break;
+      const next = candidates[0];
+      for (const row of rows) {
+        while (row.at < row.entries.length) {
+          const entry = row.entries[row.at];
+          if (entry.spans || (row !== next.row && row.x + entry.width + TAB_GAP > next.left)) break;
+          placeNext(row);
+        }
+      }
+      placeNext(next.row);
+      for (const row of rows) row.x = Math.max(row.x, next.row.x);
+    }
+    for (const row of rows) while (row.at < row.entries.length) placeNext(row);
+    return rows;
+  }
+
   function packRailNow() {
     if (frame !== null) { cancelAnimationFrame(frame); frame = null; }
     unscrollPage();
-    for (const side of ['top', 'bottom']) {
-      const state = railStates[side], panels = railPanels(side);
-      const widths = panels.map(p => p.root.getBoundingClientRect().width);
-      const total = widths.reduce((sum, width) => sum + width + TAB_GAP, LEFT_MARGIN);
-      const most = Math.min(0, innerWidth - total);
-      state.scroll = Math.max(most, Math.min(0, state.scroll));
-      const index = panels.indexOf(reveal);
-      if (index >= 0 && most < 0) {
-        const left = LEFT_MARGIN + state.scroll + widths.slice(0, index).reduce((sum, width) => sum + width + TAB_GAP, 0);
-        const visible = Math.min(widths[index], innerWidth - LEFT_MARGIN - TAB_GAP);
+    const rows = arrangeRails();
+    const spanning = rows.flatMap(row => row.entries).find(entry => entry.spans);
+    linkedRails = !!spanning;
+    const sharedScroll = spanning && railStates[railSide(spanning.panel)].scroll;
+    for (const row of rows) {
+      const state = railStates[row.side];
+      const total = linkedRails ? Math.max(...rows.map(row => row.x)) : row.x;
+      state.most = Math.min(0, innerWidth - total);
+      state.scroll = Math.max(state.most, Math.min(0, linkedRails ? sharedScroll : state.scroll));
+    }
+    for (const row of rows) {
+      const state = railStates[row.side];
+      const entry = row.entries.find(entry => entry.panel === reveal);
+      if (entry && state.most < 0) {
+        const left = entry.left + state.scroll;
+        const visible = Math.min(entry.width, innerWidth - LEFT_MARGIN - TAB_GAP);
         if (left > innerWidth - TAB_GAP - visible) state.scroll -= left - (innerWidth - TAB_GAP - visible);
-        else if (left + widths[index] < LEFT_MARGIN + visible) state.scroll += LEFT_MARGIN + visible - left - widths[index];
-        state.scroll = Math.max(most, Math.min(0, state.scroll));
+        else if (left + entry.width < LEFT_MARGIN + visible) state.scroll += LEFT_MARGIN + visible - left - entry.width;
+        state.scroll = Math.max(state.most, Math.min(0, state.scroll));
+        if (linkedRails) for (const other of Object.values(railStates)) other.scroll = state.scroll;
       }
-      let x = LEFT_MARGIN + state.scroll;
-      panels.forEach((panel, index) => {
+    }
+    for (const {side, entries} of rows) {
+      for (const {panel, left, height} of entries) {
         panel.root.style.setProperty('--rail-tab-height', panel.bar.offsetHeight + 'px');
         if (panel !== draggingPanel) {
           panel.root.classList.toggle('bottom-docked', side === 'bottom');
-          panel.place(x, side === 'bottom' ? innerHeight - panel.root.getBoundingClientRect().height : 0, true);
+          panel.place(left + railStates[side].scroll, side === 'bottom' ? innerHeight - height : 0, true);
         }
-        x += widths[index] + TAB_GAP;
-      });
+      }
     }
     reveal = null;
   }
@@ -63,11 +110,11 @@ export function createPaneLayout({getPanels, getSelected, onChange}) {
       : e.clientY >= innerHeight - railHeight('bottom') ? 'bottom' : null;
     if (!side) return;
     const state = railStates[side];
-    const total = railPanels(side).reduce((sum, panel) => sum + panel.root.offsetWidth + TAB_GAP, LEFT_MARGIN);
     const by = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? -e.deltaX : -e.deltaY;
-    const next = Math.max(Math.min(0, innerWidth - total), Math.min(0, state.scroll + by));
+    const next = Math.max(state.most, Math.min(0, state.scroll + by));
     if (next === state.scroll) return;
     state.scroll = next;
+    if (linkedRails) for (const other of Object.values(railStates)) other.scroll = next;
     packRail();
     e.preventDefault();
   }, { passive: false });
@@ -241,6 +288,7 @@ export function createPaneLayout({getPanels, getSelected, onChange}) {
       if (!onRail(panel)) root.dataset.snapped = landing.join(' ');
       panel.resized();
     } else delete root.dataset.snapped;
+    packRail();
     showEdges([]);
   }
   return {rail, onRail, railSide, railPanels, packRail, packRailNow, revealTab, addToRail, removeFromRail,

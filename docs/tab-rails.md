@@ -2,6 +2,8 @@ Panels can dock to either the top or bottom tab rail. Both rails sit flush again
 
 Top panels open downward. Bottom panels keep their title bar at the bottom and open upward; their resize grip moves to the upper-right corner. Resizing toward the opposite screen edge snaps to it within 48px. Closed tabs on either rail resize horizontally from the right edge. Alt+Enter opens a plain terminal on the bottom rail.
 
+An open pane that reaches both screen edges also reserves its width on the opposite rail. Tabs can sit before or after that space, but cannot overlap it. Both rails scroll together while a pane spans them. Shrinking, collapsing, undocking, or closing the spanning pane releases the space; reopening it restores the space if it still reaches both edges.
+
 The Visualize config editor defaults to a 26rem width, capped at 92vw, on the top rail. The startup harness and new terminal tabs default to the bottom rail. Recovery restores saved rail positions and pane sizes. Each terminal tab has a close button at the right that stops its session and removes the tab.
 
 Alt+H/L moves along one continuous order: bottom rail left to right, then top rail left to right. Left from the first top tab continues at the last bottom tab. Navigation stops at the bottom-left and top-right endpoints; it does not wrap. The existing temporary opening behavior while Alt is held is preserved.

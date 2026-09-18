@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, cp, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, resolve, relative } from 'node:path';
 import { once } from 'node:events';
 
 const repo = resolve(import.meta.dirname, '..');
@@ -150,6 +150,76 @@ setInterval(() => {}, 1000);
   const custom = JSON.parse(await readFile(join(root, 'records/custom-cli.json'), 'utf8'));
   check(JSON.stringify(custom.args) === JSON.stringify(updated.args), 'vz executes custom Bash scripts like cold startup');
   await stop('SIGINT');
+  const restartApp = join(root, 'restart-app');
+  await mkdir(restartApp);
+  await cp(join(repo, 'src.server'), join(restartApp, 'src.server'), {recursive: true});
+  for (const name of ['external-src', 'src', 'src.wterm', 'src.vterm', 'src.graphviz']) {
+    await symlink(join(repo, name), join(restartApp, name), 'dir');
+  }
+  const graphPath = join(restartApp, 'src.server/graph.janet');
+  await writeFile(graphPath, (await readFile(graphPath, 'utf8')).replace('(defn handle [op sent]', `(defn handle [op sent]
+    (when (os/stat (string root "/block-graph"))
+      (spit (string root "/graph-busy") "busy")
+      (ev/sleep 60))`));
+  await rm(join(root, 'url'), {force: true});
+  const pidPath = join(root, 'restart.pid');
+  const driver = join(root, 'restart-pty.janet');
+  await writeFile(driver, `(import ${relative(root, join(repo, 'src.server/term/pty'))} :as pty)
+(def session (pty/open (drop 1 (dyn *args*)) 24 100))
+(ev/thread (fn [session]
+  (pty/pump session (fn [chunk] (file/write stdout chunk) (file/flush stdout))) :done)
+  session :nt (ev/thread-chan 1))
+(defer (pty/close session)
+  (forever
+    (def byte (file/read stdin 1))
+    (unless byte (break))
+    (pty/write-input session byte)))
+`);
+  const terminal = spawn(join(repo, 'external-src/janet/janet'), [driver, '/bin/sh', '-c',
+    'printf "%s" "$$" > "$1"; shift; exec "$@"', 'visualize-restart-test', pidPath,
+    join(repo, 'external-src/janet/janet'), join(restartApp, 'src.server/core.janet'),
+    project, '--no-dev', '--command', 'exec /bin/cat'], {cwd: repo, env, stdio: ['pipe', 'pipe', 'pipe']});
+  let restartLog = '', restartPid, supervisorSocket;
+  for (const stream of [terminal.stdout, terminal.stderr]) stream.on('data', b => { logs += b; restartLog += b; });
+  try {
+    restartPid = Number(await until(() => readFile(pidPath, 'utf8')));
+    const url = await until(() => readFile(join(root, 'url'), 'utf8'));
+    const session = () => fetch(url + '/session', {signal: AbortSignal.timeout(2000)}).then(r => r.json());
+    const before = await session();
+    const capture = token => fetch(url + '/pane/harness/capture?k=' + token, {
+      method: 'POST', body: '{}', signal: AbortSignal.timeout(2000),
+    }).then(r => r.json());
+    const original = await capture(before.token);
+    supervisorSocket = (await readFile(join(project, 'visualize_config'), 'utf8')).match(/^@visualize terminal harness socket (\S+)/m)?.[1];
+    await writeFile(join(project, 'block-graph'), '');
+    const pendingDraw = fetch(url, {signal: AbortSignal.timeout(10000)}).catch(() => null);
+    await until(() => readFile(join(project, 'graph-busy'), 'utf8'));
+    await rm(join(project, 'block-graph'));
+    const began = Date.now();
+    terminal.stdin.write('\x04');
+    const recovered = await until(async () => { const next = await session(); return next.token !== before.token && next; });
+    check(Date.now() - began < 10000, 'Ctrl-D restarts without waiting for an occupied graph worker');
+    check(restartLog.includes('restarting server; terminal sessions kept'), 'Ctrl-D reaches the native terminal EOF handler');
+    const restored = await capture(recovered.token);
+    check(restored.running && restored.generation === original.generation, 'Ctrl-D preserves the running terminal session');
+    check((await fetch(url, {signal: AbortSignal.timeout(5000)})).ok, 'the restarted graph serves the main page');
+    terminal.stdin.write('\x04');
+    const again = await until(async () => { const next = await session(); return next.token !== recovered.token && next; });
+    check((await capture(again.token)).generation === original.generation, 'Ctrl-D works again after replacing the server process');
+    await pendingDraw;
+  } finally {
+    if (restartPid) { try { process.kill(restartPid, 'SIGTERM'); } catch {} }
+    if (supervisorSocket) {
+      await new Promise(resolve => {
+        const socket = createConnection(supervisorSocket);
+        socket.setTimeout(2000);
+        socket.on('connect', () => socket.write('{"op":"shutdown"}\n'));
+        const finish = () => { socket.destroy(); resolve(); };
+        socket.on('data', finish); socket.on('error', finish); socket.on('timeout', finish);
+      });
+    }
+    terminal.stdin.end(); terminal.kill('SIGTERM');
+  }
   console.log(JSON.stringify({passed: count}));
 } catch (error) {
   console.error(logs);

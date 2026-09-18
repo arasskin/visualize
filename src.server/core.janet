@@ -629,7 +629,7 @@
         (set stopping true)
         (close-control)
         (print "restarting server; terminal sessions kept")
-        (:stop project-graph)
+        (file/flush stdout)
         (os/posix-exec ["/bin/sh" "-c"
           ``for restart_fd in /dev/fd/*; do
   restart_fd=${restart_fd##*/}

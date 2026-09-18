@@ -6,9 +6,9 @@ Every run includes:
 
 - `./src/test/run`: backend, parser corpus, native terminal, HTTP and WebSocket regressions.
 - `node tools/frontend-checks.mjs`: frontend invariants and dependency boundaries.
-- `node tools/launch-checks.mjs`: startup, `vz`, configuration, and recovery with a fake harness.
+- `node tools/launch-checks.mjs`: startup, `vz`, configuration, and recovery with a fake harness, plus native PTY Ctrl-D restarts during a blocked graph operation and terminal-session preservation across repeated restarts.
 - `node tools/websocket-output-checks.mjs`: large snapshots and reconnects.
-- `node tools/pane-interaction-checks.mjs chrome` and `firefox`: pane, terminal, document, focus, persistence, and resize interactions, in separate jobs.
+- `node tools/pane-interaction-checks.mjs chrome` and `firefox`: pane, terminal, document, focus, persistence, and resize interactions, in separate jobs. Rail coverage includes opposite-rail spacers, multiple spanning panes, shared scrolling, and releasing space when panes shrink, collapse, undock, or close.
 
 Nightly, manual, and version-tag runs also execute the dedicated config-editor suite, the complete resize matrix, and `./src.graphviz/build --check` with the undefined behavior sanitizer. Browser suites within a job run sequentially because their servers choose from the same port range. There are no automatic test retries or performance thresholds.
 

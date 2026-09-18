@@ -108,6 +108,56 @@ try {
     panes.selectPane(railTests[2].root);panes.packRailNow();window.wideLeft=railTests[2].root.offsetLeft;
     for(let i=0;i<8;i++)panes.packRailNow();`);
   await check('railTests[2].root.offsetLeft===wideLeft', 'an oversized selected pane does not bounce between rail edges');
+  const resizeConfig = async (dx, dy) => {
+    const grip = await page.evaluate('config.grip.getBoundingClientRect().toJSON()');
+    await page.drag(grip.x + 5, grip.y + 5, dx, dy);
+    await settle();
+  };
+  for (const side of ['bottom', 'top']) {
+    const opposite = side === 'bottom' ? 'top' : 'bottom';
+    const direction = side === 'bottom' ? -1 : 1;
+    await page.evaluate(`panes.addToRail(config,0,'${side}');config.open();
+      config.root.style.width='360px';config.root.style.height=(innerHeight-70)+'px';
+      for(const p of railTests){if(!p.shut)p.toggle();p.root.style.width='240px';panes.addToRail(p,undefined,'${opposite}')}
+      panes.selectPane(config.root);panes.packRailNow()`);
+    await settle();
+    await resizeConfig(0, direction * 40);
+    await check(`Math.abs(config.root.getBoundingClientRect().height-innerHeight)<1 &&
+      Math.abs(railTests[0].root.getBoundingClientRect().left-config.root.getBoundingClientRect().right-6)<1`, `${side} snap reserves its width on the opposite rail`);
+    await resizeConfig(80, 0);
+    await check('Math.abs(railTests[0].root.getBoundingClientRect().left-config.root.getBoundingClientRect().right-6)<1', `${side} spacer follows horizontal resizing`);
+    await page.evaluate('config.toggle();panes.packRailNow()');
+    await check('railTests[0].root.offsetLeft===7', `${side} collapse releases opposite rail space`);
+    await page.evaluate('config.open();panes.packRailNow()');
+    await check('Math.abs(railTests[0].root.getBoundingClientRect().left-config.root.getBoundingClientRect().right-6)<1', `${side} reopening restores opposite rail space`);
+    await resizeConfig(0, -direction * 100);
+    await check('railTests[0].root.offsetLeft===7', `${side} shrinking away from the edge releases the spacer`);
+    await resizeConfig(0, direction * 70);
+    await page.evaluate(`panes.addToRail(railTests[0],0,'${side}');panes.packRailNow()`);
+    await check(`railTests[1].root.offsetLeft===7 &&
+      Math.abs(railTests[2].root.getBoundingClientRect().left-config.root.getBoundingClientRect().right-6)<1`, `${side} interior spacer allows tabs before and after it`);
+    await page.evaluate(`railTests[2].open();railTests[2].root.style.height=innerHeight+'px';panes.packRailNow();
+      window.spacerPositions=[config,...railTests].map(p=>p.root.offsetLeft);
+      for(let i=0;i<20;i++)panes.packRailNow()`);
+    await check(`JSON.stringify([config,...railTests].map(p=>p.root.offsetLeft))===JSON.stringify(spacerPositions) &&
+      (()=>{const a=config.root.getBoundingClientRect(),b=railTests[2].root.getBoundingClientRect();
+        return a.right+5<=b.left || b.right+5<=a.left})()`, `${side} multiple spanning panes pack without overlap or oscillation`);
+    await page.evaluate(`railTests[0].root.style.width='1000px';panes.selectPane(railTests[0].root);panes.packRailNow();
+      window.scrollBefore=[config,...railTests].map(p=>p.root.offsetLeft);
+      window.dispatchEvent(new WheelEvent('wheel',{clientY:1,deltaX:120,cancelable:true}));panes.packRailNow()`);
+    await check('[config,...railTests].every((p,i)=>p.root.offsetLeft===scrollBefore[i]-120)', `${side} spanning panes keep both rails aligned while scrolling`);
+    await page.evaluate('panes.selectPane(config.root);panes.packRailNow()');
+    await check('config.root.getBoundingClientRect().left>=7 && config.root.getBoundingClientRect().right<=innerWidth-6', `${side} selecting a spanning pane reveals it on both rails`);
+    await page.evaluate(`railTests[0].root.style.width='240px';railTests[2].toggle();panes.packRailNow()`);
+  }
+  const spanningBar = await page.evaluate('config.bar.getBoundingClientRect().toJSON()');
+  await page.drag(spanningBar.x + 10, spanningBar.y + 10, 40, 150); await settle();
+  await check('!panes.onRail(config) && railTests[1].root.offsetLeft===7', 'undocking a spanning pane releases its spacer');
+  await page.evaluate(`config.root.style.height='350px';panes.addToRail(config,0,'top');
+    railTests[2].open();railTests[2].root.style.height=innerHeight+'px';panes.packRailNow()`);
+  await check('config.root.offsetLeft>7', 'opposite spanning pane reserves space before closing');
+  await page.evaluate('panes.closePanel(railTests[2]);panes.packRailNow()');
+  await check('config.root.offsetLeft===7', 'closing a spanning pane releases its spacer');
   await page.evaluate('for(const p of railTests)panes.closePanel(p);panes.selectPane(subject.root);subject.focus()');
   await waitFor(() => page.evaluate('wire?.readyState===WebSocket.OPEN && !subject.root.querySelector(".state").textContent'));
   await page.evaluate(`window.originalSend=WebSocket.prototype.send;window.originalConsoleError=console.error;
