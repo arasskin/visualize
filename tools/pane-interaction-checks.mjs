@@ -95,7 +95,8 @@ try {
   }
   await page.evaluate(`window.before=subject.root.getBoundingClientRect().toJSON();panes.selectPane(config.root);panes.packRailNow();panes.selectPane(subject.root);panes.packRailNow()`);
   await check('subject.root.offsetLeft===before.x && subject.root.offsetTop===before.y', 'selecting a floating pane preserves its position');
-  await page.evaluate(`window.railTests=[0,1,2].map(i=>{const p=panes.createPane({id:'rail-test-'+i,file:window.CONFIG_FILE,remote:false,width:'470px'});panes.addToRail(p,undefined,'top');return p});
+  await page.evaluate(`panes.addToRail(config,undefined,'bottom');
+    window.railTests=[0,1,2].map(i=>{const p=panes.createPane({id:'rail-test-'+i,file:window.CONFIG_FILE,remote:false,width:'470px'});panes.addToRail(p,undefined,'top');return p});
     panes.selectPane(railTests[1].root);panes.packRailNow();window.railBefore=railTests.map(p=>p.root.offsetLeft);
     panes.selectPane(config.root);panes.packRailNow();panes.selectPane(subject.root);panes.packRailNow();`);
   await check('railTests.every((p,i)=>p.root.offsetLeft===railBefore[i])', 'selecting another rail or floating pane leaves the previous rail still');
