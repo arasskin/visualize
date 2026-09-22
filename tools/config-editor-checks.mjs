@@ -245,7 +245,7 @@ try {
     const search=document.querySelector('#config .config-search').getBoundingClientRect();
     return Math.abs(command.width-search.width)<1 && search.left>command.right && Math.abs(command.top-search.top)<1;
   })()`));
-  await waitFor(async () => (await readFile(file, 'utf8')).includes('placement bottom 0 780 620'));
+  await waitFor(async () => (await readFile(file, 'utf8')).includes('placement top 0 780 620'));
   const beforeSearch = await readFile(file, 'utf8');
   async function search(query) {
     await cdp.evaluate(`(()=>{const input=document.querySelector('#config .config-search input');input.focus();input.value=${JSON.stringify(query)};input.dispatchEvent(new Event('input'));})()`);
@@ -274,15 +274,27 @@ try {
   assert.deepEqual(await suggestions(), ['b', 'c']);
   await key('n', 2);
   assert.equal(await cdp.evaluate(`document.querySelector('#config .config-search-completions [aria-selected="true"]').textContent`), 'b');
+  assert.equal(await cdp.evaluate(`document.querySelector('#config .config-search input').value`), 'box b');
   await key('n', 2);
   assert.equal(await cdp.evaluate(`document.querySelector('#config .config-search-completions [aria-selected="true"]').textContent`), 'c');
+  assert.equal(await cdp.evaluate(`document.querySelector('#config .config-search input').value`), 'box c');
   await key('p', 2);
   assert.equal(await cdp.evaluate(`document.querySelector('#config .config-search-completions [aria-selected="true"]').textContent`), 'b');
+  assert.equal(await cdp.evaluate(`document.querySelector('#config .config-search input').value`), 'box b');
   const suggestionPoint = await cdp.evaluate(`(()=>{const r=document.querySelector('#config .config-search-completions li:last-child').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);
   await cdp.send('Input.dispatchMouseEvent', {type: 'mousePressed', ...suggestionPoint, button: 'left', clickCount: 1});
   await cdp.send('Input.dispatchMouseEvent', {type: 'mouseReleased', ...suggestionPoint, button: 'left', clickCount: 1});
   assert.equal(await cdp.evaluate(`document.querySelector('#config .config-search input').value`), 'box c');
   assert.equal(await selectedNode(), 'c3');
+  await cdp.evaluate(`(()=>{const input=document.querySelector('#config .config-command input');input.focus();input.value='box b red';input.setSelectionRange(5,5);input.dispatchEvent(new Event('input',{bubbles:true}));})()`);
+  const commandItems = await cdp.evaluate(`Array.from(document.querySelectorAll('#config .config-command .config-completions li'), item=>item.textContent)`);
+  assert(commandItems.length > 1);
+  for (const [letter, index] of [['n', 0], ['n', 1], ['p', 0]]) {
+    await key(letter, 2);
+    assert.equal(await cdp.evaluate(`document.querySelector('#config .config-command input').value`), `box ${commandItems[index]} red`);
+    assert(await cdp.evaluate(`!document.querySelector('#config .config-command .config-completions').hidden`));
+  }
+  await cdp.evaluate(`(()=>{const input=document.querySelector('#config .config-command input');input.value='';input.dispatchEvent(new Event('input',{bubbles:true}));input.blur();})()`);
   await search('fold ');
   await key('Escape');
   assert.equal(await cdp.evaluate(`document.querySelector('#config .config-search input').value`), 'fold ');

@@ -10,7 +10,9 @@ Every run includes:
 - `node tools/websocket-output-checks.mjs`: large snapshots and reconnects.
 - `node tools/pane-interaction-checks.mjs chrome` and `firefox`: pane, terminal, document, focus, persistence, and resize interactions, in separate jobs. Rail coverage includes opposite-rail spacers, multiple spanning panes, shared scrolling, and releasing space when panes shrink, collapse, undock, or close.
 
-Nightly, manual, and version-tag runs also execute the dedicated config-editor suite, the complete resize matrix, and `./src.graphviz/build --check` with the undefined behavior sanitizer. Browser suites within a job run sequentially because their servers choose from the same port range. There are no automatic test retries or performance thresholds.
+- `node tools/config-editor-checks.mjs`: config graph editing, autocomplete, navigation, and synchronized document views, after the Chrome pane checks.
+
+Nightly, manual, and version-tag runs also execute the complete resize matrix and `./src.graphviz/build --check` with the undefined behavior sanitizer. Browser suites within a job run sequentially because their servers choose from the same port range. There are no automatic test retries or performance thresholds.
 
 Failures upload diagnostics for seven days. Set `VZ_TEST_ARTIFACTS` to a directory when running pane interaction checks locally to retain server logs, browser errors, terminal error logs, and a screenshot when the browser is still reachable. CI keeps command output under `.logs/ci`. New runs cancel older runs for the same event and ref.
 

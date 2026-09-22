@@ -145,6 +145,21 @@
   (t/is= 1 (counts "main") "and the others are untouched")
   (t/is= nil (counts "p.go") "a member's own count goes with it"))
 
+(t/test "folded edges retain each original connection through repeated folds"
+  (def graph {:nodes (map |{:name $ :ours true}
+                         ["source" "pkg" "pkg.sub.a.py" "pkg.sub.b.py" "pkg.other.py"])
+              :edges [["source" "pkg.sub.b.py"] ["source" "pkg.sub.a.py"]
+                      ["source" "pkg.sub.a.py"] ["source" "pkg"]
+                      ["pkg.sub.a.py" "pkg.sub.b.py"]]})
+  (def [inner] (select/fold graph ["pkg.sub"] {}))
+  (t/is= [["source" "pkg.sub.a.py"] ["source" "pkg.sub.b.py"]]
+         (get-in inner [:edge-origins ["source" "pkg.sub"]]))
+  (def [outer] (select/fold inner ["pkg"] {}))
+  (t/is= [["source" "pkg"]] (outer :edges))
+  (t/is= [["source" "pkg"] ["source" "pkg.sub.a.py"] ["source" "pkg.sub.b.py"]]
+         (get-in outer [:edge-origins ["source" "pkg"]])
+         "merged edges retain destinations, including an existing prefix node, without duplicates"))
+
 (t/test "fold leaves a region of one alone"
 
   (def graph {:nodes [{:name "a.only" :ours true} {:name "b" :ours true}]

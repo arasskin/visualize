@@ -65,9 +65,11 @@ export function configSearch(host, canvas, navigation) {
   let model = {nodes: [], edges: []}, svg = null, hits = [], at = 0, selected = null, geometry = null, arrow = null;
   let boxes = new Map(), groups = new Map(), identity = null, occurrence = 0, angle = -90;
   let completion = {items: []};
-  const suggestions = completionList(input, list, {take(value) {
+  const suggestions = completionList(input, list, {preview: true, take(value, preview = false) {
     input.setRangeText(/\s/.test(value) ? JSON.stringify(value) : value, completion.start, completion.end, 'end');
-    input.focus({preventScroll: true}); suggestions.close(); search();
+    completion.end = input.selectionEnd;
+    if (!preview) suggestions.close();
+    input.focus({preventScroll: true}); search();
   }});
   const closeList = suggestions.close;
   function complete() {

@@ -289,13 +289,29 @@ const fs = require('fs')
                      {:rel "two/duplicate.png"}
                      {:rel "elsewhere/missing.png"}]))
   (t/is= [["src.web.app.js" "src.wterm.wterm-dom.js"]
-          ["src.web.index.html" "?.src.web.duplicate"]
-          ["src.web.index.html" "?.src.web.missing"]
           ["src.web.index.html" "public.icons.logo.svg"]
           ["src.web.index.html" "src.web.app.js"]
           ["src.web.index.html" "src.wterm.wterm.css"]
           ["src.web.index.html" "style.css"]]
          (g :edges)))
+
+(t/test "saved website assets do not invent local external nodes"
+  (def path "tests/fixtures/thriftbooks_home.html")
+  (def parsed (scan/parse html/spec ``
+<script src="/_fs-ch-1T1wmsGaOgGaSxcX/assets/script.js"></script>
+<script src="./local.js"></script>
+<script type="importmap">{"imports":{"missing":"./missing.js"}}</script>
+`` path))
+  (def g (scan/build [(merge parsed {:rel path :lang "html"})
+                     {:rel "tests/fixtures/local.js" :lang "javascript" :imports ["missing"]}]))
+  (t/is= [["tests.fixtures.thriftbooks_home.html" "tests.fixtures.local.js"]] (g :edges))
+  (t/ok (every? (map |($ :ours) (g :nodes)))))
+
+(t/test "visualize references do not recreate hidden files as plan nodes"
+  (def parsed (scan/parse vz/spec "check\n    app/skip.js\n" "plan.visualize"))
+  (def g (scan/build [(merge parsed {:rel "plan.visualize" :lang "visualize"})] ["app.skip.js"]))
+  (t/is= [] (g :edges))
+  (t/is= ["plan.check"] (map |($ :name) (g :nodes))))
 
 (t/test "the visualize html entrypoint resolves the vendored terminal stylesheet"
   (def path "src/web/index.html")

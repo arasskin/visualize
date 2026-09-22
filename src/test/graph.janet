@@ -5,6 +5,17 @@
 
 (var- previous nil)
 
+(t/test "folded edge destinations survive Graphviz SVG rendering"
+  (def tree {:nodes (map |{:name $ :label $ :ours true} ["main" "pkg.a.py" "pkg.b.py"])
+             :edges [["main" "pkg.a.py"] ["main" "pkg.b.py"]] :ours {} :stamps {} :sizes {}})
+  (def state (config/new-state))
+  (put state :folded ["pkg"])
+  (def [ok svg] (graph/render-svg tree state))
+  (t/ok ok)
+  (t/ok (string/find `<title>main-&gt;pkg</title>` svg) "layout uses the folded endpoint")
+  (t/ok (string/find `xlink:title="main-&gt;pkg.a.py&#10;main-&gt;pkg.b.py"` svg)
+        "the tooltip retains both original destinations"))
+
 (defn- drawn [tree path]
   (def lines (config/read-config path))
   (def [state problems] (config/run lines))
@@ -150,4 +161,3 @@
     (t/ok (string/find ">parsers</text>" svg) "parsers remains part of the folded name")
     (t/ok (not (string/find ">.parsers" svg)) "a folded node has no extension row")
     (when sized (t/ok (string/find ">741</text>" svg) "the aggregate line count stays separate"))))
-

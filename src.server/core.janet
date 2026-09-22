@@ -165,6 +165,12 @@
 
   (var terminal-theme {"foreground" 0x3a4851 "background" 0xffffff})
   (def start-empty? (empty? panes))
+  (when start-empty?
+    (def lines (config/read-config config-path))
+    (def positions (config/placements lines))
+    (unless (has-key? positions "config")
+      (put positions "config" ["top" 0])
+      (config/write-config config-path (config/remember-placements lines positions))))
   (defn pane-labels [] (config/labels (config/read-config config-path)))
   (defn set-pane-title [id text]
     (def lines (config/read-config config-path))

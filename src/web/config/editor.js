@@ -63,9 +63,11 @@ export function configReader(panel, id, file, {docs = [], colours = [], getPrefi
     editor.addEventListener('blur', () => closeRename());
     editor.focus({preventScroll: true}); editor.select();
   }
-  const suggestions = completionList(input, list, {take(value) {
+  const suggestions = completionList(input, list, {preview: true, take(value, preview = false) {
     input.setRangeText(!completion.wholeLine && /\s/.test(value) ? JSON.stringify(value) : value, completion.start, completion.end, 'end');
-    suggestions.close(); input.focus({preventScroll: true});
+    completion.end = input.selectionEnd;
+    if (!preview) suggestions.close();
+    input.focus({preventScroll: true});
   }});
   const closeList = suggestions.close;
   function complete() {

@@ -11,6 +11,8 @@ Open the file with `vz visualize_config`. The editor draws a dependency graph: p
 
 Duplicate commands are removed when saving, keeping the first occurrence, its formatting, inline comment, and position. Comparison uses the parsed verb and arguments, so `fold src` and `fold   "src"` are duplicates even with different inline comments. Different arguments remain distinct, including colors, case, and spaces inside quoted names. Active and commented commands remain distinct. Repeated blank lines collapse to one, and leading and trailing blank lines are removed. Entering an already active command leaves the file unchanged, and commenting or renaming a subtree also removes any duplicates that operation creates.
 
+Local `hide` prefixes exclude matching files and directories from discovery, parsing, and source watching. This includes rules imported by `visualize` from nested configs; paths remain relative to the project that defines the rule. Hidden-file edits do not rebuild the graph. Configs are still read so removing a hide restores the files. External-node hides only affect the displayed graph, and `fold` still parses its contents for dependencies and line counts.
+
 Saved pane state uses one line per terminal, outside the command graph:
 
 ```text

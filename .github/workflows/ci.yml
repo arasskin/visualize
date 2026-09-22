@@ -85,6 +85,9 @@ jobs:
         env:
           BROWSER: ${{ matrix.browser }}
         run: node tools/pane-interaction-checks.mjs "$BROWSER" 2>&1 | tee "$VZ_TEST_ARTIFACTS/browser.log"
+      - name: Config editor
+        if: matrix.browser == 'chrome'
+        run: node tools/config-editor-checks.mjs "$VZ_TEST_ARTIFACTS/config-editor.png" 2>&1 | tee "$VZ_TEST_ARTIFACTS/config-editor.log"
       - name: Upload failure diagnostics
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -95,7 +98,7 @@ jobs:
           retention-days: 7
 
   extended:
-    name: Config editor, resize matrix and sanitizers
+    name: Resize matrix and sanitizers
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: macos-15
     timeout-minutes: 20
@@ -111,8 +114,6 @@ jobs:
         run: |
           mkdir -p "$VZ_TEST_ARTIFACTS"
           env PATH=/usr/bin:/bin:/usr/sbin:/sbin ./build 2>&1 | tee "$VZ_TEST_ARTIFACTS/build.log"
-      - name: Config editor
-        run: node tools/config-editor-checks.mjs "$VZ_TEST_ARTIFACTS/config-editor.png" 2>&1 | tee "$VZ_TEST_ARTIFACTS/config-editor.log"
       - name: Resize matrix
         env:
           PANE_RESIZE_CASE: matrix

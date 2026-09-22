@@ -23,6 +23,30 @@ import imaginary
             ["app.pkg.jobs.main.py" "app.pkg.jobs.local.py"]
             ["app.pkg.jobs.main.py" "?.mcp"]
             ["app.pkg.jobs.parent.py" "app.pkg.common.py"]]}
+   {:name "python wrapper imports do not become direct dependencies on their implementations"
+    :files {"shoppingagent/otto/__init__.py" ""
+            "shoppingagent/otto/retailer_onboarding/__init__.py" ""
+            "shoppingagent/otto/retailer_onboarding/mcp.py" ``
+from otto.retailer_onboarding import (
+    tool_record_payment_evidence,
+)
+
+async def record_payment_evidence(method: tool_record_payment_evidence.PaymentMethod):
+    """Record payment evidence after reviewing the checkout."""
+    return await tool_record_payment_evidence.record_payment_evidence(method)
+``
+            "shoppingagent/otto/retailer_onboarding/tool_record_payment_evidence.py" ``
+from otto.retailer_onboarding import payment_evidence
+from otto.retailer_onboarding.payment_evidence import PaymentMethod
+
+async def record_payment_evidence(method: PaymentMethod):
+    return payment_evidence.save_review(method)
+``
+            "shoppingagent/otto/retailer_onboarding/payment_evidence.py" "PaymentMethod = str\ndef save_review(method): return method\n"}
+    :edges [["shoppingagent.otto.retailer_onboarding.mcp.py"
+             "shoppingagent.otto.retailer_onboarding.tool_record_payment_evidence.py"]
+            ["shoppingagent.otto.retailer_onboarding.tool_record_payment_evidence.py"
+             "shoppingagent.otto.retailer_onboarding.payment_evidence.py"]]}
    {:name "python bare libraries do not resolve to files inside packages"
     :files {"shop/otto/__init__.py" ""
             "shop/otto/retailers/__init__.py" ""

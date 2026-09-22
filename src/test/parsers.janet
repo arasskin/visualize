@@ -1,4 +1,5 @@
 (import ../../src.server/scan)
+(import ../../src.server/config)
 (import ./fixtures/parsers :as fixtures)
 (import ./harness :as t)
 
@@ -68,3 +69,40 @@
 
 (t/test "the project corpus exercises every registered parser"
   (t/is= (sorted (scan/languages)) (sorted (keys covered))))
+
+(t/test "effective hide rules prune paths before parsing and fingerprinting"
+  (def root (string "/tmp/vz-hidden-corpus-" (os/getpid)))
+  (os/mkdir root)
+  (defer (remove-tree root)
+    (eachp [path source]
+      {"visualize_config" "visualize app\nhide archive\nhide app.skip.js\nhide app.visualize_config\n"
+       "app/visualize_config" "hide tests\nhide pkg.models\nhide ?.os\nfold folded\n"
+       "archive/old.py" "import missing\n"
+       "app/tests/test.py" "import missing\n"
+       "app/skip.js" "import 'missing';\n"
+       "app/pkg/__init__.py" ""
+       "app/pkg/models.py" "import missing\n"
+       "app/main.py" "import pkg.models\nimport os\n"
+       "app/main.js" "import './skip.js';\n"
+       "app/folded/a.py" ""
+       "other/archive/keep.py" ""}
+      (write-file root path source))
+    (defn hidden []
+      (((config/run (config/read-config (string root "/visualize_config")) root) 0) :hidden))
+    (def expected ["app/folded/a.py" "app/main.js" "app/main.py" "app/pkg/__init__.py"
+                   "other/archive/keep.py" "visualize_config"])
+    (t/is= expected (map |($ :rel) (scan/find-files root (hidden)))
+           "nested hides, single files and root-relative directory hides are applied")
+    (def before (scan/fingerprint root false (hidden)))
+    (write-file root "app/tests/test.py" "import another_missing\n")
+    (write-file root "app/tests/new.py" "import more_missing\n")
+    (t/is= before (scan/fingerprint root false (hidden)) "hidden edits and additions do not invalidate the graph")
+    (def g (scan/scan root 2 (hidden)))
+    (t/is= [["app.main.py" "?.os"] ["app.main.py" "app.pkg.__init__.py"]]
+           (g :edges) "hidden imports do not reappear as external nodes")
+    (t/is= (sorted [;(map scan/node-name expected) "?.os"])
+           (sorted (map |($ :name) (g :nodes)))
+           "external hide rules do not prune local source files; folded files are still parsed")
+    (write-file root "app/visualize_config" "hide pkg.models\n")
+    (t/ok (index-of "app/tests/test.py" (map |($ :rel) (scan/find-files root (hidden))))
+          "removing an imported hide restores discovery")))

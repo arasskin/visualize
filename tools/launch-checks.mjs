@@ -91,6 +91,12 @@ setInterval(() => {}, 1000);
     return (id, op, body) => request('/pane/' + id + '/' + op, body);
   }
   let post = await start();
+  check(/^@visualize terminal config placement top 0$/m.test(await readFile(join(project, 'visualize_config'), 'utf8')), 'cold startup saves the default editor before a browser connects');
+  await stop('SIGTERM');
+  post = await start();
+  const recoveredBeforeBrowser = await page();
+  check(recoveredBeforeBrowser.includes('window.START_EMPTY = false;') &&
+    JSON.parse(recoveredBeforeBrowser.match(/window.PANE_POSITIONS = (.*);/)[1]).config?.[0] === 'top', 'restart before the first browser visit preserves the default editor');
   const original = await post('harness', 'capture');
   const record = await until(async () => JSON.parse(await readFile(join(root, 'records/harness.json'), 'utf8')));
   check(record.login === 'loaded', 'login shell setup precedes invocation');
@@ -134,6 +140,7 @@ setInterval(() => {}, 1000);
   check(!(await readdir(join(root, 'records'))).includes('harness.json'), 'recovery does not invoke the new startup command');
   check((await post('2', 'capture')).generation === second.generation, 'floating terminal survives restart');
   const restoredPage = await page();
+  check(!JSON.parse(restoredPage.match(/window.PANE_POSITIONS = (.*);/)[1]).config, 'a closed editor remains closed when terminals are recovered');
   check(JSON.stringify(JSON.parse(restoredPage.match(/window.PANE_POSITIONS = (.*);/)[1])) === JSON.stringify(Object.fromEntries(Object.entries(positions).sort())), 'restart restores rail and floating positions and sizes');
   check(JSON.parse(restoredPage.match(/window.PANE_LABELS = (.*);/)[1]).harness === 'Project "work"', 'restart restores the quoted title');
   const recovered = await request('/panes/watch', {generation: -1});

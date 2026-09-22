@@ -138,15 +138,19 @@
         (each m members (+= total (get (or sizes {}) (m :name) 0)))
         (when (> total 0) (put out-sizes prefix total)))
 
-      (def pairs @{})
+      (def origins @{})
       (each [from to] (get graph :edges [])
         (def a (stands-for from))
         (def b (stands-for to))
 
-        (unless (= a b) (put pairs [a b] true)))
+        (unless (= a b)
+          (def original (get-in graph [:edge-origins [from to]]))
+          (put origins [a b]
+               (array/concat (get origins [a b] @[]) (or original [[from to]])))))
+      (eachp [pair original] origins (put origins pair (sorted (distinct original))))
 
       [(merge graph {:nodes (sorted-by |($ :name) nodes)
-                     :edges (sorted (keys pairs))})
+                     :edges (sorted (keys origins)) :edge-origins origins})
        out-sizes])))
 
 (defn degrees

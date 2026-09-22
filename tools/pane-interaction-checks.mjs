@@ -13,7 +13,11 @@ const project = join(root, 'project'), logs = [], checks = [];
 let server, page;
 try {
   await mkdir(project); await mkdir(join(root, 'bin'));
-  await writeFile(join(project, 'visualize_config'), 'box notes\n');
+  await writeFile(join(project, 'visualize_config'), 'box notes\nfold pkg\n');
+  await mkdir(join(project, 'pkg'));
+  await writeFile(join(project, 'pkg', 'a.js'), 'export const a = 1;\n');
+  await writeFile(join(project, 'pkg', 'b.js'), 'export const b = 1;\n');
+  await writeFile(join(project, 'main.js'), "import './pkg/a.js';\nimport './pkg/b.js';\n");
   await writeFile(join(project, 'notes.md'), '# Notes\n\nLifecycle document.\n');
   await writeFile(join(root, 'bin', 'open'), '#!/bin/sh\nprintf "%s" "$1" > "$VZ_TEST_URL"\n', {mode: 0o755});
   const startServer = () => {
@@ -47,6 +51,22 @@ try {
     checks.push(name); console.log('PASS', engine, name);
   };
   const settle = () => page.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+  await check('window.START_EMPTY && panes.get("config").shut && panes.get("config").root.dataset.rail==="top"', 'cold startup restores the default editor as a top tab');
+
+  const hoveredFold = await page.evaluate(`(async()=>{
+    const {graph}=await import('/app.js');
+    const edge=[...graph.pane.querySelectorAll('g.edge')].find(g=>g.querySelector('title').textContent==='main.js->pkg');
+    const path=edge.querySelector('path'), point=path.getPointAtLength(path.getTotalLength()/2);
+    const world=new DOMPoint(point.x,point.y).matrixTransform(path.getCTM()), view=graph.view();
+    const x=view.tx+world.x*view.scale,y=view.ty+world.y*view.scale,box=graph.pane.getBoundingClientRect();
+    const hit=graph.edgeAt(x,y)===edge;
+    graph.pane.dispatchEvent(new MouseEvent('mousemove',{clientX:box.left+x,clientY:box.top+y}));
+    return {hit,rows:[...document.querySelectorAll('#edgelabel > div')].map(row=>row.textContent)};
+  })()`);
+  assert(hoveredFold.hit, 'canvas hit testing retains edges wrapped in Graphviz tooltips');
+  assert.deepEqual(hoveredFold.rows, ['main.js→pkg.a.js', 'main.js→pkg.b.js']);
+  checks.push('folded edge hover shows every original destination');
+  await page.evaluate(`document.getElementById('graph').dispatchEvent(new MouseEvent('mouseleave'))`);
 
   await page.evaluate(`window.fadePane=panes.get('config');panes.selectPane(panes.get('harness').root);fadePane.setLabel('!note');window.wasShut=fadePane.shut`);
   await check(`getComputedStyle(fadePane.root).opacity==='0.6'`, 'subtitle punctuation does not control opacity');
@@ -113,6 +133,13 @@ try {
     await page.drag(grip.x + 5, grip.y + 5, dx, dy);
     await settle();
   };
+  await page.evaluate(`panes.addToRail(config,0,'bottom');config.open();config.root.style.height=innerHeight+'px';
+    panes.selectPane(config.root);panes.packRailNow();window.upwardDrag=[];
+    config.root.addEventListener('pointermove',()=>{if(config.root.classList.contains('bottom-docked'))
+      upwardDrag.push({top:config.root.getBoundingClientRect().top,bar:config.bar.getBoundingClientRect().top})});`);
+  const upwardBar = await page.evaluate('config.bar.getBoundingClientRect().toJSON()');
+  await page.drag(upwardBar.x + 10, upwardBar.y + 10, 0, -180);
+  await check('upwardDrag.some(position=>position.top < -150 && position.bar >= 0)', 'dragging an upward-opening pane lets its body overflow the top while its bar remains reachable');
   for (const side of ['bottom', 'top']) {
     const opposite = side === 'bottom' ? 'top' : 'bottom';
     const direction = side === 'bottom' ? -1 : 1;
@@ -126,6 +153,17 @@ try {
       Math.abs(railTests[0].root.getBoundingClientRect().left-config.root.getBoundingClientRect().right-6)<1`, `${side} snap reserves its width on the opposite rail`);
     await resizeConfig(80, 0);
     await check('Math.abs(railTests[0].root.getBoundingClientRect().left-config.root.getBoundingClientRect().right-6)<1', `${side} spacer follows horizontal resizing`);
+    await page.evaluate(`window.firstSpanLeft=config.root.offsetLeft;
+      railTests[0].open();railTests[0].root.style.height=innerHeight+'px';panes.packRailNow();
+      for(let i=0;i<20;i++)panes.packRailNow()`);
+    await check(`config.root.offsetLeft===firstSpanLeft &&
+      Math.abs(railTests[0].root.getBoundingClientRect().left-config.root.getBoundingClientRect().right-6)<1`,
+      `${side} opening a full-height pane to the right preserves the occupied first position`);
+    await page.evaluate('railTests[0].toggle();panes.packRailNow();railTests[0].open();panes.packRailNow()');
+    await check(`config.root.offsetLeft===firstSpanLeft &&
+      Math.abs(railTests[0].root.getBoundingClientRect().left-config.root.getBoundingClientRect().right-6)<1`,
+      `${side} reopening the right full-height pane preserves its order`);
+    await page.evaluate('railTests[0].toggle();panes.packRailNow()');
     await page.evaluate('config.toggle();panes.packRailNow()');
     await check('railTests[0].root.offsetLeft===7', `${side} collapse releases opposite rail space`);
     await page.evaluate('config.open();panes.packRailNow()');
@@ -241,6 +279,12 @@ try {
   await waitFor(resizeSucceeded);
   await check('resizeEvents.length===2', 'reopening a pane resynchronizes its terminal size');
   await page.evaluate('WebSocket.prototype.send=originalSend;console.error=originalConsoleError');
+  await page.evaluate('panes.closePanel(panes.get("config"))');
+  await waitFor(async () => !/^@visualize terminal config .*placement /m.test(await readFile(join(project, 'visualize_config'), 'utf8')));
+  await page.navigate(url);
+  await waitFor(() => page.evaluate('!!document.querySelector("#harness textarea")'));
+  await page.evaluate('import("/app.js").then(module=>{window.panes=module.workspace})');
+  await check('!panes.get("config")', 'closing the default editor survives a browser reload on a cold-started server');
   console.log(`Passed ${checks.length} ${engine} pane interaction checks.`);
 } catch (error) {
   if (process.env.VZ_TEST_ARTIFACTS) {

@@ -22,7 +22,7 @@ export function createPaneLayout({getPanels, getSelected, onChange}) {
     const rows = ['top', 'bottom'].map(side => ({side, at: 0, x: LEFT_MARGIN,
       entries: railPanels(side).map(panel => {
         const box = panel.root.getBoundingClientRect();
-        return {panel, width: box.width, height: box.height,
+        return {panel, position: box.left, width: box.width, height: box.height,
           spans: panel !== draggingPanel && !panel.shut && box.height >= innerHeight - .5};
       }),
     }));
@@ -36,11 +36,11 @@ export function createPaneLayout({getPanels, getSelected, onChange}) {
         let left = row.x;
         for (let index = row.at; index < row.entries.length; index++) {
           const entry = row.entries[index];
-          if (entry.spans) return [{row, left}];
+          if (entry.spans) return [{row, left, position: entry.position}];
           left += entry.width + TAB_GAP;
         }
         return [];
-      }).sort((a, b) => a.left - b.left);
+      }).sort((a, b) => a.position - b.position || a.left - b.left);
       if (!candidates.length) break;
       const next = candidates[0];
       for (const row of rows) {

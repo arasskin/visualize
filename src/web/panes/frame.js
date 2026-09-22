@@ -48,7 +48,8 @@ export function createPaneFrame(root, options = {}) {
     const w = root.offsetWidth, edge = 28;
     root.style.left = (free ? left
       : Math.min(Math.max(left, edge - w), innerWidth - edge)) + 'px';
-    root.style.top = Math.min(Math.max(top, 0), innerHeight - edge) + 'px';
+    const barTop = bar.offsetTop;
+    root.style.top = (Math.min(Math.max(top + barTop, 0), innerHeight - edge) - barTop) + 'px';
   }
 
   grab(bar,

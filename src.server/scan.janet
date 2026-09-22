@@ -111,30 +111,38 @@
 
 (defn pruned-dirs
 
-  [&opt extra-skips]
+  []
   (def skips (merge @{} skip-dirs))
   (each spec specs
     (each dir (or (spec :skip-dirs) []) (put skips dir true)))
-  (each dir (or extra-skips []) (put skips dir true))
   skips)
+
+(defn- hidden-test [hidden]
+  (def prefixes (filter |(and (not (names/external? $))
+                             (not= $ "?") (not (string/find "@" $)))
+                       (or hidden [])))
+  (fn [name] (some |(string/has-prefix? $ name) prefixes)))
 
 (defn find-files
 
-  [root &opt extra-skips]
+  [root &opt hidden]
   (trace/measure "scan-find-files"
   (def found @[])
 
-  (def skips (pruned-dirs extra-skips))
+  (def skips (pruned-dirs))
+  (def hidden? (hidden-test hidden))
 
   (defn walk [dir rel]
     (each entry (try (os/dir dir) ([_] []))
       (def full (string dir "/" entry))
       (def here (if (empty? rel) entry (string rel "/" entry)))
       (case (os/stat full :mode)
-        :directory (unless (or (skips entry) (string/has-prefix? "." entry))
+        :directory (unless (or (skips entry) (string/has-prefix? "." entry)
+                               (hidden? (names/node-name here)))
                      (walk full here))
 
-        :file (unless (string/has-prefix? "." entry)
+        :file (unless (or (string/has-prefix? "." entry)
+                          (hidden? (names/node-name here)))
                 (array/push found
                             {:path full :rel here
                              :spec (find |(claims? $ entry full) specs)})))))
@@ -274,7 +282,7 @@
     (-- level))
   target)
 
-(defn- link-project-files [file files]
+(defn- link-project-files [file files hidden?]
   (if (nil? (file :dependencies))
     file
     (do
@@ -282,19 +290,25 @@
       (def kept (merge @{} local))
       (def edges @[])
       (each [from fallback path] (file :dependencies)
-        (def target (if (local fallback) fallback (or (files path) fallback)))
-        (when (= target fallback) (put kept fallback true))
-        (unless (= from target) (array/push edges [from target])))
+        (unless (and (not (local fallback)) (hidden? (names/node-name path)))
+          (def target (if (local fallback) fallback (or (files path) fallback)))
+          (when (= target fallback) (put kept fallback true))
+          (unless (= from target) (array/push edges [from target]))))
       (merge file {:nodes (filter |(kept $) (file :nodes)) :edges edges}))))
 
 (defn build
 
-  [parsed]
+  [parsed &opt hidden]
   (trace/measure "scan-build"
   (def live (filter |(and $ (not ($ :skipped))) parsed))
+  (def hidden? (hidden-test hidden))
+  (def extensions (tabseq [spec :in specs] (spec :name) (spec :ext)))
+  (defn hidden-import? [file name]
+    (or (hidden? name)
+        (some |(hidden? (string name $)) (get extensions (file :lang) []))))
   (def files (tabseq [file :in live :when (empty? (or (file :nodes) []))]
                     (file :rel) (node-name (file :rel))))
-  (def live (map |(link-project-files $ files) live))
+  (def live (map |(link-project-files $ files hidden?) live))
 
   (def owners @{})
   (def swift-owners @{})
@@ -415,24 +429,19 @@
           (def candidates (asset-paths path))
           (when (and candidates (= 1 (length candidates))) (first candidates)))))
 
-  (defn asset-external [file url]
-    (names/external
-      (names/from-path (file :rel)
-        (if (string/has-prefix? "/" url)
-          (string "./" (string/slice url 1))
-          (if (string/has-prefix? "." url) url (string "./" url))))))
-
   (each file live
     (eachp [name target] (or (file :aliases) {})
       (put aliases name target))
     (eachp [name url] (or (file :asset-aliases) {})
-      (put aliases name (or (asset-target file url) (asset-external file url)))))
+      (put aliases name (or (asset-target file url) false))))
 
   (def pairs @{})
   (def externals @{})
 
   (defn resolve-import [file name]
     (def here (node-name (file :rel)))
+
+    (when (= false (get aliases name)) (break nil))
 
     (def name (or (get aliases name) name))
     (when (names/external? name) (break name))
@@ -474,7 +483,8 @@
                                  "." wanted))
 
           (defn ok [t] (and t (importable? (file :lang) t) t))
-          (set found (or (language-target candidate)
+          (set found (or (and (hidden-import? file candidate) candidate)
+                         (language-target candidate)
                          (ok (from-stem candidate))
                          (ok (and (ours candidate) candidate))
 
@@ -485,7 +495,8 @@
     (def beside (beside-of mapped))
 
     (defn ok [t] (and t (importable? (file :lang) t) t))
-    (def target (or (language-target mapped)
+    (def target (or (and (hidden-import? file mapped) mapped)
+                    (language-target mapped)
                     (ok (from-stem mapped))
                     (ok (and (ours mapped) mapped))
                     beside
@@ -503,7 +514,7 @@
                                  (not (string/find "." mapped)))
                              (ok (from-leaf (last (string/split "." mapped)))))))))
     (cond
-      target (unless (own-package? here target) target)
+      target (unless (or (hidden-import? file target) (own-package? here target)) target)
 
       speculative? nil
 
@@ -533,10 +544,7 @@
   (each file live
     (def here (node-name (file :rel)))
     (each url (or (file :assets) [])
-      (def found (asset-target file url))
-      (def target (or found (asset-external file url)))
-      (when (or found (not (pruned? target)))
-        (when (names/external? target) (put externals target true))
+      (when-let [target (asset-target file url)]
         (unless (= here target) (put pairs [here target] true))))
     (each name (or (file :refs) [])
       (when-let [target (if (= "swift" (file :lang))
@@ -575,17 +583,17 @@
 
 (defn scan
 
-  [root &opt workers extra-skips]
+  [root &opt workers hidden]
   (trace/measure "scan-scan"
-  (build (read-all (find-files root extra-skips) workers))))
+  (build (read-all (find-files root hidden) workers) hidden)))
 
 (defn fingerprint
 
-  [root &opt yield? extra-skips excluded]
+  [root &opt yield? hidden excluded]
   (trace/measure "scan-fingerprint"
   (def entries @[])
   (var since 0)
-  (each job (find-files root extra-skips)
+  (each job (find-files root hidden)
     (def stats (os/stat (job :path)))
     (when (and stats (not= excluded (job :path)))
       (array/push entries [(job :rel) (stats :modified) (stats :size)

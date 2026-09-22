@@ -1,5 +1,7 @@
 Visualize opens your chosen harness on a fresh start. Harnesses manage their own agents using their native tools and settings. Visualize does not inject orchestration instructions or install an MCP server.
 
+A fresh start also saves the default config editor on the top rail before opening the browser. It can be recovered even if no browser connected before the next restart. Closing the editor removes its saved placement, so browser reloads and terminal recovery do not recreate it.
+
 The `startup_prompt` variable in `./visualize` describes dependency graphs, the `.visualize` format, and project-relative file references, with an example. It does not prescribe when to use the format. The launcher passes it through Codex's [developer instructions setting](https://learn.chatgpt.com/docs/config-file/config-reference). Set the `invocation` variable to choose the command:
 
 ```sh

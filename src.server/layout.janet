@@ -195,7 +195,11 @@
     (node-line node "  "))
 
   (each [from to] (get graph :edges [])
-    (array/push out (string "  \"" (quoted from) "\" -> \"" (quoted to) "\";")))
+    (def origins (get-in graph [:edge-origins [from to]]))
+    (def tooltip (when origins
+                   (attrs [["tooltip" (quoted (string/join
+                     (map (fn [[a b]] (string a "->" b)) origins) "\n"))]])))
+    (array/push out (string "  \"" (quoted from) "\" -> \"" (quoted to) "\"" tooltip ";")))
 
   (array/push out "}")
   (string/join out "\n"))

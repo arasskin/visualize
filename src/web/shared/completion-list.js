@@ -33,7 +33,7 @@ export function completionList(input, list, {take, preview = false, visibility =
   }
   function move(step) {
     selected = selected < 0 ? (step > 0 ? 0 : items.length - 1) : (selected + step + items.length) % items.length;
-    highlight(); if (preview) take(items[selected]);
+    highlight(); if (preview) take(items[selected], true);
   }
   function key(event, enter = true) {
     if (list.hidden || event.isComposing) return false;

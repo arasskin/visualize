@@ -40,18 +40,21 @@ export function createHover(graph) {
 
     const pair = group.dataset.edge;
     if (!pair) return;
-    const [from, to] = pair.split('->');
     hoverGraphEdge(group);
     const edgeLabel = labelEl();
     edgeLabel.replaceChildren();
-    const a = document.createElement('b');
-    a.textContent = names.get((from || '').trim()) || from || '?';
-    const arrow = document.createElement('span');
-    arrow.className = 'arrow';
-    arrow.textContent = '→';
-    const b = document.createElement('b');
-    b.textContent = names.get((to || '').trim()) || to || '?';
-    edgeLabel.append(a, arrow, b);
+    for (const connection of pair.split('\n')) {
+      const [from, to] = connection.split('->');
+      const row = document.createElement('div');
+      const a = document.createElement('b');
+      a.textContent = names.get((from || '').trim()) || from || '?';
+      const arrow = document.createElement('span');
+      arrow.className = 'arrow';
+      arrow.textContent = '→';
+      const b = document.createElement('b');
+      b.textContent = names.get((to || '').trim()) || to || '?';
+      row.append(a, arrow, b); edgeLabel.append(row);
+    }
     edgeLabel.style.display = 'block';
   }
 
@@ -86,7 +89,8 @@ export function createHover(graph) {
     hovered = null;
     for (const group of svg.querySelectorAll('g.edge')) {
       const title = group.querySelector('title');
-      if (title) group.dataset.edge = title.textContent.trim();
+      const tooltip = group.querySelector('a')?.getAttributeNS('http://www.w3.org/1999/xlink', 'title');
+      if (title) group.dataset.edge = tooltip || title.textContent.trim();
     }
   }
 
