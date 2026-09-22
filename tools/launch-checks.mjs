@@ -167,7 +167,10 @@ setInterval(() => {}, 1000);
   await writeFile(graphPath, (await readFile(graphPath, 'utf8')).replace('(defn handle [op sent]', `(defn handle [op sent]
     (when (os/stat (string root "/block-graph"))
       (spit (string root "/graph-busy") "busy")
-      (ev/sleep 60))`));
+      (ev/sleep 60))
+    (when (os/stat (string root "/pause-graph"))
+      (spit (string root "/graph-paused") "paused")
+      (while (os/stat (string root "/pause-graph")) (ev/sleep 0.01)))`));
   await rm(join(root, 'url'), {force: true});
   const pidPath = join(root, 'restart.pid');
   const driver = join(root, 'restart-pty.janet');
@@ -198,6 +201,16 @@ setInterval(() => {}, 1000);
     }).then(r => r.json());
     const original = await capture(before.token);
     supervisorSocket = (await readFile(join(project, 'visualize_config'), 'utf8')).match(/^@visualize terminal harness socket (\S+)/m)?.[1];
+    await writeFile(join(project, 'pause-graph'), '');
+    const pendingConfig = fetch(url + '/config?k=' + before.token, {
+      method: 'POST', body: JSON.stringify({action: 'run', index: -1, draw: true}), signal: AbortSignal.timeout(10000),
+    }).then(r => r.json());
+    await until(() => readFile(join(project, 'graph-paused'), 'utf8'));
+    const configPath = join(project, 'visualize_config');
+    await writeFile(configPath, (await readFile(configPath, 'utf8')) + '\nbox snapshot\n');
+    await rm(join(project, 'pause-graph'));
+    const drawnConfig = await pendingConfig;
+    check(drawnConfig.lines.includes('box snapshot') && drawnConfig.svg.includes('<svg'), 'config lines match the graph snapshot when edits overlap a draw');
     await writeFile(join(project, 'block-graph'), '');
     const pendingDraw = fetch(url, {signal: AbortSignal.timeout(10000)}).catch(() => null);
     await until(() => readFile(join(project, 'graph-busy'), 'utf8'));

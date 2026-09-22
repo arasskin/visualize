@@ -258,6 +258,8 @@ export function terminalContent(termPanel, prefix, launch = {}) {
   }
 
   window.addEventListener('resize', () => { if (!termPanel.shut) syncSize(); }, {signal: lifetime.signal});
+  const sizeObserver = new ResizeObserver(() => syncSize());
+  sizeObserver.observe(screen);
 
   for (const signal of ['visibilitychange', 'focus', 'online']) {
     (signal === 'visibilitychange' ? document : window).addEventListener(signal, () => {
@@ -319,6 +321,7 @@ export function terminalContent(termPanel, prefix, launch = {}) {
     if (disposed) return;
     disposed = true;
     lifetime.abort();
+    sizeObserver.disconnect();
     clearTimeout(sizing);
     cancelResize();
     clearTimeout(bootRetry);

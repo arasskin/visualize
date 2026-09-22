@@ -218,6 +218,7 @@ try {
     assert(await cdp.evaluate('window.getSelection().toString().length>0 && linkClicks.filter(Boolean).length===allowedBeforeDrag'), 'dragging over a link selects it without navigating: ' + JSON.stringify(await cdp.evaluate('({selection:window.getSelection().toString(),clicks:linkClicks,link:subject.root.querySelector(".term-link").outerHTML})')));
     checks.push('link dragging selects text without navigation');
   } else {
+  await cdp.evaluate(`const scrollbarStyle=document.createElement('style');scrollbarStyle.textContent='.screen::-webkit-scrollbar {width:15px}';document.head.append(scrollbarStyle)`);
   for (const mode of ['normal', 'alternate']) {
     await cdp.evaluate(`subject.type(${JSON.stringify(mode === 'normal' ? 'n' : 'a')})`);
     for (const side of ['top', 'bottom', 'floating']) {
@@ -227,6 +228,9 @@ try {
         const before = await snapshot();
         await drag('subject.grip', dx, dy * sign);
         await healthy(`${mode}/${side}: ${name}`);
+        if (mode === 'normal' && side === 'top' && name === 'shrink') {
+          assert(await cdp.evaluate('subject.root.querySelector(".screen").offsetWidth - subject.root.querySelector(".screen").clientWidth === 15'), 'resize exercises a scrollbar that occupies column space');
+        }
         assert(Math.abs(lastSnapshot.box.width - before.box.width - dx) < 2, 'drag width differs');
         assert(Math.abs(lastSnapshot.box.height - before.box.height - dy) < 2, 'drag height differs');
         if (side === 'bottom') assert(Math.abs(lastSnapshot.box.bottom - 1000) < 2, 'bottom anchor moved');
