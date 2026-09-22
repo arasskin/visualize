@@ -125,6 +125,8 @@ try {
     return [add.left-pane.left, find.left-add.right, pane.right-find.right, add.top-pane.top].every(gap=>Math.abs(gap-6)<.1);
   })()`));
   await cdp.evaluate('document.fonts.ready');
+  await waitFor(() => cdp.evaluate('document.readyState === "complete"'));
+  await cdp.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
   assert(await cdp.evaluate(`(()=>{
     const nodes=[...document.querySelectorAll('#config .node')];
     return nodes.every(node=>{

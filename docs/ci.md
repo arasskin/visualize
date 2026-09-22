@@ -14,6 +14,8 @@ Every run includes:
 
 Nightly, manual, and version-tag runs also execute the complete resize matrix and `./src.graphviz/build --check` with the undefined behavior sanitizer. Browser suites within a job run sequentially because their servers choose from the same port range. There are no automatic test retries or performance thresholds.
 
+The resize matrix creates its own fixed graph configuration; it does not require a developer's untracked `visualize_config` file.
+
 Failures upload diagnostics for seven days. Set `VZ_TEST_ARTIFACTS` to a directory when running pane interaction checks locally to retain server logs, browser errors, terminal error logs, and a screenshot when the browser is still reachable. CI keeps command output under `.logs/ci`. New runs cancel older runs for the same event and ref.
 
 GitHub must receive the workflow commit before it can run. Making the jobs required for merging is a separate repository ruleset setting. Linux coverage is deferred until the remaining platform assumptions are addressed.
